@@ -1,6 +1,3 @@
-"""
-Iris AI – SFT Chatbot (Blended Skill Talk, FP32, MPS‑safe, resume‑ready)
-"""
 import os
 import torch
 import torch.nn.functional as F
@@ -21,7 +18,6 @@ except ImportError:
 USER_TOKEN = "User:"
 BOT_TOKEN  = "Bot:"
 EOS_TOKEN  = "<|endoftext|>"
-
 
 def get_device(force_cpu=False):
     if force_cpu:
@@ -59,7 +55,6 @@ class SFTDataset(Dataset):
             texts.append(full)
             prompt_lengths.append(len(tokenizer.encode(prompt)))
 
-        print(f"Tokenizing {len(conversations)} conversations...")
         batch_enc = tokenizer(
             texts,
             truncation=True,
@@ -114,8 +109,6 @@ def prepare_conversations(subset_size=None):
     total = len(pairs)
     if subset_size and subset_size < total:
         pairs = pairs[:subset_size]
-    print(f"Loaded {len(pairs)} turn pairs from Blended Skill Talk "
-          f"(total available: {total})")
     return pairs
 
 def train_one_epoch(model, loader, optimizer, scheduler, device, accum_steps,
@@ -155,8 +148,6 @@ def train_one_epoch(model, loader, optimizer, scheduler, device, accum_steps,
             optimizer.zero_grad()
             if device.type == "mps":
                 torch.mps.empty_cache()
-            if TQDM_AVAILABLE:
-                bar.set_postfix(loss=f"{masked_loss.item()/n_tokens.item():.4f}")
 
     if (step + 1) % accum_steps != 0:
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
@@ -232,9 +223,6 @@ def generate_reply(model, tokenizer, prompt_text, device,
     return reply or "I'm not sure what to say."
 
 def chat(model, tokenizer, device):
-    print("\n" + "=" * 54)
-    print("  Iris AI — type 'quit' to exit")
-    print("=" * 54 + "\n")
     history = ""
     while True:
         user = input("You: ").strip()
@@ -251,25 +239,18 @@ def chat(model, tokenizer, device):
             lines = history.strip().split("\n")
             history = "\n".join(lines[2:]) + "\n" if len(lines) > 2 else ""
 
-
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--chat-only", action="store_true",
-                        help="Skip training, chat with best checkpoint")
-    parser.add_argument("--resume", action="store_true",
-                        help="Continue training from the best checkpoint")
-    parser.add_argument("--subset", type=int, default=50000,
-                        help="Number of training examples (default 50k)")
-    parser.add_argument("--epochs", type=int, default=10,
-                        help="Total epochs to run (default 10)")
+    parser.add_argument("--chat-only", action="store_true")
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--subset", type=int, default=50000)
+    parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--force-cpu", action="store_true")
-    parser.add_argument("--lr", type=float, default=5e-6,
-                        help="Learning rate (default 5e-6)")
+    parser.add_argument("--lr", type=float, default=5e-6)
     args = parser.parse_args()
 
     device = get_device(force_cpu=args.force_cpu)
-    print(f"Using device: {device}   |   FP32 (no mixed precision)")
 
     CHECKPOINT  = "gpt2_sft_chatbot_best.pt"
     MODEL_NAME  = "microsoft/DialoGPT-medium"
@@ -293,9 +274,6 @@ def main():
     if args.chat_only:
         if os.path.exists(CHECKPOINT):
             model.load_state_dict(torch.load(CHECKPOINT, map_location=device))
-            print(f"Loaded checkpoint '{CHECKPOINT}'.")
-        else:
-            print("No checkpoint found, using base model.")
         chat(model, tokenizer, device)
         return
 
@@ -326,41 +304,32 @@ def main():
 
     start_epoch = 1
     if args.resume and os.path.exists(CHECKPOINT):
-        print(f"Resuming from '{CHECKPOINT}'...")
         model.load_state_dict(torch.load(CHECKPOINT, map_location=device))
 
     best_val_loss = float("inf")
     for epoch in range(start_epoch, args.epochs + 1):
-        print(f"\n--- Epoch {epoch}/{args.epochs} ---")
         train_loss = train_one_epoch(
             model, train_loader, optimizer, scheduler, device, ACCUM_STEPS,
             epoch=epoch
         )
         if torch.isnan(torch.tensor(train_loss)):
-            print("Training diverged (NaN loss). Try lowering learning rate.")
             break
 
         val_loss = evaluate(model, val_loader, device)
-        print(f"Train loss: {train_loss:.4f} | Val loss: {val_loss:.4f} | "
-              f"LR: {scheduler.get_last_lr()[0]:.2e}")
 
         torch.save(model.state_dict(), f"gpt2_sft_epoch{epoch}.pt")
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), CHECKPOINT)
-            print(f"  >> best model saved ({CHECKPOINT})")
 
         probe = f"{USER_TOKEN} Hello\n{BOT_TOKEN} "
         reply = generate_reply(model, tokenizer, probe, device, max_new_tokens=32)
-        print(f"  [Sample]: {reply!r}")
         if is_degenerate(reply):
-            print("Output still nonsense – consider early stopping.")
+            pass
 
     if os.path.exists(CHECKPOINT):
         model.load_state_dict(torch.load(CHECKPOINT, map_location=device))
-        print("\nLoaded best checkpoint for chatting.")
     chat(model, tokenizer, device)
-
 
 if __name__ == "__main__":
     main()

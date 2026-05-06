@@ -6,75 +6,156 @@
     <title>Iris AI Chatbot</title>
     <style>
         :root {
-            --primary: #6366f1;
-            --bg-dark: #1e1e2f;
-            --bg-panel: #2a2a40;
+            --primary: #38b6ff;
+            --bg-dark: #0a0a0a;
+            --bg-panel: #1f1f1f;
             --text-light: #e0e0e0;
-            --border: #3f3f5a;
+            --border: #333333;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { display: flex; height: 100vh; background-color: var(--bg-dark); color: var(--text-light); }
         
         .sidebar { width: 280px; background-color: var(--bg-panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
-        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); }
-        .new-chat-btn { width: 100%; padding: 12px; background-color: var(--primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold; transition: background 0.2s; }
-        .new-chat-btn:hover { background-color: #4f46e5; }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+        .btn { width: 100%; padding: 12px; background-color: var(--primary); color: #000; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        .btn:hover { opacity: 0.9; }
         .chat-list { flex: 1; overflow-y: auto; padding: 10px; }
-        .chat-item { padding: 12px; margin-bottom: 8px; background-color: rgba(255,255,255,0.05); border-radius: 6px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background 0.2s; }
+        .chat-item { padding: 12px; margin-bottom: 8px; background-color: rgba(255,255,255,0.05); border-radius: 6px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
         .chat-item:hover, .chat-item.active { background-color: rgba(255,255,255,0.15); }
+        .chat-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .delete-btn { margin-left: 10px; color: white; font-weight: bold; cursor: pointer; }
+        .delete-btn:hover { color: #ff4c4c; }
         
-        .main-chat { flex: 1; display: flex; flex-direction: column; }
-        .chat-header { padding: 20px; background-color: var(--bg-panel); border-bottom: 1px solid var(--border); font-size: 1.2rem; font-weight: bold; }
+        .main-chat { flex: 1; display: flex; flex-direction: column; position: relative; }
+        .chat-header { padding: 24px; background-color: var(--bg-panel); border-bottom: 1px solid var(--border); font-weight: bold; display: flex; justify-content: center; align-items: center; }
+        .brand-logo { height: 86px; width: auto; }
         .chat-messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
         
         .message { max-width: 70%; padding: 12px 16px; border-radius: 12px; line-height: 1.5; }
-        .message.user { align-self: flex-end; background-color: var(--primary); color: white; border-bottom-right-radius: 2px; }
+        .message.user { align-self: flex-end; background-color: var(--primary); color: #000; border-bottom-right-radius: 2px; }
         .message.bot { align-self: flex-start; background-color: var(--bg-panel); border: 1px solid var(--border); border-bottom-left-radius: 2px; }
         
         .input-area { padding: 20px; background-color: var(--bg-panel); border-top: 1px solid var(--border); display: flex; gap: 10px; }
         .input-area input { flex: 1; padding: 15px; background-color: var(--bg-dark); border: 1px solid var(--border); color: var(--text-light); border-radius: 8px; font-size: 16px; outline: none; }
-        .input-area input:focus { border-color: var(--primary); }
-        .input-area button { padding: 0 25px; background-color: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        .input-area button { padding: 0 25px; background-color: var(--primary); color: #000; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; }
         
-        .typing { font-style: italic; color: #888; font-size: 0.9em; display: none; margin-left: 10px;}
+        .centered-prompt { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; background-color: var(--bg-dark); z-index: 10; }
+        .centered-prompt h2 { margin-bottom: 30px; font-size: 2rem; }
+        .centered-prompt img { margin-bottom: 30px; height: 140px; width: auto; }
+        .centered-prompt .input-wrapper { display: flex; width: 60%; max-width: 800px; gap: 10px; background: var(--bg-panel); padding: 10px; border-radius: 30px; border: 1px solid var(--border); }
+        .centered-prompt input { flex: 1; padding: 15px 20px; background: transparent; border: none; color: var(--text-light); font-size: 1.1rem; outline: none; }
+        .centered-prompt button { padding: 0 25px; border-radius: 20px; background: var(--primary); color: #000; border: none; font-weight: bold; cursor: pointer; }
+
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; justify-content: center; align-items: center; }
+        .modal-content { background: var(--bg-panel); width: 80%; max-width: 900px; height: 80vh; padding: 30px; border-radius: 12px; display: flex; flex-direction: column; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-controls { display: flex; gap: 15px; margin-bottom: 20px; }
+        .modal-controls input { padding: 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-dark); color: white; width: 120px; }
+        .log-area { flex: 1; background: var(--bg-dark); padding: 15px; border-radius: 8px; overflow-y: auto; font-family: monospace; white-space: pre-wrap; font-size: 0.9rem; }
     </style>
 </head>
 <body>
 
     <div class="sidebar">
         <div class="sidebar-header">
-            <button class="new-chat-btn" onclick="startNewChat()">+ New Chat</button>
+            <button class="btn" onclick="startNewChat()">+ New Chat</button>
+            <button class="btn" onclick="openTraining()">Model Training</button>
         </div>
-        <div class="chat-list" id="chatList">
-            </div>
+        <div class="chat-list" id="chatList"></div>
     </div>
 
     <div class="main-chat">
         <div class="chat-header">
-            Iris AI <span class="typing" id="typingIndicator">Iris is typing...</span>
+            <img src="{{ url_for('static', filename='logo_white.png') }}" alt="Iris AI logo" class="brand-logo">
         </div>
-        <div class="chat-messages" id="chatMessages">
-            </div>
-        <div class="input-area">
-            <input type="text" id="userInput" placeholder="Type a message..." onkeypress="handleKeyPress(event)">
+        
+        <div class="chat-messages" id="chatMessages"></div>
+        
+        <div class="input-area" id="bottomInput" style="display: none;">
+            <input type="text" id="userInput" placeholder="Message Iris..." onkeypress="if(event.key === 'Enter') sendMessage()">
             <button onclick="sendMessage()">Send</button>
         </div>
+
+        <div class="centered-prompt" id="centeredPrompt">
+            <img src="{{ url_for('static', filename='logo_white.png') }}" alt="Iris AI logo">
+            <p>Where should we begin?</p>
+            <br>
+            <div class="input-wrapper">
+                <input type="text" id="centerInput" placeholder="Ask anything..." onkeypress="if(event.key === 'Enter') sendCenterMessage()">
+                <button onclick="sendCenterMessage()">Send</button>
+            </div>
+        </div>
     </div>
+
+    <div class="modal" id="trainModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Training Panel</h2>
+            <button class="btn" style="width: auto;" onclick="closeTraining()">Close</button>
+        </div>
+        
+        <div class="modal-controls" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+            <div>
+                <label>Epochs</label>
+                <input type="number" id="epochsInput" value="10" style="width: 100%;">
+            </div>
+            <div>
+                <label>Learning Rate</label>
+                <input type="text" id="lrInput" value="5e-6" style="width: 100%;">
+            </div>
+            <div>
+                <label>Subset Size</label>
+                <input type="number" id="subsetInput" value="50000" style="width: 100%;">
+            </div>
+            <div>
+                <label>Device</label>
+                <select id="deviceInput" style="width: 100%; padding: 10px; border-radius: 6px; background: var(--bg-dark); color: white; border: 1px solid var(--border);">
+                    <option value="auto">Auto (CUDA/MPS)</option>
+                    <option value="cpu">Force CPU</option>
+                </select>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; margin-top: 20px;">
+                <input type="checkbox" id="resumeInput" style="width: 20px; height: 20px;">
+                <label>Resume Training</label>
+            </div>
+            <div style="display: flex; align-items: flex-end;">
+                <button class="btn" onclick="startTraining()">Start Training</button>
+            </div>
+        </div>
+
+        <div class="log_area" id="trainLogs" style="margin-top: 20px;">Ready to train...</div>
+    </div>
+</div>
 
     <script>
         let currentChatId = null;
         let chats = JSON.parse(localStorage.getItem('iris_chats')) || [];
+        let logInterval = null;
 
-        const chatMessages = document.getElementById('chatMessages');
-        const userInput = document.getElementById('userInput');
-        const chatList = document.getElementById('chatList');
-        const typingIndicator = document.getElementById('typingIndicator');
+        function renderChatList() {
+            const chatList = document.getElementById('chatList');
+            chatList.innerHTML = '';
+            chats.forEach(chat => {
+                const div = document.createElement('div');
+                div.className = `chat-item ${chat.id === currentChatId ? 'active' : ''}`;
+                
+                div.innerHTML = `
+                    <div class="chat-title" onclick="loadChat('${chat.id}')">${chat.title}</div>
+                    <div class="delete-btn" onclick="deleteChat('${chat.id}', event)">X</div>
+                `;
+                chatList.appendChild(div);
+            });
+        }
 
-        renderChatList();
-        if (chats.length > 0) {
-            loadChat(chats[0].id);
-        } else {
-            startNewChat();
+        function deleteChat(id, event) {
+            event.stopPropagation();
+            chats = chats.filter(c => c.id !== id);
+            localStorage.setItem('iris_chats', JSON.stringify(chats));
+            if (currentChatId === id) {
+                startNewChat();
+            } else {
+                renderChatList();
+            }
         }
 
         function startNewChat() {
@@ -85,98 +166,143 @@
                 messages: [],
                 historyString: ""
             });
-            saveChatsToLocal();
+            localStorage.setItem('iris_chats', JSON.stringify(chats));
             renderChatList();
-            chatMessages.innerHTML = `<div class="message bot">Hello! I'm Iris. How can I help you today?</div>`;
-            document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+            updateUIMode(true);
+            document.getElementById('chatMessages').innerHTML = '';
         }
 
         function loadChat(id) {
             currentChatId = id;
             const chat = chats.find(c => c.id === id);
-            chatMessages.innerHTML = '';
+            const msgContainer = document.getElementById('chatMessages');
+            msgContainer.innerHTML = '';
             
             chat.messages.forEach(msg => {
-                appendMessage(msg.role, msg.content, false);
+                appendMessage(msg.role, msg.content);
             });
+            
+            updateUIMode(chat.messages.length === 0);
             renderChatList();
         }
 
-        function renderChatList() {
-            chatList.innerHTML = '';
-            chats.forEach(chat => {
-                const div = document.createElement('div');
-                div.className = `chat-item ${chat.id === currentChatId ? 'active' : ''}`;
-                div.textContent = chat.title;
-                div.onclick = () => loadChat(chat.id);
-                chatList.appendChild(div);
-            });
+        function updateUIMode(isNewChat) {
+            document.getElementById('centeredPrompt').style.display = isNewChat ? 'flex' : 'none';
+            document.getElementById('bottomInput').style.display = isNewChat ? 'none' : 'flex';
+            if (isNewChat) document.getElementById('centerInput').focus();
+            else document.getElementById('userInput').focus();
         }
 
-        function saveChatsToLocal() {
-            localStorage.setItem('iris_chats', JSON.stringify(chats));
-        }
-
-        function appendMessage(role, text, animate = true) {
+        function appendMessage(role, text) {
+            const container = document.getElementById('chatMessages');
             const div = document.createElement('div');
             div.className = `message ${role}`;
             div.textContent = text;
-            chatMessages.appendChild(div);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
         }
 
-        function handleKeyPress(e) {
-            if (e.key === 'Enter') sendMessage();
+        async function sendCenterMessage() {
+            const input = document.getElementById('centerInput');
+            await processMessage(input.value);
+            input.value = '';
         }
 
         async function sendMessage() {
-            const text = userInput.value.trim();
+            const input = document.getElementById('userInput');
+            await processMessage(input.value);
+            input.value = '';
+        }
+
+        async function processMessage(text) {
+            text = text.trim();
             if (!text) return;
 
             const chat = chats.find(c => c.id === currentChatId);
             
             if (chat.messages.length === 0) {
                 chat.title = text.substring(0, 30) + (text.length > 30 ? '...' : '');
-                renderChatList();
             }
 
-            appendMessage('user', text);
-            userInput.value = '';
             chat.messages.push({role: 'user', content: text});
-            
-            typingIndicator.style.display = 'inline';
+            updateUIMode(false);
+            appendMessage('user', text);
+            renderChatList();
 
             try {
                 const response = await fetch('/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
+                        chat_id: currentChatId,
                         message: text,
                         history: chat.historyString
                     })
                 });
                 
                 const data = await response.json();
-                const botReply = data.reply;
-
-                appendMessage('bot', botReply);
-                chat.messages.push({role: 'bot', content: botReply});
-                
-                chat.historyString += `User: ${text}\nBot: ${botReply}\n`;
+                chat.messages.push({role: 'bot', content: data.reply});
+                chat.historyString += `User: ${text}\nBot: ${data.reply}\n`;
                 
                 const histTokens = chat.historyString.split('\n');
                 if (histTokens.length > 20) { 
                     chat.historyString = histTokens.slice(-20).join('\n') + '\n';
                 }
 
-                saveChatsToLocal();
-
+                localStorage.setItem('iris_chats', JSON.stringify(chats));
+                appendMessage('bot', data.reply);
+                
             } catch (error) {
-                console.error("Error:", error);
                 appendMessage('bot', "Error: Could not connect to the backend server.");
-            } finally {
-                typingIndicator.style.display = 'none';
             }
+        }
+
+        function openTraining() {
+            document.getElementById('trainModal').style.display = 'flex';
+        }
+
+        function closeTraining() {
+            document.getElementById('trainModal').style.display = 'none';
+            if (logInterval) clearInterval(logInterval);
+        }
+
+        async function startTraining() {
+    const params = {
+        epochs: document.getElementById('epochsInput').value,
+        lr: document.getElementById('lrInput').value,
+        subset: document.getElementById('subsetInput').value,
+        device: document.getElementById('deviceInput').value,
+        resume: document.getElementById('resumeInput').checked
+    };
+    
+    document.getElementById('trainLogs').textContent = "Starting training with selected parameters...\n";
+    
+    await fetch('/train', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params)
+    });
+
+    if (logInterval) clearInterval(logInterval);
+    logInterval = setInterval(fetchLogs, 2000);
+}
+
+        async function fetchLogs() {
+            try {
+                const res = await fetch('/train_logs');
+                const data = await res.json();
+                const logArea = document.getElementById('trainLogs');
+                if (data.logs) {
+                    logArea.textContent = data.logs;
+                    logArea.scrollTop = logArea.scrollHeight;
+                }
+            } catch (e) {}
+        }
+
+        if (chats.length > 0) {
+            loadChat(chats[0].id);
+        } else {
+            startNewChat();
         }
     </script>
 </body>
