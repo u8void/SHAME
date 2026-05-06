@@ -7,109 +7,187 @@
     <style>
         :root {
             --primary: #38b6ff;
+            --primary-hover: #299de0;
             --bg-dark: #0a0a0a;
             --bg-panel: #1f1f1f;
             --text-light: #e0e0e0;
+            --text-muted: #888;
             --border: #333333;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { display: flex; height: 100vh; background-color: var(--bg-dark); color: var(--text-light); }
-        
-        .sidebar { width: 280px; background-color: var(--bg-panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+        body { display: flex; height: 100vh; background-color: var(--bg-dark); color: var(--text-light); overflow: hidden; }
+
+        /* ── Sidebar ── */
+        .sidebar { width: 280px; background-color: var(--bg-panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
         .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
-        .btn { width: 100%; padding: 12px; background-color: var(--primary); color: #000; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold; }
-        .btn:hover { opacity: 0.9; }
+        .btn { width: 100%; padding: 12px; background-color: var(--primary); color: #000; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 600; transition: background 0.2s; }
+        .btn:hover { background-color: var(--primary-hover); }
+        
         .chat-list { flex: 1; overflow-y: auto; padding: 10px; }
-        .chat-item { padding: 12px; margin-bottom: 8px; background-color: rgba(255,255,255,0.05); border-radius: 6px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .chat-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; margin-bottom: 6px; background-color: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer; font-size: 14px; transition: background 0.15s; }
         .chat-item:hover, .chat-item.active { background-color: rgba(255,255,255,0.15); }
         .chat-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .delete-btn { margin-left: 10px; color: white; font-weight: bold; cursor: pointer; }
+        .delete-btn { margin-left: 10px; color: #ff6b6b; font-weight: bold; cursor: pointer; padding: 0 5px; }
         .delete-btn:hover { color: #ff4c4c; }
+
+        .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted); text-align: center; }
+
+        /* ── Main Chat ── */
+        .main-chat { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+        .chat-header { padding: 16px 20px; background-color: var(--bg-panel); border-bottom: 1px solid var(--border); font-size: 1.1rem; font-weight: 700; display: flex; justify-content: center; align-items: center; gap: 10px; height: 75px; }
+        .brand-logo { height: 40px; width: auto; }
         
-        .main-chat { flex: 1; display: flex; flex-direction: column; position: relative; }
-        .chat-header { padding: 24px; background-color: var(--bg-panel); border-bottom: 1px solid var(--border); font-weight: bold; display: flex; justify-content: center; align-items: center; }
-        .brand-logo { height: 86px; width: auto; }
-        .chat-messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
-        
-        .message { max-width: 70%; padding: 12px 16px; border-radius: 12px; line-height: 1.5; }
-        .message.user { align-self: flex-end; background-color: var(--primary); color: #000; border-bottom-right-radius: 2px; }
-        .message.bot { align-self: flex-start; background-color: var(--bg-panel); border: 1px solid var(--border); border-bottom-left-radius: 2px; }
-        
-        .input-area { padding: 20px; background-color: var(--bg-panel); border-top: 1px solid var(--border); display: flex; gap: 10px; }
-        .input-area input { flex: 1; padding: 15px; background-color: var(--bg-dark); border: 1px solid var(--border); color: var(--text-light); border-radius: 8px; font-size: 16px; outline: none; }
-        .input-area button { padding: 0 25px; background-color: var(--primary); color: #000; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; }
-        
-        .centered-prompt { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; background-color: var(--bg-dark); z-index: 10; }
-        .centered-prompt h2 { margin-bottom: 30px; font-size: 2rem; }
-        .centered-prompt img { margin-bottom: 30px; height: 140px; width: auto; }
+        .chat-messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+        .message { max-width: 72%; padding: 12px 16px; border-radius: 14px; line-height: 1.55; font-size: 15px; word-break: break-word; }
+        .message.user { align-self: flex-end; background-color: var(--primary); color: #000; border-bottom-right-radius: 4px; }
+        .message.bot { align-self: flex-start; background-color: var(--bg-panel); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+        .typing-bubble { align-self: flex-start; background-color: var(--bg-panel); border: 1px solid var(--border); border-bottom-left-radius: 4px; border-radius: 14px; padding: 12px 14px; display: none; width: fit-content; }
+        .typing-dots { display: flex; gap: 6px; align-items: center; }
+        .typing-dots span { width: 8px; height: 8px; border-radius: 50%; background-color: var(--text-muted); display: inline-block; animation: typingBounce 1.2s infinite ease-in-out; }
+        .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+        .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+        @keyframes typingBounce {
+            0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+            40% { transform: translateY(-4px); opacity: 1; }
+        }
+
+        /* ── Input Area ── */
+        .input-area { padding: 16px 20px; background-color: var(--bg-panel); border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: center; }
+        .input-area input { flex: 1; padding: 13px 16px; background-color: var(--bg-dark); border: 1px solid var(--border); color: var(--text-light); border-radius: 10px; font-size: 15px; outline: none; transition: border-color 0.15s; }
+        .input-area input:focus { border-color: var(--primary); }
+        .input-area input:disabled { opacity: 0.6; }
+        .send-btn { padding: 13px 22px; background-color: var(--primary); color: #000; border: none; border-radius: 10px; cursor: pointer; font-size: 15px; font-weight: 600; transition: background 0.2s; }
+        .send-btn:hover:not(:disabled) { background-color: var(--primary-hover); }
+        .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* ── Centered Prompt ── */
+        .centered-prompt { position: absolute; top: 75px; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; background-color: var(--bg-dark); z-index: 10; }
+        .centered-prompt h2 { margin-bottom: 30px; font-size: 2rem; font-weight: 600; }
         .centered-prompt .input-wrapper { display: flex; width: 60%; max-width: 800px; gap: 10px; background: var(--bg-panel); padding: 10px; border-radius: 30px; border: 1px solid var(--border); }
         .centered-prompt input { flex: 1; padding: 15px 20px; background: transparent; border: none; color: var(--text-light); font-size: 1.1rem; outline: none; }
-        .centered-prompt button { padding: 0 25px; border-radius: 20px; background: var(--primary); color: #000; border: none; font-weight: bold; cursor: pointer; }
+        .centered-prompt button { padding: 0 25px; border-radius: 20px; background: var(--primary); color: #000; border: none; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+        .centered-prompt button:hover { background: var(--primary-hover); }
 
+        /* ── Modal ── */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; justify-content: center; align-items: center; }
         .modal-content { background: var(--bg-panel); width: 80%; max-width: 900px; height: 80vh; padding: 30px; border-radius: 12px; display: flex; flex-direction: column; }
         .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .modal-controls { display: flex; gap: 15px; margin-bottom: 20px; }
-        .modal-controls input { padding: 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-dark); color: white; width: 120px; }
-        .log-area { flex: 1; background: var(--bg-dark); padding: 15px; border-radius: 8px; overflow-y: auto; font-family: monospace; white-space: pre-wrap; font-size: 0.9rem; }
+        .tab-bar { display: flex; gap: 10px; margin-bottom: 16px; }
+        .tab-btn { width: auto; padding: 9px 14px; background-color: var(--bg-dark); color: var(--text-light); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; }
+        .tab-btn.active { background-color: var(--primary); color: #000; border-color: transparent; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .modal-controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+        .modal-controls input, .modal-controls select { padding: 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-dark); color: white; width: 100%; }
+        .log_area { height: 48vh; background: var(--bg-dark); padding: 15px; border-radius: 8px; overflow-y: auto; font-family: monospace; white-space: pre-wrap; font-size: 0.9rem; }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
     </style>
 </head>
 <body>
 
-    <div class="sidebar">
-        <div class="sidebar-header">
-            <button class="btn" onclick="startNewChat()">+ New Chat</button>
-            <button class="btn" onclick="openTraining()">Model Training</button>
-        </div>
-        <div class="chat-list" id="chatList"></div>
+<div class="sidebar">
+    <div class="sidebar-header">
+        <button class="btn" onclick="startNewChat()">+ New Chat</button>
+        <button class="btn" style="background-color: var(--bg-dark); color: var(--text-light); border: 1px solid var(--border);" onclick="openTraining()">Model Training</button>
+    </div>
+    <div class="chat-list" id="chatList"></div>
+    <div class="sidebar-footer">Iris AI &middot; Powered by DialoGPT</div>
+</div>
+
+<div class="main-chat">
+    <div class="chat-header">
+        <img src="{{ url_for('static', filename='logo_white.png') }}" alt="Iris AI logo" class="brand-logo" onerror="this.style.display='none'"> 
+        <span style="font-size: 1.2rem; margin-left: 10px;">Iris AI</span>
     </div>
 
-    <div class="main-chat">
-        <div class="chat-header">
-            <img src="{{ url_for('static', filename='logo_white.png') }}" alt="Iris AI logo" class="brand-logo">
-        </div>
-        
-        <div class="chat-messages" id="chatMessages"></div>
-        
-        <div class="input-area" id="bottomInput" style="display: none;">
-            <input type="text" id="userInput" placeholder="Message Iris..." onkeypress="if(event.key === 'Enter') sendMessage()">
-            <button onclick="sendMessage()">Send</button>
-        </div>
+    <div class="chat-messages" id="chatMessages"></div>
 
-        <div class="centered-prompt" id="centeredPrompt">
-            <img src="{{ url_for('static', filename='logo_white.png') }}" alt="Iris AI logo">
-            <p>Where should we begin?</p>
-            <br>
-            <div class="input-wrapper">
-                <input type="text" id="centerInput" placeholder="Ask anything..." onkeypress="if(event.key === 'Enter') sendCenterMessage()">
-                <button onclick="sendCenterMessage()">Send</button>
-            </div>
-        </div>
+    <div class="input-area" id="bottomInput" style="display: none;">
+        <input type="text" id="userInput" placeholder="Type a message…" onkeypress="handleKeyPress(event)">
+        <button class="send-btn" id="sendBtn" onclick="sendMessage('userInput')">Send</button>
     </div>
 
-    <div class="modal" id="trainModal">
+    <div class="centered-prompt" id="centeredPrompt">
+        <img src="{{ url_for('static', filename='logo_white.png') }}" alt="Iris AI logo" style="height: 100px; margin-bottom: 20px;" onerror="this.style.display='none'">
+        <h2>Where should we begin?</h2>
+        <div class="input-wrapper">
+            <input type="text" id="centerInput" placeholder="Ask anything..." onkeypress="if(event.key === 'Enter') sendMessage('centerInput')">
+            <button onclick="sendMessage('centerInput')">Send</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="trainModal">
     <div class="modal-content">
         <div class="modal-header">
             <h2>Training Panel</h2>
             <button class="btn" style="width: auto;" onclick="closeTraining()">Close</button>
         </div>
-        
-        <div class="modal-controls" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+        <div class="tab-bar">
+            <button class="tab-btn active" id="trainingSettingsTabBtn" onclick="switchTrainingTab('settings')">Settings</button>
+            <button class="tab-btn" id="trainingLogsTabBtn" onclick="switchTrainingTab('logs')">Logs</button>
+        </div>
+
+        <div id="trainingSettingsTab" class="tab-content active">
+        <div class="modal-controls">
+            <div>
+                <label>Model Name</label>
+                <input type="text" id="modelNameInput" value="microsoft/DialoGPT-medium">
+            </div>
+            <div>
+                <label>Checkpoint Path</label>
+                <input type="text" id="checkpointInput" value="gpt2_sft_chatbot_best.pt">
+            </div>
             <div>
                 <label>Epochs</label>
-                <input type="number" id="epochsInput" value="10" style="width: 100%;">
+                <input type="number" id="epochsInput" value="5">
             </div>
             <div>
                 <label>Learning Rate</label>
-                <input type="text" id="lrInput" value="5e-6" style="width: 100%;">
+                <input type="text" id="lrInput" value="3e-5">
             </div>
             <div>
-                <label>Subset Size</label>
-                <input type="number" id="subsetInput" value="50000" style="width: 100%;">
+                <label>BST Size</label>
+                <input type="number" id="bstSizeInput" value="10000">
+            </div>
+            <div>
+                <label>DD Size</label>
+                <input type="number" id="ddSizeInput" value="30000">
+            </div>
+            <div>
+                <label>MD Dir</label>
+                <input type="text" id="mdDirInput" value="training">
+            </div>
+            <div>
+                <label>Max Length</label>
+                <input type="number" id="maxLengthInput" value="128">
+            </div>
+            <div>
+                <label>Batch Size</label>
+                <input type="number" id="batchSizeInput" value="4">
+            </div>
+            <div>
+                <label>Accum Steps</label>
+                <input type="number" id="accumInput" value="4">
+            </div>
+            <div>
+                <label>Weight Decay</label>
+                <input type="text" id="weightDecayInput" value="0.01">
+            </div>
+            <div>
+                <label>Warmup Ratio</label>
+                <input type="text" id="warmupRatioInput" value="0.05">
+            </div>
+            <div>
+                <label>Sample Max New Tokens</label>
+                <input type="number" id="sampleMaxNewTokensInput" value="50">
             </div>
             <div>
                 <label>Device</label>
-                <select id="deviceInput" style="width: 100%; padding: 10px; border-radius: 6px; background: var(--bg-dark); color: white; border: 1px solid var(--border);">
+                <select id="deviceInput">
                     <option value="auto">Auto (CUDA/MPS)</option>
                     <option value="cpu">Force CPU</option>
                 </select>
@@ -118,192 +196,340 @@
                 <input type="checkbox" id="resumeInput" style="width: 20px; height: 20px;">
                 <label>Resume Training</label>
             </div>
+            <div style="display: flex; align-items: center; gap: 10px; margin-top: 20px;">
+                <input type="checkbox" id="keepBestOnlyInput" style="width: 20px; height: 20px;" checked>
+                <label>Keep Best Only (delete epoch checkpoints)</label>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; margin-top: 20px;">
+                <input type="checkbox" id="noBstInput" style="width: 20px; height: 20px;">
+                <label>Disable BST</label>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; margin-top: 20px;">
+                <input type="checkbox" id="noDdInput" style="width: 20px; height: 20px;">
+                <label>Disable DailyDialog</label>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; margin-top: 20px;">
+                <input type="checkbox" id="noMdInput" style="width: 20px; height: 20px;">
+                <label>Disable Markdown Data</label>
+            </div>
+            <br>
             <div style="display: flex; align-items: flex-end;">
-                <button class="btn" onclick="startTraining()">Start Training</button>
+                <button class="btn" id="startTrainingBtn" onclick="startTraining()">Start Training</button>
+            </div>
+            <div style="display: flex; align-items: flex-end;">
+                <button class="btn" id="stopTrainingBtn" style="background-color: #ff6b6b; color: #fff;" onclick="stopTraining()">Stop Training</button>
             </div>
         </div>
+        </div>
 
-        <div class="log_area" id="trainLogs" style="margin-top: 20px;">Ready to train...</div>
+        <div id="trainingLogsTab" class="tab-content">
+            <div class="log_area" id="trainLogs">Ready to train...</div>
+        </div>
     </div>
 </div>
 
-    <script>
-        let currentChatId = null;
-        let chats = JSON.parse(localStorage.getItem('iris_chats')) || [];
-        let logInterval = null;
+<script>
+    let currentChatId = null;
+    let chats = JSON.parse(localStorage.getItem('iris_chats')) || [];
+    let logInterval = null;
 
-        function renderChatList() {
-            const chatList = document.getElementById('chatList');
-            chatList.innerHTML = '';
-            chats.forEach(chat => {
-                const div = document.createElement('div');
-                div.className = `chat-item ${chat.id === currentChatId ? 'active' : ''}`;
-                
-                div.innerHTML = `
-                    <div class="chat-title" onclick="loadChat('${chat.id}')">${chat.title}</div>
-                    <div class="delete-btn" onclick="deleteChat('${chat.id}', event)">X</div>
-                `;
-                chatList.appendChild(div);
-            });
-        }
+    const chatMessages = document.getElementById('chatMessages');
+    const typingBubble = document.createElement('div');
+    typingBubble.className = 'typing-bubble';
+    typingBubble.id = 'typingBubble';
+    typingBubble.innerHTML = `
+        <div class="typing-dots" aria-label="AI is typing">
+            <span></span><span></span><span></span>
+        </div>
+    `;
 
-        function deleteChat(id, event) {
-            event.stopPropagation();
-            chats = chats.filter(c => c.id !== id);
-            localStorage.setItem('iris_chats', JSON.stringify(chats));
-            if (currentChatId === id) {
-                startNewChat();
-            } else {
-                renderChatList();
-            }
-        }
-
-        function startNewChat() {
-            currentChatId = Date.now().toString();
-            chats.unshift({
-                id: currentChatId,
-                title: 'New Conversation',
-                messages: [],
-                historyString: ""
-            });
-            localStorage.setItem('iris_chats', JSON.stringify(chats));
-            renderChatList();
-            updateUIMode(true);
-            document.getElementById('chatMessages').innerHTML = '';
-        }
-
-        function loadChat(id) {
-            currentChatId = id;
-            const chat = chats.find(c => c.id === id);
-            const msgContainer = document.getElementById('chatMessages');
-            msgContainer.innerHTML = '';
-            
-            chat.messages.forEach(msg => {
-                appendMessage(msg.role, msg.content);
-            });
-            
-            updateUIMode(chat.messages.length === 0);
-            renderChatList();
-        }
-
-        function updateUIMode(isNewChat) {
-            document.getElementById('centeredPrompt').style.display = isNewChat ? 'flex' : 'none';
-            document.getElementById('bottomInput').style.display = isNewChat ? 'none' : 'flex';
-            if (isNewChat) document.getElementById('centerInput').focus();
-            else document.getElementById('userInput').focus();
-        }
-
-        function appendMessage(role, text) {
-            const container = document.getElementById('chatMessages');
+    function renderChatList() {
+        const chatList = document.getElementById('chatList');
+        chatList.innerHTML = '';
+        chats.forEach(chat => {
             const div = document.createElement('div');
-            div.className = `message ${role}`;
-            div.textContent = text;
-            container.appendChild(div);
-            container.scrollTop = container.scrollHeight;
-        }
-
-        async function sendCenterMessage() {
-            const input = document.getElementById('centerInput');
-            await processMessage(input.value);
-            input.value = '';
-        }
-
-        async function sendMessage() {
-            const input = document.getElementById('userInput');
-            await processMessage(input.value);
-            input.value = '';
-        }
-
-        async function processMessage(text) {
-            text = text.trim();
-            if (!text) return;
-
-            const chat = chats.find(c => c.id === currentChatId);
+            div.className = `chat-item ${chat.id === currentChatId ? 'active' : ''}`;
             
-            if (chat.messages.length === 0) {
-                chat.title = text.substring(0, 30) + (text.length > 30 ? '...' : '');
-            }
+            div.innerHTML = `
+                <div class="chat-title" onclick="loadChat('${chat.id}')">${chat.title}</div>
+                <div class="delete-btn" onclick="deleteChat('${chat.id}', event)">✖</div>
+            `;
+            chatList.appendChild(div);
+        });
+    }
 
-            chat.messages.push({role: 'user', content: text});
-            updateUIMode(false);
-            appendMessage('user', text);
-            renderChatList();
-
-            try {
-                const response = await fetch('/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        chat_id: currentChatId,
-                        message: text,
-                        history: chat.historyString
-                    })
-                });
-                
-                const data = await response.json();
-                chat.messages.push({role: 'bot', content: data.reply});
-                chat.historyString += `User: ${text}\nBot: ${data.reply}\n`;
-                
-                const histTokens = chat.historyString.split('\n');
-                if (histTokens.length > 20) { 
-                    chat.historyString = histTokens.slice(-20).join('\n') + '\n';
-                }
-
-                localStorage.setItem('iris_chats', JSON.stringify(chats));
-                appendMessage('bot', data.reply);
-                
-            } catch (error) {
-                appendMessage('bot', "Error: Could not connect to the backend server.");
-            }
-        }
-
-        function openTraining() {
-            document.getElementById('trainModal').style.display = 'flex';
-        }
-
-        function closeTraining() {
-            document.getElementById('trainModal').style.display = 'none';
-            if (logInterval) clearInterval(logInterval);
-        }
-
-        async function startTraining() {
-    const params = {
-        epochs: document.getElementById('epochsInput').value,
-        lr: document.getElementById('lrInput').value,
-        subset: document.getElementById('subsetInput').value,
-        device: document.getElementById('deviceInput').value,
-        resume: document.getElementById('resumeInput').checked
-    };
-    
-    document.getElementById('trainLogs').textContent = "Starting training with selected parameters...\n";
-    
-    await fetch('/train', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params)
-    });
-
-    if (logInterval) clearInterval(logInterval);
-    logInterval = setInterval(fetchLogs, 2000);
-}
-
-        async function fetchLogs() {
-            try {
-                const res = await fetch('/train_logs');
-                const data = await res.json();
-                const logArea = document.getElementById('trainLogs');
-                if (data.logs) {
-                    logArea.textContent = data.logs;
-                    logArea.scrollTop = logArea.scrollHeight;
-                }
-            } catch (e) {}
-        }
-
-        if (chats.length > 0) {
-            loadChat(chats[0].id);
-        } else {
+    function deleteChat(id, event) {
+        event.stopPropagation();
+        chats = chats.filter(c => c.id !== id);
+        localStorage.setItem('iris_chats', JSON.stringify(chats));
+        if (currentChatId === id) {
             startNewChat();
+        } else {
+            renderChatList();
         }
-    </script>
+    }
+
+    function startNewChat() {
+        currentChatId = Date.now().toString();
+        chats.unshift({
+            id: currentChatId,
+            title: 'New Conversation',
+            messages: [],
+            historyString: ""
+        });
+        localStorage.setItem('iris_chats', JSON.stringify(chats));
+        renderChatList();
+        updateUIMode(true);
+        chatMessages.innerHTML = '';
+    }
+
+    function loadChat(id) {
+        currentChatId = id;
+        const chat = chats.find(c => c.id === id);
+        chatMessages.innerHTML = '';
+        
+        chat.messages.forEach(msg => {
+            appendMessage(msg.role, msg.content, false);
+        });
+        
+        updateUIMode(chat.messages.length === 0);
+        renderChatList();
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function updateUIMode(isNewChat) {
+        document.getElementById('centeredPrompt').style.display = isNewChat ? 'flex' : 'none';
+        document.getElementById('bottomInput').style.display = isNewChat ? 'none' : 'flex';
+        if (isNewChat) document.getElementById('centerInput').focus();
+        else document.getElementById('userInput').focus();
+    }
+
+    function appendMessage(role, text, scroll = true) {
+        const div = document.createElement('div');
+        div.className = `message ${role}`;
+        div.textContent = text;
+        chatMessages.appendChild(div);
+        if (scroll) chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function handleKeyPress(e) {
+        if (e.key === 'Enter' && !e.shiftKey) sendMessage('userInput');
+    }
+
+    function setLoading(loading) {
+        document.getElementById('userInput').disabled = loading;
+        document.getElementById('centerInput').disabled = loading;
+        document.getElementById('sendBtn').disabled = loading;
+
+        if (loading) {
+            if (!typingBubble.parentNode) {
+                chatMessages.appendChild(typingBubble);
+            }
+            typingBubble.style.display = 'block';
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        } else {
+            typingBubble.style.display = 'none';
+        }
+    }
+
+    async function sendMessage(inputId) {
+        const inputEl = document.getElementById(inputId);
+        const text = inputEl.value.trim();
+        if (!text) return;
+
+        const chat = chats.find(c => c.id === currentChatId);
+        
+        if (chat.messages.length === 0) {
+            chat.title = text.substring(0, 30) + (text.length > 30 ? '...' : '');
+        }
+
+        chat.messages.push({role: 'user', content: text});
+        updateUIMode(false);
+        appendMessage('user', text);
+        renderChatList();
+        
+        inputEl.value = '';
+        setLoading(true);
+
+        try {
+            const response = await fetch('/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: currentChatId,
+                    message: text,
+                    history: chat.historyString
+                })
+            });
+            
+            if (!response.ok) throw new Error(`Server error: ${response.status}`);
+            const data = await response.json();
+            
+            chat.messages.push({role: 'bot', content: data.reply});
+            chat.historyString += `User: ${text}\nBot: ${data.reply}\n`;
+            
+            const lines = chat.historyString.split('\n').filter(l => l.trim());
+            if (lines.length > 80) {
+                chat.historyString = lines.slice(-80).join('\n') + '\n';
+            }
+
+            localStorage.setItem('iris_chats', JSON.stringify(chats));
+            appendMessage('bot', data.reply);
+            
+        } catch (error) {
+            appendMessage('bot', "⚠️ Error: Could not connect to the backend server.");
+        } finally {
+            setLoading(false);
+            document.getElementById('userInput').focus();
+        }
+    }
+
+    // --- Training Modal Logic ---
+    async function openTraining() {
+        document.getElementById('trainModal').style.display = 'flex';
+        switchTrainingTab('settings');
+        await fetchLogs();
+        await refreshTrainingStatus();
+    }
+    function closeTraining() { 
+        document.getElementById('trainModal').style.display = 'none';
+        if (logInterval) clearInterval(logInterval);
+    }
+
+    async function startTraining() {
+        const params = {
+            model_name: document.getElementById('modelNameInput').value,
+            checkpoint: document.getElementById('checkpointInput').value,
+            epochs: document.getElementById('epochsInput').value,
+            lr: document.getElementById('lrInput').value,
+            bst_size: document.getElementById('bstSizeInput').value,
+            dd_size: document.getElementById('ddSizeInput').value,
+            md_dir: document.getElementById('mdDirInput').value,
+            max_length: document.getElementById('maxLengthInput').value,
+            batch_size: document.getElementById('batchSizeInput').value,
+            accum: document.getElementById('accumInput').value,
+            weight_decay: document.getElementById('weightDecayInput').value,
+            warmup_ratio: document.getElementById('warmupRatioInput').value,
+            sample_max_new_tokens: document.getElementById('sampleMaxNewTokensInput').value,
+            device: document.getElementById('deviceInput').value,
+            resume: document.getElementById('resumeInput').checked,
+            keep_best_only: document.getElementById('keepBestOnlyInput').checked,
+            no_bst: document.getElementById('noBstInput').checked,
+            no_dd: document.getElementById('noDdInput').checked,
+            no_md: document.getElementById('noMdInput').checked,
+            chat_after_train: false
+        };
+        
+        const logArea = document.getElementById('trainLogs');
+        logArea.textContent = "Starting training with selected parameters...\n";
+        setTrainingRunning(true);
+        
+        try {
+            const res = await fetch('/train', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(params)
+            });
+            const data = await res.json();
+
+            if (data.status === 'already_running') {
+                logArea.textContent = "Training is already running. Reconnecting to live logs...\n";
+            }
+
+            if (logInterval) clearInterval(logInterval);
+            logInterval = setInterval(fetchLogs, 2000);
+            await fetchLogs();
+            switchTrainingTab('logs');
+            await refreshTrainingStatus();
+        } catch (e) {
+            logArea.textContent += "\n[ERROR] Could not start training.\n";
+            setTrainingRunning(false);
+        }
+    }
+
+    function switchTrainingTab(tabName) {
+        const settingsTab = document.getElementById('trainingSettingsTab');
+        const logsTab = document.getElementById('trainingLogsTab');
+        const settingsBtn = document.getElementById('trainingSettingsTabBtn');
+        const logsBtn = document.getElementById('trainingLogsTabBtn');
+
+        if (tabName === 'logs') {
+            settingsTab.classList.remove('active');
+            logsTab.classList.add('active');
+            settingsBtn.classList.remove('active');
+            logsBtn.classList.add('active');
+        } else {
+            logsTab.classList.remove('active');
+            settingsTab.classList.add('active');
+            logsBtn.classList.remove('active');
+            settingsBtn.classList.add('active');
+        }
+    }
+
+    async function refreshTrainingStatus() {
+        try {
+            const res = await fetch('/train_status');
+            const data = await res.json();
+            if (data.running) {
+                if (logInterval) clearInterval(logInterval);
+                logInterval = setInterval(fetchLogs, 2000);
+                setTrainingRunning(true);
+            } else {
+                if (logInterval) clearInterval(logInterval);
+                logInterval = null;
+                setTrainingRunning(false);
+            }
+        } catch (e) {}
+    }
+
+    async function stopTraining() {
+        try {
+            const res = await fetch('/stop_train', { method: 'POST' });
+            const data = await res.json();
+            const logArea = document.getElementById('trainLogs');
+            if (data.status === 'stopped') {
+                logArea.textContent += "\n[INFO] Training stopped by user.\n";
+                if (logInterval) clearInterval(logInterval);
+                logInterval = null;
+                setTrainingRunning(false);
+            } else {
+                logArea.textContent += "\n[INFO] No active training process.\n";
+                setTrainingRunning(false);
+            }
+            logArea.scrollTop = logArea.scrollHeight;
+        } catch (e) {
+            const logArea = document.getElementById('trainLogs');
+            logArea.textContent += "\n[ERROR] Failed to stop training.\n";
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+    }
+
+    async function fetchLogs() {
+        try {
+            const res = await fetch('/train_logs');
+            const data = await res.json();
+            const logArea = document.getElementById('trainLogs');
+            if (typeof data.logs === 'string' && data.logs !== logArea.textContent) {
+                logArea.textContent = data.logs;
+                logArea.scrollTop = logArea.scrollHeight;
+            }
+        } catch (e) {}
+    }
+
+    function setTrainingRunning(isRunning) {
+        const startBtn = document.getElementById('startTrainingBtn');
+        const stopBtn = document.getElementById('stopTrainingBtn');
+        startBtn.disabled = isRunning;
+        stopBtn.disabled = !isRunning;
+    }
+
+    // Init
+    if (chats.length > 0) {
+        loadChat(chats[0].id);
+    } else {
+        startNewChat();
+    }
+    setTrainingRunning(false);
+</script>
 </body>
 </html>

@@ -1,4 +1,11 @@
+"""
+Iris AI – SFT Chatbot
+Datasets: Blended Skill Talk + DailyDialog + custom Markdown files
+Training: FP32, MPS-safe, resume-ready
+"""
 import os
+import re
+import glob
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
@@ -19,6 +26,9 @@ USER_TOKEN = "User:"
 BOT_TOKEN  = "Bot:"
 EOS_TOKEN  = "<|endoftext|>"
 
+
+# ---------------------------------------------------------------- DEVICE ----
+
 def get_device(force_cpu=False):
     if force_cpu:
         return torch.device("cpu")
@@ -27,6 +37,9 @@ def get_device(force_cpu=False):
     if torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
+
+
+# ---------------------------------------------------------- QUALITY CHECK ----
 
 def is_degenerate(text):
     s = (text or "").strip()
@@ -43,18 +56,189 @@ def is_degenerate(text):
         return True
     return False
 
+
+# ------------------------------------------------------------------ DATA ----
+
+def load_blended_skill_talk(subset_size=None):
+    """
+    Load Blended Skill Talk.
+    The dataset rows contain a 'previous_utterance' list (full conversation
+    history, alternating user/bot) plus 'free_messages' (candidate bot replies
+    to the *last* user turn).  We extract both.
+    """
+    try:
+        ds = load_dataset("blended_skill_talk", split="train", trust_remote_code=True)
+    except Exception as e:
+        print(f"[BST] Could not load blended_skill_talk: {e}")
+        return []
+
+    pairs = []
+    for row in ds:
+        utterances = row.get("previous_utterance", [])
+        free_msgs  = row.get("free_messages", [])
+
+        # --- 1. Paired turns from the history ---
+        # previous_utterance is an alternating list: user, bot, user, bot …
+        for i in range(0, len(utterances) - 1, 2):
+            u = utterances[i].strip()
+            b = utterances[i + 1].strip()
+            if u and b:
+                pairs.append((u, b))
+
+        # --- 2. Final turn: last user utterance → first valid free_message ---
+        if utterances and free_msgs:
+            last_user = utterances[-1].strip()
+            for reply in free_msgs:
+                reply = (reply or "").strip()
+                if reply:
+                    pairs.append((last_user, reply))
+                    break
+
+    total = len(pairs)
+    if subset_size and subset_size < total:
+        import random
+        random.shuffle(pairs)
+        pairs = pairs[:subset_size]
+
+    print(f"[BST] Loaded {len(pairs)} pairs (total available: {total})")
+    return pairs
+
+
+def load_daily_dialog(subset_size=None):
+    """
+    Load DailyDialog — clean multi-turn dialogues.
+    Each row has a 'dialog' list of alternating utterances.
+    """
+    try:
+        ds = load_dataset("daily_dialog", split="train", trust_remote_code=True)
+    except Exception as e:
+        print(f"[DD] Could not load daily_dialog: {e}")
+        return []
+
+    pairs = []
+    for row in ds:
+        dialog = row.get("dialog", [])
+        for i in range(len(dialog) - 1):
+            u = dialog[i].strip()
+            b = dialog[i + 1].strip()
+            if u and b:
+                pairs.append((u, b))
+
+    total = len(pairs)
+    if subset_size and subset_size < total:
+        import random
+        random.shuffle(pairs)
+        pairs = pairs[:subset_size]
+
+    print(f"[DD]  Loaded {len(pairs)} pairs (total available: {total})")
+    return pairs
+
+
+def load_markdown_files(md_dir="md", pattern="*.md"):
+    """
+    Load conversation pairs from Markdown files.
+
+    Expected format (flexible):
+        USER: some message
+        BOT: some reply
+
+    Lines starting with # are treated as comments/headings and skipped.
+    Blank lines between pairs are ignored.
+    Both 'USER:' and 'User:' (and 'BOT:'/'Bot:') are accepted.
+    """
+    pairs = []
+    search_path = os.path.join(md_dir, pattern)
+    files = glob.glob(search_path)
+
+    if not files:
+        print(f"[MD]  No markdown files found at '{search_path}'")
+        return pairs
+
+    user_re = re.compile(r"^(?:USER|User)\s*:\s*(.+)", re.IGNORECASE)
+    bot_re  = re.compile(r"^(?:BOT|Bot)\s*:\s*(.+)",  re.IGNORECASE)
+
+    for filepath in sorted(files):
+        file_pairs = 0
+        pending_user = None
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.rstrip("\n")
+                    # Skip headings and HTML comments
+                    if line.strip().startswith("#") or line.strip().startswith("<!--"):
+                        continue
+
+                    u_match = user_re.match(line.strip())
+                    b_match = bot_re.match(line.strip())
+
+                    if u_match:
+                        pending_user = u_match.group(1).strip()
+                    elif b_match and pending_user:
+                        bot_text = b_match.group(1).strip()
+                        if pending_user and bot_text:
+                            pairs.append((pending_user, bot_text))
+                            file_pairs += 1
+                        pending_user = None
+
+            print(f"[MD]  {os.path.basename(filepath)}: {file_pairs} pairs")
+        except Exception as e:
+            print(f"[MD]  Could not read {filepath}: {e}")
+
+    print(f"[MD]  Total markdown pairs: {len(pairs)}")
+    return pairs
+
+
+def cleanup_epoch_checkpoints(pattern="gpt2_sft_epoch*.pt"):
+    """Delete intermediate epoch checkpoint files."""
+    for path in glob.glob(pattern):
+        try:
+            os.remove(path)
+        except OSError as e:
+            print(f"[CKPT] Could not delete '{path}': {e}")
+
+
+def prepare_conversations(
+    bst_size=10000,
+    dd_size=30000,
+    md_dir="training_data",
+    use_bst=True,
+    use_dd=True,
+    use_md=True,
+):
+    """Combine all data sources, shuffle, and return pairs."""
+    import random
+    all_pairs = []
+
+    if use_bst:
+        all_pairs += load_blended_skill_talk(subset_size=bst_size)
+
+    if use_dd:
+        all_pairs += load_daily_dialog(subset_size=dd_size)
+
+    if use_md:
+        all_pairs += load_markdown_files(md_dir=md_dir)
+
+    random.shuffle(all_pairs)
+    print(f"\nTotal combined pairs: {len(all_pairs)}\n")
+    return all_pairs
+
+
+# ---------------------------------------------------------------- DATASET ----
+
 class SFTDataset(Dataset):
-    def __init__(self, conversations, tokenizer, max_length=64):
+    def __init__(self, conversations, tokenizer, max_length=128):
         self.max_length = max_length
         self.samples = []
         texts = []
         prompt_lengths = []
+
         for user, bot in conversations:
             prompt = f"{USER_TOKEN} {user}\n{BOT_TOKEN} "
             full   = prompt + bot + EOS_TOKEN
             texts.append(full)
             prompt_lengths.append(len(tokenizer.encode(prompt)))
 
+        print(f"Tokenizing {len(conversations)} conversations...")
         batch_enc = tokenizer(
             texts,
             truncation=True,
@@ -62,16 +246,15 @@ class SFTDataset(Dataset):
             padding=False,
             return_length=False,
         )
+
         iterator = enumerate(zip(batch_enc["input_ids"], prompt_lengths))
         if TQDM_AVAILABLE:
             iterator = tqdm(iterator, total=len(conversations), desc="Encoding")
+
         for _, (full_ids, orig_prompt_len) in iterator:
             prompt_len = min(orig_prompt_len, len(full_ids))
-            loss_mask = [0] * prompt_len + [1] * (len(full_ids) - prompt_len)
-            self.samples.append({
-                "input_ids":  full_ids,
-                "loss_mask":  loss_mask,
-            })
+            loss_mask  = [0] * prompt_len + [1] * (len(full_ids) - prompt_len)
+            self.samples.append({"input_ids": full_ids, "loss_mask": loss_mask})
 
     def __len__(self):
         return len(self.samples)
@@ -79,37 +262,23 @@ class SFTDataset(Dataset):
     def __getitem__(self, idx):
         return self.samples[idx]
 
+
 def collate_fn(batch, tokenizer):
     pad_val = tokenizer.pad_token_id
-    max_len = max(len(s["input_ids"]) for s in batch)
+    max_len  = max(len(s["input_ids"]) for s in batch)
     input_ids, loss_mask = [], []
     for s in batch:
         ids = s["input_ids"]
         m   = s["loss_mask"]
         input_ids.append(ids + [pad_val] * (max_len - len(ids)))
-        loss_mask.append(m   + [0]      * (max_len - len(m)))
+        loss_mask.append(m   + [0]       * (max_len - len(m)))
     return {
-        "input_ids":  torch.tensor(input_ids, dtype=torch.long),
-        "loss_mask":  torch.tensor(loss_mask, dtype=torch.float),
+        "input_ids": torch.tensor(input_ids, dtype=torch.long),
+        "loss_mask": torch.tensor(loss_mask, dtype=torch.float),
     }
 
-def prepare_conversations(subset_size=None):
-    ds = load_dataset("blended_skill_talk", split="train")
-    pairs = []
-    for row in ds:
-        user_utters = row["previous_utterance"]
-        bot_utters  = row["free_messages"]
 
-        for user_text, bot_text in zip(user_utters, bot_utters):
-            user_text = user_text.strip()
-            bot_text  = bot_text.strip()
-            if user_text and bot_text:
-                pairs.append((user_text, bot_text))
-
-    total = len(pairs)
-    if subset_size and subset_size < total:
-        pairs = pairs[:subset_size]
-    return pairs
+# -------------------------------------------------------------- TRAINING ----
 
 def train_one_epoch(model, loader, optimizer, scheduler, device, accum_steps,
                     max_grad_norm=1.0, epoch=None):
@@ -118,7 +287,8 @@ def train_one_epoch(model, loader, optimizer, scheduler, device, accum_steps,
     total_toks = 0
     optimizer.zero_grad()
 
-    bar = tqdm(loader, desc=f"Epoch {epoch}", leave=False) if TQDM_AVAILABLE else loader
+    bar  = tqdm(loader, desc=f"Epoch {epoch}", leave=False) if TQDM_AVAILABLE else loader
+    step = 0
     for step, batch in enumerate(bar):
         input_ids = batch["input_ids"].to(device)
         loss_mask = batch["loss_mask"].to(device)
@@ -135,11 +305,11 @@ def train_one_epoch(model, loader, optimizer, scheduler, device, accum_steps,
         )
         masked_loss = (loss_flat * m.reshape(-1)).sum()
         n_tokens    = m.sum().clamp(min=1)
-        loss = masked_loss / n_tokens / accum_steps
+        loss        = masked_loss / n_tokens / accum_steps
         loss.backward()
 
-        total_loss   += masked_loss.item()
-        total_toks   += n_tokens.item()
+        total_loss += masked_loss.item()
+        total_toks += n_tokens.item()
 
         if (step + 1) % accum_steps == 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
@@ -148,7 +318,10 @@ def train_one_epoch(model, loader, optimizer, scheduler, device, accum_steps,
             optimizer.zero_grad()
             if device.type == "mps":
                 torch.mps.empty_cache()
+            if TQDM_AVAILABLE:
+                bar.set_postfix(loss=f"{masked_loss.item()/n_tokens.item():.4f}")
 
+    # Flush remaining gradients
     if (step + 1) % accum_steps != 0:
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
         optimizer.step()
@@ -158,6 +331,7 @@ def train_one_epoch(model, loader, optimizer, scheduler, device, accum_steps,
             torch.mps.empty_cache()
 
     return total_loss / max(total_toks, 1)
+
 
 @torch.no_grad()
 def evaluate(model, loader, device):
@@ -170,8 +344,7 @@ def evaluate(model, loader, device):
         x = input_ids[:, :-1]
         y = input_ids[:, 1:]
         m = loss_mask[:, 1:]
-
-        logits = model(x).logits
+        logits    = model(x).logits
         loss_flat = F.cross_entropy(
             logits.reshape(-1, logits.size(-1)),
             y.reshape(-1),
@@ -183,17 +356,30 @@ def evaluate(model, loader, device):
         total_toks += m.sum().item()
     return total_loss / max(total_toks, 1)
 
+
+# ------------------------------------------------------------ GENERATION ----
+
+STOP_SEQUENCES = [
+    f"\n{USER_TOKEN}",
+    "\nUser:",
+    "\nUser :",
+    "\nYou:",
+    f"\n{BOT_TOKEN}",
+    "\nBot :",
+]
+
 @torch.no_grad()
 def generate_reply(model, tokenizer, prompt_text, device,
-                   max_new_tokens=64, temperature=0.5, top_p=0.9, top_k=50,
-                   repetition_penalty=1.4):
+                   max_new_tokens=100, temperature=0.7, top_p=0.9, top_k=50,
+                   repetition_penalty=1.3):
     model.eval()
-    enc = tokenizer(prompt_text, return_tensors="pt")
-    input_ids = enc["input_ids"].to(device)
+    enc            = tokenizer(prompt_text, return_tensors="pt")
+    input_ids      = enc["input_ids"].to(device)
     attention_mask = enc["attention_mask"].to(device)
+
     max_ctx = model.config.n_positions - max_new_tokens
     if input_ids.size(1) > max_ctx:
-        input_ids = input_ids[:, -max_ctx:]
+        input_ids      = input_ids[:, -max_ctx:]
         attention_mask = attention_mask[:, -max_ctx:]
 
     output_ids = model.generate(
@@ -211,18 +397,28 @@ def generate_reply(model, tokenizer, prompt_text, device,
         eos_token_id=tokenizer.eos_token_id,
         pad_token_id=tokenizer.eos_token_id,
     )
+
     generated = output_ids[0, input_ids.size(1):]
     reply = tokenizer.decode(
         generated,
         skip_special_tokens=True,
-        clean_up_tokenization_spaces=False
+        clean_up_tokenization_spaces=False,
     ).strip()
-    for stop in [f"\n{USER_TOKEN}", "\nYou:"]:
+
+    # Strip any leaked turn markers
+    for stop in STOP_SEQUENCES:
         if stop in reply:
             reply = reply.split(stop)[0].strip()
+
     return reply or "I'm not sure what to say."
 
+
+# --------------------------------------------------------------- CHAT CLI ----
+
 def chat(model, tokenizer, device):
+    print("\n" + "=" * 54)
+    print("  Iris AI — type 'quit' to exit")
+    print("=" * 54 + "\n")
     history = ""
     while True:
         user = input("You: ").strip()
@@ -235,101 +431,10 @@ def chat(model, tokenizer, device):
         reply  = generate_reply(model, tokenizer, prompt, device)
         print(f"Bot: {reply}\n")
         history += turn + reply + "\n"
+        # Trim context if it grows too large
         if len(tokenizer.encode(history)) > 800:
-            lines = history.strip().split("\n")
+            lines   = history.strip().split("\n")
             history = "\n".join(lines[2:]) + "\n" if len(lines) > 2 else ""
 
-def main():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--chat-only", action="store_true")
-    parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--subset", type=int, default=50000)
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--force-cpu", action="store_true")
-    parser.add_argument("--lr", type=float, default=5e-6)
-    args = parser.parse_args()
 
-    device = get_device(force_cpu=args.force_cpu)
-
-    CHECKPOINT  = "gpt2_sft_chatbot_best.pt"
-    MODEL_NAME  = "microsoft/DialoGPT-medium"
-    MAX_LENGTH  = 64
-    BATCH_SIZE  = 1
-    ACCUM_STEPS = 8
-    LR          = args.lr
-    WARMUP_RATIO = 0.1
-
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    tokenizer.pad_token = tokenizer.eos_token
-
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME,
-        low_cpu_mem_usage=True,
-        torch_dtype=torch.float32,
-    )
-    model = model.to(device)
-    model.gradient_checkpointing_enable()
-
-    if args.chat_only:
-        if os.path.exists(CHECKPOINT):
-            model.load_state_dict(torch.load(CHECKPOINT, map_location=device))
-        chat(model, tokenizer, device)
-        return
-
-    pairs = prepare_conversations(subset_size=args.subset)
-    split = int(0.9 * len(pairs))
-    train_pairs, val_pairs = pairs[:split], pairs[split:]
-
-    train_ds = SFTDataset(train_pairs, tokenizer, max_length=MAX_LENGTH)
-    val_ds   = SFTDataset(val_pairs,   tokenizer, max_length=MAX_LENGTH)
-
-    train_loader = DataLoader(
-        train_ds, batch_size=BATCH_SIZE, shuffle=True,
-        collate_fn=lambda b: collate_fn(b, tokenizer)
-    )
-    val_loader = DataLoader(
-        val_ds, batch_size=BATCH_SIZE, shuffle=False,
-        collate_fn=lambda b: collate_fn(b, tokenizer)
-    )
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=0.01)
-    total_steps = (len(train_loader) // ACCUM_STEPS) * args.epochs
-    warmup_steps = int(total_steps * WARMUP_RATIO)
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer,
-        num_warmup_steps=warmup_steps,
-        num_training_steps=total_steps,
-    )
-
-    start_epoch = 1
-    if args.resume and os.path.exists(CHECKPOINT):
-        model.load_state_dict(torch.load(CHECKPOINT, map_location=device))
-
-    best_val_loss = float("inf")
-    for epoch in range(start_epoch, args.epochs + 1):
-        train_loss = train_one_epoch(
-            model, train_loader, optimizer, scheduler, device, ACCUM_STEPS,
-            epoch=epoch
-        )
-        if torch.isnan(torch.tensor(train_loss)):
-            break
-
-        val_loss = evaluate(model, val_loader, device)
-
-        torch.save(model.state_dict(), f"gpt2_sft_epoch{epoch}.pt")
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), CHECKPOINT)
-
-        probe = f"{USER_TOKEN} Hello\n{BOT_TOKEN} "
-        reply = generate_reply(model, tokenizer, probe, device, max_new_tokens=32)
-        if is_degenerate(reply):
-            pass
-
-    if os.path.exists(CHECKPOINT):
-        model.load_state_dict(torch.load(CHECKPOINT, map_location=device))
-    chat(model, tokenizer, device)
-
-if __name__ == "__main__":
-    main()
+# This module intentionally contains reusable core logic only.

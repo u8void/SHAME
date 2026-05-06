@@ -31,9 +31,9 @@ _model_init_lock = threading.Lock()
 training_proc = None
 
 def init_model():
+    """Load once in the process that actually serves HTTP."""
     global model, tokenizer, device
     
-    # Skip model loading entirely if we are just previewing the design
     if PREVIEW_MODE:
         return 
         
@@ -80,7 +80,6 @@ def chat():
     if not user_message:
         return jsonify({'reply': "Please send a valid message."}), 400
 
-    # Return a mock response instantly if in preview mode
     if PREVIEW_MODE:
         reply = "[Preview Mode] This is a mock response to test the UI design. The AI model is currently disabled."
     else:
@@ -88,7 +87,7 @@ def chat():
         prompt = history + turn
         reply = generate_reply(model, tokenizer, prompt, device)
 
-    # Logging still works in preview mode to test the file creation logic
+    # Logging works in both modes
     log_filepath = os.path.join(LOGS_DIR, f"{chat_id}.txt")
     with open(log_filepath, "a", encoding="utf-8") as f:
         f.write(f"User: {user_message}\nBot: {reply}\n\n")
@@ -98,22 +97,63 @@ def chat():
 @app.route('/train', methods=['POST'])
 def train():
     global training_proc
+    if training_proc is not None and training_proc.poll() is None:
+        return jsonify({'status': 'already_running'})
+
     data = request.json or {}
     
-    # Extract parameters from request[cite: 2]
-    epochs = str(data.get('epochs', 10))
-    lr = str(data.get('lr', '5e-6'))
-    subset = str(data.get('subset', 50000))
+    model_name = str(data.get('model_name', 'microsoft/DialoGPT-medium'))
+    checkpoint = str(data.get('checkpoint', 'gpt2_sft_chatbot_best.pt'))
+    epochs = str(data.get('epochs', 5))
+    lr = str(data.get('lr', '3e-5'))
+    bst_size = str(data.get('bst_size', 10000))
+    dd_size = str(data.get('dd_size', 30000))
+    md_dir = str(data.get('md_dir', 'training'))
+    max_length = str(data.get('max_length', 128))
+    batch_size = str(data.get('batch_size', 4))
+    accum = str(data.get('accum', 4))
+    weight_decay = str(data.get('weight_decay', 0.01))
+    warmup_ratio = str(data.get('warmup_ratio', 0.05))
+    sample_max_new_tokens = str(data.get('sample_max_new_tokens', 50))
     force_cpu = data.get('device') == 'cpu'
     resume = data.get('resume', False)
+    keep_best_only = data.get('keep_best_only', False)
+    no_bst = data.get('no_bst', False)
+    no_dd = data.get('no_dd', False)
+    no_md = data.get('no_md', False)
+    chat_after_train = data.get('chat_after_train', False)
 
-    # Build command based on iris.py flags
-    cmd = ["python3", "iris.py", "--epochs", epochs, "--lr", lr, "--subset", subset]
+    cmd = [
+        "python3", "train.py",
+        "--model-name", model_name,
+        "--checkpoint", checkpoint,
+        "--epochs", epochs,
+        "--lr", lr,
+        "--bst-size", bst_size,
+        "--dd-size", dd_size,
+        "--md-dir", md_dir,
+        "--max-length", max_length,
+        "--batch-size", batch_size,
+        "--accum", accum,
+        "--weight-decay", weight_decay,
+        "--warmup-ratio", warmup_ratio,
+        "--sample-max-new-tokens", sample_max_new_tokens,
+    ]
     
     if force_cpu:
         cmd.append("--force-cpu")
     if resume:
         cmd.append("--resume")
+    if keep_best_only:
+        cmd.append("--keep-best-only")
+    if no_bst:
+        cmd.append("--no-bst")
+    if no_dd:
+        cmd.append("--no-dd")
+    if no_md:
+        cmd.append("--no-md")
+    if chat_after_train:
+        cmd.append("--chat-after-train")
 
     with open(TRAIN_LOG_FILE, "w", encoding="utf-8") as f:
         f.write(f"Running: {' '.join(cmd)}\n")
@@ -130,10 +170,31 @@ def get_logs():
         content = f.read()
     return jsonify({'logs': content})
 
+@app.route('/train_status', methods=['GET'])
+def train_status():
+    running = training_proc is not None and training_proc.poll() is None
+    return jsonify({'running': running})
+
+@app.route('/stop_train', methods=['POST'])
+def stop_train():
+    global training_proc
+    if training_proc is None or training_proc.poll() is not None:
+        return jsonify({'status': 'not_running'})
+
+    try:
+        training_proc.terminate()
+        training_proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        training_proc.kill()
+        training_proc.wait(timeout=5)
+
+    return jsonify({'status': 'stopped'})
+
 if __name__ == '__main__':
     if PREVIEW_MODE:
-        print("Starting server in PREVIEW MODE (AI Model Disabled)")
+        print("🚀 Starting server in PREVIEW MODE (AI Model Disabled)")
     else:
-        print("Starting server normally (AI Model Enabled)")
-        
-    app.run(debug=True, port=5000)
+        print("🚀 Starting server normally (AI Model Enabled)")
+
+    port = int(os.environ.get("PORT", "5050"))
+    app.run(debug=True, host="127.0.0.1", port=port)
