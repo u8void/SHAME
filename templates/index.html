@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iris AI Chatbot</title>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --bg-dark: #1e1e2f;
+            --bg-panel: #2a2a40;
+            --text-light: #e0e0e0;
+            --border: #3f3f5a;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { display: flex; height: 100vh; background-color: var(--bg-dark); color: var(--text-light); }
+        
+        .sidebar { width: 280px; background-color: var(--bg-panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); }
+        .new-chat-btn { width: 100%; padding: 12px; background-color: var(--primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold; transition: background 0.2s; }
+        .new-chat-btn:hover { background-color: #4f46e5; }
+        .chat-list { flex: 1; overflow-y: auto; padding: 10px; }
+        .chat-item { padding: 12px; margin-bottom: 8px; background-color: rgba(255,255,255,0.05); border-radius: 6px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background 0.2s; }
+        .chat-item:hover, .chat-item.active { background-color: rgba(255,255,255,0.15); }
+        
+        .main-chat { flex: 1; display: flex; flex-direction: column; }
+        .chat-header { padding: 20px; background-color: var(--bg-panel); border-bottom: 1px solid var(--border); font-size: 1.2rem; font-weight: bold; }
+        .chat-messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
+        
+        .message { max-width: 70%; padding: 12px 16px; border-radius: 12px; line-height: 1.5; }
+        .message.user { align-self: flex-end; background-color: var(--primary); color: white; border-bottom-right-radius: 2px; }
+        .message.bot { align-self: flex-start; background-color: var(--bg-panel); border: 1px solid var(--border); border-bottom-left-radius: 2px; }
+        
+        .input-area { padding: 20px; background-color: var(--bg-panel); border-top: 1px solid var(--border); display: flex; gap: 10px; }
+        .input-area input { flex: 1; padding: 15px; background-color: var(--bg-dark); border: 1px solid var(--border); color: var(--text-light); border-radius: 8px; font-size: 16px; outline: none; }
+        .input-area input:focus { border-color: var(--primary); }
+        .input-area button { padding: 0 25px; background-color: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        
+        .typing { font-style: italic; color: #888; font-size: 0.9em; display: none; margin-left: 10px;}
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <button class="new-chat-btn" onclick="startNewChat()">+ New Chat</button>
+        </div>
+        <div class="chat-list" id="chatList">
+            </div>
+    </div>
+
+    <div class="main-chat">
+        <div class="chat-header">
+            Iris AI <span class="typing" id="typingIndicator">Iris is typing...</span>
+        </div>
+        <div class="chat-messages" id="chatMessages">
+            </div>
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="Type a message..." onkeypress="handleKeyPress(event)">
+            <button onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        let currentChatId = null;
+        let chats = JSON.parse(localStorage.getItem('iris_chats')) || [];
+
+        const chatMessages = document.getElementById('chatMessages');
+        const userInput = document.getElementById('userInput');
+        const chatList = document.getElementById('chatList');
+        const typingIndicator = document.getElementById('typingIndicator');
+
+        renderChatList();
+        if (chats.length > 0) {
+            loadChat(chats[0].id);
+        } else {
+            startNewChat();
+        }
+
+        function startNewChat() {
+            currentChatId = Date.now().toString();
+            chats.unshift({
+                id: currentChatId,
+                title: 'New Conversation',
+                messages: [],
+                historyString: ""
+            });
+            saveChatsToLocal();
+            renderChatList();
+            chatMessages.innerHTML = `<div class="message bot">Hello! I'm Iris. How can I help you today?</div>`;
+            document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+        }
+
+        function loadChat(id) {
+            currentChatId = id;
+            const chat = chats.find(c => c.id === id);
+            chatMessages.innerHTML = '';
+            
+            chat.messages.forEach(msg => {
+                appendMessage(msg.role, msg.content, false);
+            });
+            renderChatList();
+        }
+
+        function renderChatList() {
+            chatList.innerHTML = '';
+            chats.forEach(chat => {
+                const div = document.createElement('div');
+                div.className = `chat-item ${chat.id === currentChatId ? 'active' : ''}`;
+                div.textContent = chat.title;
+                div.onclick = () => loadChat(chat.id);
+                chatList.appendChild(div);
+            });
+        }
+
+        function saveChatsToLocal() {
+            localStorage.setItem('iris_chats', JSON.stringify(chats));
+        }
+
+        function appendMessage(role, text, animate = true) {
+            const div = document.createElement('div');
+            div.className = `message ${role}`;
+            div.textContent = text;
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function handleKeyPress(e) {
+            if (e.key === 'Enter') sendMessage();
+        }
+
+        async function sendMessage() {
+            const text = userInput.value.trim();
+            if (!text) return;
+
+            const chat = chats.find(c => c.id === currentChatId);
+            
+            if (chat.messages.length === 0) {
+                chat.title = text.substring(0, 30) + (text.length > 30 ? '...' : '');
+                renderChatList();
+            }
+
+            appendMessage('user', text);
+            userInput.value = '';
+            chat.messages.push({role: 'user', content: text});
+            
+            typingIndicator.style.display = 'inline';
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: text,
+                        history: chat.historyString
+                    })
+                });
+                
+                const data = await response.json();
+                const botReply = data.reply;
+
+                appendMessage('bot', botReply);
+                chat.messages.push({role: 'bot', content: botReply});
+                
+                chat.historyString += `User: ${text}\nBot: ${botReply}\n`;
+                
+                const histTokens = chat.historyString.split('\n');
+                if (histTokens.length > 20) { 
+                    chat.historyString = histTokens.slice(-20).join('\n') + '\n';
+                }
+
+                saveChatsToLocal();
+
+            } catch (error) {
+                console.error("Error:", error);
+                appendMessage('bot', "Error: Could not connect to the backend server.");
+            } finally {
+                typingIndicator.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>
