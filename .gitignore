@@ -1,7 +1,21 @@
-# Ignore all epoch model folders
-iris_lora_mps_chat_epoch*/
-# Ignore merged model folder
-iris_merged_model/
-iris_lora_mps_chat/
+# macOS
+.DS_Store
+
+# python
+.venv/
 __pycache__/
-logs/*
+*.py[co]
+
+# website
+website/output/
+website/data/
+
+# planning docs
+docs/
+
+# agents
+.agents/
+.claude/skills/
+.superpowers/
+.playwright-cli/
+skills-lock.json
