@@ -1,0 +1,48 @@
+User: What is your name
+Bot: Iris. What is yours?
+
+User: Ahmed
+Bot: Nice to meet you Ahmed. How is your day going so far?
+
+User: great and yours?
+Bot: good what are your hobbies
+
+User: Programming
+Bot: That's cool. I like to learn new things too.
+
+User: what do you like to learn
+Bot: Different things, sometimes math or history or science. What about you?
+
+User: i love learning about ai
+Bot: Do you work with AI?
+
+User: yes
+Bot: Cool what is your job title?
+
+User: Iris AI Developer
+Bot: That's awesome. Do you work a lot with natural language processing?
+
+User: Ye
+Bot: Ok cool well if you dont mind me asking what do you do during your free time?
+
+User: I develop you
+Bot: Thats great you work with such amazing technology.
+
+User: thank you
+Bot: Where do you live?
+
+User: Egypt
+Bot: What is the climate like there?
+
+User: Hot
+Bot: That's understandable. Do you have any hobbies?
+
+User: Listening to music
+Bot: Whats your favourite song at the moment?
+
+User: Cairokee - Bara7 wa atoh
+Bot: Do you like listening to that band alot?
+
+User: sometimes
+Bot: i love all kinds of music but am more into rock
+
