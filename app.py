@@ -1,200 +1,237 @@
+
+import gc
 import os
-import sys
 import argparse
 import threading
-import torch
 import subprocess
+
+import torch
 from flask import Flask, request, jsonify, render_template
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+
 from iris import USER_TOKEN, BOT_TOKEN, get_device, generate_reply
 
-# Parse arguments to enable preview mode
+
 parser = argparse.ArgumentParser(description="Run the Iris AI Flask App")
-parser.add_argument("--preview-only", action="store_true", help="Launch UI without loading the AI model")
-args, unknown = parser.parse_known_args()
+parser.add_argument("--preview-only", action="store_true",
+                    help="Launch UI without loading the AI model")
+parser.add_argument("--force-cpu", action="store_true",
+                    help="Force CPU inference (overrides MPS auto-detect)")
+args, _ = parser.parse_known_args()
+
+
 PREVIEW_MODE = args.preview_only
+FORCE_CPU    = args.force_cpu or os.environ.get("FORCE_CPU", "").lower() in ("1", "true", "yes")
+
 
 app = Flask(__name__)
 
-MODEL_NAME = "microsoft/DialoGPT-medium"
-CHECKPOINT = "gpt2_sft_chatbot_best.pt"
-LOGS_DIR = "logs"
-TRAIN_LOG_FILE = "train_output.txt"
+MERGED_MODEL_PATH = "./iris_merged_model"
+BASE_MODEL_NAME   = "google/gemma-2-2b-it"
+LOGS_DIR          = "logs"
+TRAIN_LOG_FILE    = "outputs/train_output.txt"
 
 os.makedirs(LOGS_DIR, exist_ok=True)
+os.makedirs(os.path.dirname(TRAIN_LOG_FILE), exist_ok=True)
 
-model = None
-tokenizer = None
-device = None
-_model_init_lock = threading.Lock()
+
+model         = None
+tokenizer     = None
+device        = None
+_model_lock   = threading.Lock()
 training_proc = None
 
+
 def init_model():
-    """Load once in the process that actually serves HTTP."""
     global model, tokenizer, device
-    
-    if PREVIEW_MODE:
-        return 
-        
-    if model is not None:
+
+    if PREVIEW_MODE or model is not None:
         return
-    with _model_init_lock:
+
+    with _model_lock:
         if model is not None:
             return
-        device = get_device(
-            force_cpu=os.environ.get("FORCE_CPU", "").lower() in ("1", "true", "yes")
+
+        device = get_device(force_cpu=FORCE_CPU)
+        print(f"[INFO] Device: {device}")
+
+        model_path = MERGED_MODEL_PATH if os.path.exists(MERGED_MODEL_PATH) else BASE_MODEL_NAME
+        if model_path == BASE_MODEL_NAME:
+            print(f"[WARNING] Merged model not found — falling back to {BASE_MODEL_NAME}")
+        else:
+            print(f"[INFO] Loading model from {model_path}")
+
+
+        dtype = torch.float32 if FORCE_CPU else torch.float16
+        print(f"[INFO] Loading with dtype={dtype} ...")
+
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+            use_fast=True,
         )
-        print("Loading tokenizer and model...")
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         tokenizer.pad_token = tokenizer.eos_token
 
+
         model = AutoModelForCausalLM.from_pretrained(
-            MODEL_NAME,
+            model_path,
+            torch_dtype=dtype,
             low_cpu_mem_usage=True,
-            dtype=torch.float32,
         )
+
+
+        model.eval()
+        for p in model.parameters():
+            p.requires_grad_(False)
+
+
         model = model.to(device)
 
-        if os.path.exists(CHECKPOINT):
-            print(f"Loading trained weights from {CHECKPOINT}")
-            model.load_state_dict(torch.load(CHECKPOINT, map_location=device))
-        else:
-            print("Warning: No custom checkpoint found. Using base model.")
+        gc.collect()
+        if device.type == "mps":
+            torch.mps.empty_cache()
+        elif device.type == "cuda":
+            torch.cuda.empty_cache()
+
+        print("[INFO] Model ready.")
+
 
 @app.before_request
-def _ensure_model_loaded():
+def _ensure_model():
     init_model()
 
-@app.route('/')
-def home():
-    return render_template('index.html')
 
-@app.route('/chat', methods=['POST'])
+
+@app.route("/")
+def home():
+    return render_template("index.html")
+
+
+@app.route("/chat", methods=["POST"])
 def chat():
-    data = request.json or {}
-    chat_id = data.get('chat_id', 'unknown_chat')
-    user_message = data.get('message', '')
-    history = data.get('history', '')
+    data         = request.json or {}
+    chat_id      = data.get("chat_id", "unknown_chat")
+    user_message = data.get("message", "").strip()
+    history      = data.get("history", "")
+    settings     = data.get("settings", {})
 
     if not user_message:
-        return jsonify({'reply': "Please send a valid message."}), 400
+        return jsonify({"reply": "Please send a valid message."}), 400
 
     if PREVIEW_MODE:
-        reply = "[Preview Mode] This is a mock response to test the UI design. The AI model is currently disabled."
+        reply = "[Preview Mode] Mock response — AI model disabled."
     else:
-        turn = f"{USER_TOKEN} {user_message}\n{BOT_TOKEN} "
-        prompt = history + turn
-        reply = generate_reply(model, tokenizer, prompt, device)
 
-    # Logging works in both modes
-    log_filepath = os.path.join(LOGS_DIR, f"{chat_id}.txt")
-    with open(log_filepath, "a", encoding="utf-8") as f:
+        trimmed_history = _trim_history(history, max_lines=6)
+        prompt = trimmed_history + f"{USER_TOKEN} {user_message}\n{BOT_TOKEN} "
+
+        reply = generate_reply(
+            model, tokenizer, prompt, device,
+            max_new_tokens    = int(float(settings.get("max_new_tokens",     40))),
+            temperature       = float(settings.get("temperature",           0.6)),
+            top_p             = float(settings.get("top_p",                 0.9)),
+            top_k             = int(float(settings.get("top_k",              40))),
+            repetition_penalty= float(settings.get("repetition_penalty",    1.3)),
+            max_sentences     = int(float(settings.get("max_sentences",       1))),
+        )
+
+
+        if device.type == "mps":
+            torch.mps.empty_cache()
+
+    log_path = os.path.join(LOGS_DIR, f"{chat_id}.txt")
+    with open(log_path, "a", encoding="utf-8") as f:
         f.write(f"User: {user_message}\nBot: {reply}\n\n")
 
-    return jsonify({'reply': reply})
+    return jsonify({"reply": reply})
 
-@app.route('/train', methods=['POST'])
+
+def _trim_history(history: str, max_lines: int) -> str:
+    if not history:
+        return ""
+    lines = [l for l in history.splitlines() if l.strip()]
+    if len(lines) <= max_lines:
+        return history
+    return "\n".join(lines[-max_lines:]) + "\n"
+
+
+@app.route("/train", methods=["POST"])
 def train():
     global training_proc
+
     if training_proc is not None and training_proc.poll() is None:
-        return jsonify({'status': 'already_running'})
+        return jsonify({"status": "already_running"})
 
     data = request.json or {}
-    
-    model_name = str(data.get('model_name', 'microsoft/DialoGPT-medium'))
-    checkpoint = str(data.get('checkpoint', 'gpt2_sft_chatbot_best.pt'))
-    epochs = str(data.get('epochs', 5))
-    lr = str(data.get('lr', '3e-5'))
-    bst_size = str(data.get('bst_size', 10000))
-    dd_size = str(data.get('dd_size', 30000))
-    md_dir = str(data.get('md_dir', 'training'))
-    max_length = str(data.get('max_length', 128))
-    batch_size = str(data.get('batch_size', 4))
-    accum = str(data.get('accum', 4))
-    weight_decay = str(data.get('weight_decay', 0.01))
-    warmup_ratio = str(data.get('warmup_ratio', 0.05))
-    sample_max_new_tokens = str(data.get('sample_max_new_tokens', 50))
-    force_cpu = data.get('device') == 'cpu'
-    resume = data.get('resume', False)
-    keep_best_only = data.get('keep_best_only', False)
-    no_bst = data.get('no_bst', False)
-    no_dd = data.get('no_dd', False)
-    no_md = data.get('no_md', False)
-    chat_after_train = data.get('chat_after_train', False)
 
     cmd = [
         "python3", "train.py",
-        "--model-name", model_name,
-        "--checkpoint", checkpoint,
-        "--epochs", epochs,
-        "--lr", lr,
-        "--bst-size", bst_size,
-        "--dd-size", dd_size,
-        "--md-dir", md_dir,
-        "--max-length", max_length,
-        "--batch-size", batch_size,
-        "--accum", accum,
-        "--weight-decay", weight_decay,
-        "--warmup-ratio", warmup_ratio,
-        "--sample-max-new-tokens", sample_max_new_tokens,
+        "--model-name",  str(data.get("model_name",  BASE_MODEL_NAME)),
+        "--epochs",      str(data.get("epochs",       3)),
+        "--lr",          str(data.get("lr",           "2e-4")),
+        "--max-pairs",   str(data.get("max_pairs",    5000)),
+        "--md-dir",      str(data.get("md_dir",       "training")),
+        "--max-length",  str(data.get("max_length",   64)),
+        "--batch-size",  str(data.get("batch_size",   1)),
+        "--accum-steps", str(data.get("accum_steps",  8)),
+        "--output-dir",  str(data.get("output_dir",   "./iris_lora_adapter")),
     ]
-    
-    if force_cpu:
-        cmd.append("--force-cpu")
-    if resume:
-        cmd.append("--resume")
-    if keep_best_only:
-        cmd.append("--keep-best-only")
-    if no_bst:
-        cmd.append("--no-bst")
-    if no_dd:
-        cmd.append("--no-dd")
-    if no_md:
-        cmd.append("--no-md")
-    if chat_after_train:
-        cmd.append("--chat-after-train")
 
-    with open(TRAIN_LOG_FILE, "w", encoding="utf-8") as f:
-        f.write(f"Running: {' '.join(cmd)}\n")
+    device_choice = data.get("device") or ("cpu" if FORCE_CPU else None)
+    if device_choice:
+        cmd.extend(["--device", device_choice])
+    if data.get("no_bst"):            cmd.append("--no-bst")
+    if data.get("no_dd"):             cmd.append("--no-dd")
+    if data.get("no_md"):             cmd.append("--no-md")
+    if data.get("use_chat_template"): cmd.append("--use-chat-template")
 
-    training_proc = subprocess.Popen(cmd, stdout=open(TRAIN_LOG_FILE, "a"), stderr=subprocess.STDOUT)
-    
-    return jsonify({'status': 'started'})
+    os.makedirs(os.path.dirname(TRAIN_LOG_FILE), exist_ok=True)
+    log_file = open(TRAIN_LOG_FILE, "w", encoding="utf-8")
+    log_file.write(f"Running: {' '.join(cmd)}\n")
+    log_file.flush()
 
-@app.route('/train_logs', methods=['GET'])
+    training_proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
+    return jsonify({"status": "started"})
+
+
+@app.route("/train_logs", methods=["GET"])
 def get_logs():
     if not os.path.exists(TRAIN_LOG_FILE):
-        return jsonify({'logs': ''})
+        return jsonify({"logs": ""})
     with open(TRAIN_LOG_FILE, "r", encoding="utf-8") as f:
-        content = f.read()
-    return jsonify({'logs': content})
+        return jsonify({"logs": f.read()})
 
-@app.route('/train_status', methods=['GET'])
+
+@app.route("/train_status", methods=["GET"])
 def train_status():
     running = training_proc is not None and training_proc.poll() is None
-    return jsonify({'running': running})
+    return jsonify({"running": running})
 
-@app.route('/stop_train', methods=['POST'])
+
+@app.route("/stop_train", methods=["POST"])
 def stop_train():
     global training_proc
+
     if training_proc is None or training_proc.poll() is not None:
-        return jsonify({'status': 'not_running'})
+        return jsonify({"status": "not_running"})
 
     try:
         training_proc.terminate()
         training_proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         training_proc.kill()
-        training_proc.wait(timeout=5)
+        training_proc.wait()
 
-    return jsonify({'status': 'stopped'})
+    return jsonify({"status": "stopped"})
 
-if __name__ == '__main__':
-    if PREVIEW_MODE:
-        print("🚀 Starting server in PREVIEW MODE (AI Model Disabled)")
-    else:
-        print("🚀 Starting server normally (AI Model Enabled)")
+
+
+if __name__ == "__main__":
+    mode_label = "PREVIEW MODE" if PREVIEW_MODE else (
+        "CPU float32" if FORCE_CPU else "MPS float16"
+    )
+    print(f"[INFO] Starting Iris AI — {mode_label}")
 
     port = int(os.environ.get("PORT", "5050"))
-    app.run(debug=True, host="127.0.0.1", port=port)
+    app.run(debug=False, host="127.0.0.1", port=port)

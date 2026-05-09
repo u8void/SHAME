@@ -3,533 +3,254 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Iris AI Chatbot</title>
-    <style>
-        :root {
-            --primary: #38b6ff;
-            --primary-hover: #299de0;
-            --bg-dark: #0a0a0a;
-            --bg-panel: #1f1f1f;
-            --text-light: #e0e0e0;
-            --text-muted: #888;
-            --border: #333333;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { display: flex; height: 100vh; background-color: var(--bg-dark); color: var(--text-light); overflow: hidden; }
-
-        /* ── Sidebar ── */
-        .sidebar { width: 280px; background-color: var(--bg-panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
-        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
-        .btn { width: 100%; padding: 12px; background-color: var(--primary); color: #000; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 600; transition: background 0.2s; }
-        .btn:hover { background-color: var(--primary-hover); }
-        
-        .chat-list { flex: 1; overflow-y: auto; padding: 10px; }
-        .chat-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; margin-bottom: 6px; background-color: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer; font-size: 14px; transition: background 0.15s; }
-        .chat-item:hover, .chat-item.active { background-color: rgba(255,255,255,0.15); }
-        .chat-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .delete-btn { margin-left: 10px; color: #ff6b6b; font-weight: bold; cursor: pointer; padding: 0 5px; }
-        .delete-btn:hover { color: #ff4c4c; }
-
-        .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted); text-align: center; }
-
-        /* ── Main Chat ── */
-        .main-chat { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
-        .chat-header { padding: 16px 20px; background-color: var(--bg-panel); border-bottom: 1px solid var(--border); font-size: 1.1rem; font-weight: 700; display: flex; justify-content: center; align-items: center; gap: 10px; height: 75px; }
-        .brand-logo { height: 40px; width: auto; }
-        
-        .chat-messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
-        .message { max-width: 72%; padding: 12px 16px; border-radius: 14px; line-height: 1.55; font-size: 15px; word-break: break-word; }
-        .message.user { align-self: flex-end; background-color: var(--primary); color: #000; border-bottom-right-radius: 4px; }
-        .message.bot { align-self: flex-start; background-color: var(--bg-panel); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
-        .typing-bubble { align-self: flex-start; background-color: var(--bg-panel); border: 1px solid var(--border); border-bottom-left-radius: 4px; border-radius: 14px; padding: 12px 14px; display: none; width: fit-content; }
-        .typing-dots { display: flex; gap: 6px; align-items: center; }
-        .typing-dots span { width: 8px; height: 8px; border-radius: 50%; background-color: var(--text-muted); display: inline-block; animation: typingBounce 1.2s infinite ease-in-out; }
-        .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
-        .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
-        @keyframes typingBounce {
-            0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
-            40% { transform: translateY(-4px); opacity: 1; }
-        }
-
-        /* ── Input Area ── */
-        .input-area { padding: 16px 20px; background-color: var(--bg-panel); border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: center; }
-        .input-area input { flex: 1; padding: 13px 16px; background-color: var(--bg-dark); border: 1px solid var(--border); color: var(--text-light); border-radius: 10px; font-size: 15px; outline: none; transition: border-color 0.15s; }
-        .input-area input:focus { border-color: var(--primary); }
-        .input-area input:disabled { opacity: 0.6; }
-        .send-btn { padding: 13px 22px; background-color: var(--primary); color: #000; border: none; border-radius: 10px; cursor: pointer; font-size: 15px; font-weight: 600; transition: background 0.2s; }
-        .send-btn:hover:not(:disabled) { background-color: var(--primary-hover); }
-        .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        /* ── Centered Prompt ── */
-        .centered-prompt { position: absolute; top: 75px; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; background-color: var(--bg-dark); z-index: 10; }
-        .centered-prompt h2 { margin-bottom: 30px; font-size: 2rem; font-weight: 600; }
-        .centered-prompt .input-wrapper { display: flex; width: 60%; max-width: 800px; gap: 10px; background: var(--bg-panel); padding: 10px; border-radius: 30px; border: 1px solid var(--border); }
-        .centered-prompt input { flex: 1; padding: 15px 20px; background: transparent; border: none; color: var(--text-light); font-size: 1.1rem; outline: none; }
-        .centered-prompt button { padding: 0 25px; border-radius: 20px; background: var(--primary); color: #000; border: none; font-weight: bold; cursor: pointer; transition: background 0.2s; }
-        .centered-prompt button:hover { background: var(--primary-hover); }
-
-        /* ── Modal ── */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; justify-content: center; align-items: center; }
-        .modal-content { background: var(--bg-panel); width: 80%; max-width: 900px; height: 80vh; padding: 30px; border-radius: 12px; display: flex; flex-direction: column; }
-        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .tab-bar { display: flex; gap: 10px; margin-bottom: 16px; }
-        .tab-btn { width: auto; padding: 9px 14px; background-color: var(--bg-dark); color: var(--text-light); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; }
-        .tab-btn.active { background-color: var(--primary); color: #000; border-color: transparent; }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
-        .modal-controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
-        .modal-controls input, .modal-controls select { padding: 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-dark); color: white; width: 100%; }
-        .log_area { height: 48vh; background: var(--bg-dark); padding: 15px; border-radius: 8px; overflow-y: auto; font-family: monospace; white-space: pre-wrap; font-size: 0.9rem; }
-
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-    </style>
+    <title>Iris AI Dashboard</title>
+    <meta name="description" content="Iris AI: Your intelligent fine-tuned assistant, trained on your data.">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-
-<div class="sidebar">
-    <div class="sidebar-header">
-        <button class="btn" onclick="startNewChat()">+ New Chat</button>
-        <button class="btn" style="background-color: var(--bg-dark); color: var(--text-light); border: 1px solid var(--border);" onclick="openTraining()">Model Training</button>
-    </div>
-    <div class="chat-list" id="chatList"></div>
-    <div class="sidebar-footer">Iris AI &middot; Powered by DialoGPT</div>
-</div>
-
-<div class="main-chat">
-    <div class="chat-header">
-        <img src="{{ url_for('static', filename='logo_white.png') }}" alt="Iris AI logo" class="brand-logo" onerror="this.style.display='none'"> 
-        <span style="font-size: 1.2rem; margin-left: 10px;">Iris AI</span>
-    </div>
-
-    <div class="chat-messages" id="chatMessages"></div>
-
-    <div class="input-area" id="bottomInput" style="display: none;">
-        <input type="text" id="userInput" placeholder="Type a message…" onkeypress="handleKeyPress(event)">
-        <button class="send-btn" id="sendBtn" onclick="sendMessage('userInput')">Send</button>
-    </div>
-
-    <div class="centered-prompt" id="centeredPrompt">
-        <img src="{{ url_for('static', filename='logo_white.png') }}" alt="Iris AI logo" style="height: 100px; margin-bottom: 20px;" onerror="this.style.display='none'">
-        <h2>Where should we begin?</h2>
-        <div class="input-wrapper">
-            <input type="text" id="centerInput" placeholder="Ask anything..." onkeypress="if(event.key === 'Enter') sendMessage('centerInput')">
-            <button onclick="sendMessage('centerInput')">Send</button>
-        </div>
-    </div>
-</div>
-
-<div class="modal" id="trainModal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2>Training Panel</h2>
-            <button class="btn" style="width: auto;" onclick="closeTraining()">Close</button>
-        </div>
-        <div class="tab-bar">
-            <button class="tab-btn active" id="trainingSettingsTabBtn" onclick="switchTrainingTab('settings')">Settings</button>
-            <button class="tab-btn" id="trainingLogsTabBtn" onclick="switchTrainingTab('logs')">Logs</button>
+    <aside class="sidebar" id="sidebar">
+        <div class="header-row">
+            <div class="left-group">
+                <button class="icon-btn" id="toggleBtn" aria-label="Toggle sidebar">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                </button>
+                <div class="brand-wrapper">
+                    <img src="{{ url_for('static', filename='iris_logo.png') }}" alt="Iris AI" class="iris-logo" onerror="this.style.display='none'">
+                    <span class="iris-name nav-text">Iris AI</span>
+                </div>
+            </div>
+            <button class="icon-btn nav-text search-btn" id="searchToggleBtn" aria-label="Search chats">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            </button>
         </div>
 
-        <div id="trainingSettingsTab" class="tab-content active">
-        <div class="modal-controls">
-            <div>
-                <label>Model Name</label>
-                <input type="text" id="modelNameInput" value="microsoft/DialoGPT-medium">
-            </div>
-            <div>
-                <label>Checkpoint Path</label>
-                <input type="text" id="checkpointInput" value="gpt2_sft_chatbot_best.pt">
-            </div>
-            <div>
-                <label>Epochs</label>
-                <input type="number" id="epochsInput" value="5">
-            </div>
-            <div>
-                <label>Learning Rate</label>
-                <input type="text" id="lrInput" value="3e-5">
-            </div>
-            <div>
-                <label>BST Size</label>
-                <input type="number" id="bstSizeInput" value="10000">
-            </div>
-            <div>
-                <label>DD Size</label>
-                <input type="number" id="ddSizeInput" value="30000">
-            </div>
-            <div>
-                <label>MD Dir</label>
-                <input type="text" id="mdDirInput" value="training">
-            </div>
-            <div>
-                <label>Max Length</label>
-                <input type="number" id="maxLengthInput" value="128">
-            </div>
-            <div>
-                <label>Batch Size</label>
-                <input type="number" id="batchSizeInput" value="4">
-            </div>
-            <div>
-                <label>Accum Steps</label>
-                <input type="number" id="accumInput" value="4">
-            </div>
-            <div>
-                <label>Weight Decay</label>
-                <input type="text" id="weightDecayInput" value="0.01">
-            </div>
-            <div>
-                <label>Warmup Ratio</label>
-                <input type="text" id="warmupRatioInput" value="0.05">
-            </div>
-            <div>
-                <label>Sample Max New Tokens</label>
-                <input type="number" id="sampleMaxNewTokensInput" value="50">
-            </div>
-            <div>
-                <label>Device</label>
-                <select id="deviceInput">
-                    <option value="auto">Auto (CUDA/MPS)</option>
-                    <option value="cpu">Force CPU</option>
-                </select>
-            </div>
-            <div style="display: flex; align-items: center; gap: 10px; margin-top: 20px;">
-                <input type="checkbox" id="resumeInput" style="width: 20px; height: 20px;">
-                <label>Resume Training</label>
-            </div>
-            <div style="display: flex; align-items: center; gap: 10px; margin-top: 20px;">
-                <input type="checkbox" id="keepBestOnlyInput" style="width: 20px; height: 20px;" checked>
-                <label>Keep Best Only (delete epoch checkpoints)</label>
-            </div>
-            <div style="display: flex; align-items: center; gap: 10px; margin-top: 20px;">
-                <input type="checkbox" id="noBstInput" style="width: 20px; height: 20px;">
-                <label>Disable BST</label>
-            </div>
-            <div style="display: flex; align-items: center; gap: 10px; margin-top: 20px;">
-                <input type="checkbox" id="noDdInput" style="width: 20px; height: 20px;">
-                <label>Disable DailyDialog</label>
-            </div>
-            <div style="display: flex; align-items: center; gap: 10px; margin-top: 20px;">
-                <input type="checkbox" id="noMdInput" style="width: 20px; height: 20px;">
-                <label>Disable Markdown Data</label>
-            </div>
-            <br>
-            <div style="display: flex; align-items: flex-end;">
-                <button class="btn" id="startTrainingBtn" onclick="startTraining()">Start Training</button>
-            </div>
-            <div style="display: flex; align-items: flex-end;">
-                <button class="btn" id="stopTrainingBtn" style="background-color: #ff6b6b; color: #fff;" onclick="stopTraining()">Stop Training</button>
+        <div class="sidebar-content">
+            <div class="nav-item" id="newChatBtn" aria-label="New chat">
+                <svg class="main-icon pen-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                <span class="nav-text">New chat</span>
             </div>
         </div>
+
+        <!-- Search bar (hidden by default) -->
+        <div class="search-bar-container" id="searchBarContainer">
+            <div class="search-bar-inner">
+                <svg class="search-bar-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <input type="text" id="searchInput" class="search-bar-input" placeholder="Search chats..." autocomplete="off" spellcheck="false">
+                <button class="search-clear-btn" id="searchClearBtn" aria-label="Clear search">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
         </div>
 
-        <div id="trainingLogsTab" class="tab-content">
-            <div class="log_area" id="trainLogs">Ready to train...</div>
+        <div class="recent-section nav-text">
+            <p class="section-label" id="recentLabel">Recent Chats</p>
+            <div class="chat-history" id="chatHistory"></div>
+            <p class="search-empty" id="searchEmpty">No chats match your search.</p>
         </div>
-    </div>
-</div>
 
-<script>
-    let currentChatId = null;
-    let chats = JSON.parse(localStorage.getItem('iris_chats')) || [];
-    let logInterval = null;
-
-    const chatMessages = document.getElementById('chatMessages');
-    const typingBubble = document.createElement('div');
-    typingBubble.className = 'typing-bubble';
-    typingBubble.id = 'typingBubble';
-    typingBubble.innerHTML = `
-        <div class="typing-dots" aria-label="AI is typing">
-            <span></span><span></span><span></span>
+        <div class="sidebar-footer">
+            <div class="nav-item" id="settingsBtn" aria-label="Settings">
+                <svg class="main-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <span class="nav-text">Settings</span>
+            </div>
         </div>
-    `;
+    </aside>
 
-    function renderChatList() {
-        const chatList = document.getElementById('chatList');
-        chatList.innerHTML = '';
-        chats.forEach(chat => {
-            const div = document.createElement('div');
-            div.className = `chat-item ${chat.id === currentChatId ? 'active' : ''}`;
-            
-            div.innerHTML = `
-                <div class="chat-title" onclick="loadChat('${chat.id}')">${chat.title}</div>
-                <div class="delete-btn" onclick="deleteChat('${chat.id}', event)">✖</div>
-            `;
-            chatList.appendChild(div);
-        });
-    }
+    <main class="main-content" id="mainContent">
 
-    function deleteChat(id, event) {
-        event.stopPropagation();
-        chats = chats.filter(c => c.id !== id);
-        localStorage.setItem('iris_chats', JSON.stringify(chats));
-        if (currentChatId === id) {
-            startNewChat();
-        } else {
-            renderChatList();
-        }
-    }
+        <div class="chat-messages" id="chatMessages"></div>
 
-    function startNewChat() {
-        currentChatId = Date.now().toString();
-        chats.unshift({
-            id: currentChatId,
-            title: 'New Conversation',
-            messages: [],
-            historyString: ""
-        });
-        localStorage.setItem('iris_chats', JSON.stringify(chats));
-        renderChatList();
-        updateUIMode(true);
-        chatMessages.innerHTML = '';
-    }
+        <div class="center-panel" id="centerPanel">
+            <div class="welcome-section" id="welcomeSection">
+                <h1 class="hi-text" id="greetingText">Hi</h1>
+                <p class="sub-text">What's on your mind today?</p>
+            </div>
 
-    function loadChat(id) {
-        currentChatId = id;
-        const chat = chats.find(c => c.id === id);
-        chatMessages.innerHTML = '';
-        
-        chat.messages.forEach(msg => {
-            appendMessage(msg.role, msg.content, false);
-        });
-        
-        updateUIMode(chat.messages.length === 0);
-        renderChatList();
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
+            <div class="input-area">
+                <div class="input-wrapper">
+                    <input type="text" id="chatInput" placeholder="Ask anything" autocomplete="off">
+                    <button class="send-btn" id="sendBtn" aria-label="Send message">
+                        <h3>&nbsp;➤&nbsp;</h3>
+                    </button>
+                </div>
+                <p class="footere" id="footerText">Iris AI can make mistakes. Check important info.</p>
+            </div>
+        </div>
+    </main>
 
-    function updateUIMode(isNewChat) {
-        document.getElementById('centeredPrompt').style.display = isNewChat ? 'flex' : 'none';
-        document.getElementById('bottomInput').style.display = isNewChat ? 'none' : 'flex';
-        if (isNewChat) document.getElementById('centerInput').focus();
-        else document.getElementById('userInput').focus();
-    }
+    <!-- ═══════════════════════════════════════════
+         SETTINGS PANEL (slides in from right)
+    ════════════════════════════════════════════ -->
+    <div class="settings-overlay" id="settingsOverlay"></div>
 
-    function appendMessage(role, text, scroll = true) {
-        const div = document.createElement('div');
-        div.className = `message ${role}`;
-        div.textContent = text;
-        chatMessages.appendChild(div);
-        if (scroll) chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
+    <aside class="settings-panel" id="settingsPanel" aria-label="Settings">
+        <div class="settings-header">
+            <h2 class="settings-title">Settings</h2>
+            <button class="icon-btn" id="closeSettingsBtn" aria-label="Close settings">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+        </div>
 
-    function handleKeyPress(e) {
-        if (e.key === 'Enter' && !e.shiftKey) sendMessage('userInput');
-    }
+        <div class="settings-tabs">
+            <button class="stab-btn active" id="stab-chat" data-tab="chat">Chat</button>
+            <button class="stab-btn" id="stab-training" data-tab="training">Training</button>
+        </div>
 
-    function setLoading(loading) {
-        document.getElementById('userInput').disabled = loading;
-        document.getElementById('centerInput').disabled = loading;
-        document.getElementById('sendBtn').disabled = loading;
+        <!-- CHAT SETTINGS TAB -->
+        <div class="settings-tab-content active" id="stab-content-chat">
+            <p class="settings-section-label">Generation</p>
 
-        if (loading) {
-            if (!typingBubble.parentNode) {
-                chatMessages.appendChild(typingBubble);
-            }
-            typingBubble.style.display = 'block';
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        } else {
-            typingBubble.style.display = 'none';
-        }
-    }
+            <div class="settings-field">
+                <label for="cs_max_new_tokens">
+                    Max New Tokens
+                    <span class="field-hint">Number of tokens the model generates per reply.</span>
+                </label>
+                <input type="number" id="cs_max_new_tokens" value="40" min="1" max="512">
+            </div>
 
-    async function sendMessage(inputId) {
-        const inputEl = document.getElementById(inputId);
-        const text = inputEl.value.trim();
-        if (!text) return;
+            <div class="settings-field">
+                <label for="cs_temperature">
+                    Temperature
+                    <span class="field-hint">Higher = more creative. Lower = more predictable.</span>
+                </label>
+                <input type="number" id="cs_temperature" value="0.6" step="0.05" min="0.01" max="2">
+            </div>
 
-        const chat = chats.find(c => c.id === currentChatId);
-        
-        if (chat.messages.length === 0) {
-            chat.title = text.substring(0, 30) + (text.length > 30 ? '...' : '');
-        }
+            <div class="settings-field">
+                <label for="cs_top_p">
+                    Top P
+                    <span class="field-hint">Nucleus sampling threshold.</span>
+                </label>
+                <input type="number" id="cs_top_p" value="0.9" step="0.05" min="0" max="1">
+            </div>
 
-        chat.messages.push({role: 'user', content: text});
-        updateUIMode(false);
-        appendMessage('user', text);
-        renderChatList();
-        
-        inputEl.value = '';
-        setLoading(true);
+            <div class="settings-field">
+                <label for="cs_top_k">
+                    Top K
+                    <span class="field-hint">Limits vocabulary to the top K likely tokens.</span>
+                </label>
+                <input type="number" id="cs_top_k" value="40" min="1" max="200">
+            </div>
 
-        try {
-            const response = await fetch('/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    chat_id: currentChatId,
-                    message: text,
-                    history: chat.historyString
-                })
-            });
-            
-            if (!response.ok) throw new Error(`Server error: ${response.status}`);
-            const data = await response.json();
-            
-            chat.messages.push({role: 'bot', content: data.reply});
-            chat.historyString += `User: ${text}\nBot: ${data.reply}\n`;
-            
-            const lines = chat.historyString.split('\n').filter(l => l.trim());
-            if (lines.length > 80) {
-                chat.historyString = lines.slice(-80).join('\n') + '\n';
-            }
+            <div class="settings-field">
+                <label for="cs_repetition_penalty">
+                    Repetition Penalty
+                    <span class="field-hint">Penalizes repeating words. 1.05–1.3 works well.</span>
+                </label>
+                <input type="number" id="cs_repetition_penalty" value="1.3" step="0.05" min="1" max="2">
+            </div>
 
-            localStorage.setItem('iris_chats', JSON.stringify(chats));
-            appendMessage('bot', data.reply);
-            
-        } catch (error) {
-            appendMessage('bot', "⚠️ Error: Could not connect to the backend server.");
-        } finally {
-            setLoading(false);
-            document.getElementById('userInput').focus();
-        }
-    }
+            <button class="settings-save-btn" id="saveChatSettingsBtn">Save Chat Settings</button>
+        </div>
 
-    // --- Training Modal Logic ---
-    async function openTraining() {
-        document.getElementById('trainModal').style.display = 'flex';
-        switchTrainingTab('settings');
-        await fetchLogs();
-        await refreshTrainingStatus();
-    }
-    function closeTraining() { 
-        document.getElementById('trainModal').style.display = 'none';
-        if (logInterval) clearInterval(logInterval);
-    }
+        <!-- TRAINING SETTINGS TAB -->
+        <div class="settings-tab-content" id="stab-content-training">
+            <div class="training-subtabs">
+                <button class="training-subtab active" id="tsub-params" data-tsub="params">Parameters</button>
+                <button class="training-subtab" id="tsub-logs" data-tsub="logs">Live Logs</button>
+            </div>
 
-    async function startTraining() {
-        const params = {
-            model_name: document.getElementById('modelNameInput').value,
-            checkpoint: document.getElementById('checkpointInput').value,
-            epochs: document.getElementById('epochsInput').value,
-            lr: document.getElementById('lrInput').value,
-            bst_size: document.getElementById('bstSizeInput').value,
-            dd_size: document.getElementById('ddSizeInput').value,
-            md_dir: document.getElementById('mdDirInput').value,
-            max_length: document.getElementById('maxLengthInput').value,
-            batch_size: document.getElementById('batchSizeInput').value,
-            accum: document.getElementById('accumInput').value,
-            weight_decay: document.getElementById('weightDecayInput').value,
-            warmup_ratio: document.getElementById('warmupRatioInput').value,
-            sample_max_new_tokens: document.getElementById('sampleMaxNewTokensInput').value,
-            device: document.getElementById('deviceInput').value,
-            resume: document.getElementById('resumeInput').checked,
-            keep_best_only: document.getElementById('keepBestOnlyInput').checked,
-            no_bst: document.getElementById('noBstInput').checked,
-            no_dd: document.getElementById('noDdInput').checked,
-            no_md: document.getElementById('noMdInput').checked,
-            chat_after_train: false
-        };
-        
-        const logArea = document.getElementById('trainLogs');
-        logArea.textContent = "Starting training with selected parameters...\n";
-        setTrainingRunning(true);
-        
-        try {
-            const res = await fetch('/train', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(params)
-            });
-            const data = await res.json();
+            <!-- PARAMETERS -->
+            <div class="tsub-content active" id="tsub-content-params">
+                <p class="settings-section-label">Model</p>
 
-            if (data.status === 'already_running') {
-                logArea.textContent = "Training is already running. Reconnecting to live logs...\n";
-            }
+                <div class="settings-field">
+                    <label for="modelNameInput">Model Name</label>
+                    <input type="text" id="modelNameInput" value="google/gemma-2-2b-it">
+                </div>
 
-            if (logInterval) clearInterval(logInterval);
-            logInterval = setInterval(fetchLogs, 2000);
-            await fetchLogs();
-            switchTrainingTab('logs');
-            await refreshTrainingStatus();
-        } catch (e) {
-            logArea.textContent += "\n[ERROR] Could not start training.\n";
-            setTrainingRunning(false);
-        }
-    }
+                <p class="settings-section-label" style="margin-top:20px">Hyperparameters</p>
 
-    function switchTrainingTab(tabName) {
-        const settingsTab = document.getElementById('trainingSettingsTab');
-        const logsTab = document.getElementById('trainingLogsTab');
-        const settingsBtn = document.getElementById('trainingSettingsTabBtn');
-        const logsBtn = document.getElementById('trainingLogsTabBtn');
+                <div class="settings-field-row">
+                    <div class="settings-field">
+                        <label for="epochsInput">Epochs</label>
+                        <input type="number" id="epochsInput" value="3">
+                    </div>
+                    <div class="settings-field">
+                        <label for="lrInput">Learning Rate</label>
+                        <input type="text" id="lrInput" value="2e-4">
+                    </div>
+                </div>
 
-        if (tabName === 'logs') {
-            settingsTab.classList.remove('active');
-            logsTab.classList.add('active');
-            settingsBtn.classList.remove('active');
-            logsBtn.classList.add('active');
-        } else {
-            logsTab.classList.remove('active');
-            settingsTab.classList.add('active');
-            logsBtn.classList.remove('active');
-            settingsBtn.classList.add('active');
-        }
-    }
+                <div class="settings-field-row">
+                    <div class="settings-field">
+                        <label for="batchSizeInput">Batch Size</label>
+                        <input type="number" id="batchSizeInput" value="1">
+                    </div>
+                    <div class="settings-field">
+                        <label for="accumInput">Accum Steps</label>
+                        <input type="number" id="accumInput" value="8">
+                    </div>
+                </div>
 
-    async function refreshTrainingStatus() {
-        try {
-            const res = await fetch('/train_status');
-            const data = await res.json();
-            if (data.running) {
-                if (logInterval) clearInterval(logInterval);
-                logInterval = setInterval(fetchLogs, 2000);
-                setTrainingRunning(true);
-            } else {
-                if (logInterval) clearInterval(logInterval);
-                logInterval = null;
-                setTrainingRunning(false);
-            }
-        } catch (e) {}
-    }
+                <div class="settings-field-row">
+                    <div class="settings-field">
+                        <label for="maxLengthInput">Max Length</label>
+                        <input type="number" id="maxLengthInput" value="64">
+                    </div>
+                    <div class="settings-field">
+                        <label for="maxPairsInput">Max Pairs</label>
+                        <input type="number" id="maxPairsInput" value="5000">
+                    </div>
+                </div>
 
-    async function stopTraining() {
-        try {
-            const res = await fetch('/stop_train', { method: 'POST' });
-            const data = await res.json();
-            const logArea = document.getElementById('trainLogs');
-            if (data.status === 'stopped') {
-                logArea.textContent += "\n[INFO] Training stopped by user.\n";
-                if (logInterval) clearInterval(logInterval);
-                logInterval = null;
-                setTrainingRunning(false);
-            } else {
-                logArea.textContent += "\n[INFO] No active training process.\n";
-                setTrainingRunning(false);
-            }
-            logArea.scrollTop = logArea.scrollHeight;
-        } catch (e) {
-            const logArea = document.getElementById('trainLogs');
-            logArea.textContent += "\n[ERROR] Failed to stop training.\n";
-            logArea.scrollTop = logArea.scrollHeight;
-        }
-    }
+                <p class="settings-section-label" style="margin-top:20px">Dataset</p>
 
-    async function fetchLogs() {
-        try {
-            const res = await fetch('/train_logs');
-            const data = await res.json();
-            const logArea = document.getElementById('trainLogs');
-            if (typeof data.logs === 'string' && data.logs !== logArea.textContent) {
-                logArea.textContent = data.logs;
-                logArea.scrollTop = logArea.scrollHeight;
-            }
-        } catch (e) {}
-    }
+                <div class="settings-field">
+                    <label for="mdDirInput">Markdown Dir</label>
+                    <input type="text" id="mdDirInput" value="training">
+                </div>
 
-    function setTrainingRunning(isRunning) {
-        const startBtn = document.getElementById('startTrainingBtn');
-        const stopBtn = document.getElementById('stopTrainingBtn');
-        startBtn.disabled = isRunning;
-        stopBtn.disabled = !isRunning;
-    }
+                <p class="settings-section-label" style="margin-top:20px">Device &amp; Flags</p>
 
-    // Init
-    if (chats.length > 0) {
-        loadChat(chats[0].id);
-    } else {
-        startNewChat();
-    }
-    setTrainingRunning(false);
-</script>
+                <div class="settings-field">
+                    <label for="deviceInput">Device</label>
+                    <select id="deviceInput">
+                        <option value="">Auto (CUDA / MPS)</option>
+                        <option value="cpu">Force CPU</option>
+                        <option value="mps">Force MPS</option>
+                        <option value="cuda">Force CUDA</option>
+                    </select>
+                </div>
+
+                <div class="toggle-group">
+                    <label class="toggle-label">
+                        <input type="checkbox" id="noBstInput">
+                        <span class="toggle-track"></span>
+                        Disable BST
+                    </label>
+                    <label class="toggle-label">
+                        <input type="checkbox" id="noDdInput">
+                        <span class="toggle-track"></span>
+                        Disable DailyDialog
+                    </label>
+                    <label class="toggle-label">
+                        <input type="checkbox" id="noMdInput">
+                        <span class="toggle-track"></span>
+                        Disable Markdown Data
+                    </label>
+                    <label class="toggle-label">
+                        <input type="checkbox" id="useChatTemplateInput">
+                        <span class="toggle-track"></span>
+                        Use Chat Template
+                    </label>
+                </div>
+
+                <div class="training-actions">
+                    <button class="settings-save-btn" id="startTrainingBtn">Start Training</button>
+                    <button class="stop-training-btn" id="stopTrainingBtn" disabled>Stop Training</button>
+                </div>
+            </div>
+
+            <!-- LIVE LOGS -->
+            <div class="tsub-content" id="tsub-content-logs">
+                <div class="log-area" id="trainLogs">Ready to train...</div>
+            </div>
+        </div>
+    </aside>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="{{ url_for('static', filename='scriptchat.js') }}"></script>
+    <script src="{{ url_for('static', filename='settings.js') }}"></script>
 </body>
 </html>

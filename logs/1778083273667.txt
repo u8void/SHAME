@@ -1,6 +1,0 @@
-User: hello
-Bot: [Preview Mode] This is a mock response to test the UI design. The AI model is currently disabled.
-
-User: How are you
-Bot: [Preview Mode] This is a mock response to test the UI design. The AI model is currently disabled.
-

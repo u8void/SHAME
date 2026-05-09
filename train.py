@@ -1,168 +1,349 @@
-import argparse
-import glob
-import os
+#!/usr/bin/env python3
+"""
+Iris AI – Unified trainer (CUDA / MPS / CPU)
+Automatically selects 4‑bit QLoRA (CUDA), FP16 LoRA (MPS), or FP32 LoRA (CPU).
+Uses Gemma’s native chat template for all training.
+"""
+import os, glob, argparse, torch
+from torch.utils.data import DataLoader, TensorDataset
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    get_linear_schedule_with_warmup,
+)
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
+from datasets import Dataset, load_dataset                   # HuggingFace datasets
 
-import torch
-from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM, AutoTokenizer, get_linear_schedule_with_warmup
-
+# Import your existing data loaders (they live in iris.py)
 from iris import (
-    USER_TOKEN,
-    BOT_TOKEN,
-    SFTDataset,
-    chat,
-    cleanup_epoch_checkpoints,
-    collate_fn,
-    evaluate,
-    generate_reply,
-    get_device,
-    is_degenerate,
-    prepare_conversations,
-    train_one_epoch,
+    load_blended_skill_talk,
+    load_daily_dialog,
+    load_markdown_files,
 )
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train Iris AI model")
-
-    parser.add_argument("--model-name", type=str, default="microsoft/DialoGPT-medium", help="Base model name")
-    parser.add_argument("--checkpoint", type=str, default="gpt2_sft_chatbot_best.pt", help="Best checkpoint path")
-    parser.add_argument("--resume", action="store_true", help="Continue training from best checkpoint")
-
-    # Dataset control
-    parser.add_argument("--bst-size", type=int, default=10000, help="Max pairs from Blended Skill Talk (default 10k)")
-    parser.add_argument("--dd-size", type=int, default=30000, help="Max pairs from DailyDialog (default 30k)")
-    parser.add_argument("--md-dir", type=str, default="training", help="Directory containing *.md training files")
-    parser.add_argument("--no-bst", action="store_true", help="Disable BST dataset")
-    parser.add_argument("--no-dd", action="store_true", help="Disable DailyDialog dataset")
-    parser.add_argument("--no-md", action="store_true", help="Disable MD file training")
-
-    # Training hyper-params
+# ----------------------------------------------------------------------
+#   Argument parsing
+# ----------------------------------------------------------------------
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train Iris AI on any device")
+    # Model & training
+    parser.add_argument("--model-name", default="google/gemma-2-2b-it")
     parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--lr", type=float, default=3e-5, help="Learning rate (default 3e-5)")
-    parser.add_argument("--max-length", type=int, default=128, help="Max token length per sample (default 128)")
-    parser.add_argument("--batch-size", type=int, default=4, help="Per-device batch size (default 4)")
-    parser.add_argument("--accum", type=int, default=4, help="Gradient accumulation steps (default 4)")
-    parser.add_argument("--weight-decay", type=float, default=0.01, help="AdamW weight decay")
-    parser.add_argument("--warmup-ratio", type=float, default=0.05, help="Warmup ratio of total steps")
-    parser.add_argument("--sample-max-new-tokens", type=int, default=50, help="Generated sample length per epoch")
-    parser.add_argument("--force-cpu", action="store_true")
-    parser.add_argument(
-        "--keep-best-only",
-        action="store_true",
-        help="Delete intermediate epoch checkpoints and keep only best model",
+    parser.add_argument("--lr", type=float, default=2e-4)
+    parser.add_argument("--max-pairs", type=int, default=5000,
+                        help="Maximum training pairs to use")
+    # Data sources
+    parser.add_argument("--bst-size", type=int, default=None,
+                        help="Max BST pairs (overrides --max-pairs if set)")
+    parser.add_argument("--dd-size", type=int, default=None,
+                        help="Max DailyDialog pairs (unused if dataset broken)")
+    parser.add_argument("--md-dir", default="training",
+                        help="Folder with *.md training files")
+    parser.add_argument("--no-bst", action="store_true")
+    parser.add_argument("--no-dd", action="store_true")
+    parser.add_argument("--no-md", action="store_true")
+    # Memory / device
+    parser.add_argument("--max-length", type=int, default=64,
+                        help="Max token length (reduce for low VRAM/RAM)")
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--accum-steps", type=int, default=8,
+                        help="Gradient accumulation steps")
+    parser.add_argument("--force-cpu", action="store_true",
+                        help="Force CPU training even if GPU available")
+    parser.add_argument("--device", choices=["cuda", "mps", "cpu"], default=None,
+                        help="Manually select device")
+    # Output
+    parser.add_argument("--output-dir", default="./iris_lora_unified")
+    parser.add_argument("--chat-after-train", action="store_true")
+    parser.add_argument("--keep-best-only", action="store_true")
+    return parser.parse_args()
+
+
+# ----------------------------------------------------------------------
+#   Data loading (uses the functions from iris.py)
+# ----------------------------------------------------------------------
+def load_conversations(args):
+    pairs = []
+    # Blended Skill Talk
+    if not args.no_bst:
+        pairs += load_blended_skill_talk(
+            subset_size=args.bst_size if args.bst_size else args.max_pairs
+        )
+    # DailyDialog (may be broken, but safe to try)
+    if not args.no_dd:
+        pairs += load_daily_dialog(
+            subset_size=args.dd_size if args.dd_size else None
+        )
+    # Markdown files
+    if not args.no_md:
+        pairs += load_markdown_files(md_dir=args.md_dir)
+
+    import random
+    random.shuffle(pairs)
+    if len(pairs) > args.max_pairs:
+        pairs = pairs[:args.max_pairs]
+    print(f"Total training pairs: {len(pairs)}")
+    return pairs
+
+
+# ----------------------------------------------------------------------
+#   Device selection
+# ----------------------------------------------------------------------
+def get_device_and_mode(force_cpu=False, manual_device=None):
+    if manual_device:
+        device_str = manual_device
+    elif force_cpu:
+        device_str = "cpu"
+    elif torch.cuda.is_available():
+        device_str = "cuda"
+    elif torch.backends.mps.is_available():
+        device_str = "mps"
+    else:
+        device_str = "cpu"
+
+    device = torch.device(device_str)
+    if device_str == "cuda":
+        print("CUDA detected → QLoRA (4‑bit) + HuggingFace Trainer")
+        return device, "cuda_qlora"
+    elif device_str == "mps":
+        print("MPS detected → LoRA FP16 + manual loop (no autocast)")
+        return device, "mps_fp16"
+    else:
+        print("CPU detected → LoRA FP32 + manual loop")
+        return device, "cpu_fp32"
+
+
+# ----------------------------------------------------------------------
+#   CUDA training (4‑bit QLoRA + HuggingFace Trainer)
+# ----------------------------------------------------------------------
+def train_cuda(model, tokenizer, dataset, args):
+    from transformers import (
+        BitsAndBytesConfig, TrainingArguments, Trainer,
+        DataCollatorForLanguageModeling,
     )
-    parser.add_argument("--chat-after-train", action="store_true", help="Launch interactive chat after training")
-
-    args = parser.parse_args()
-
-    device = get_device(force_cpu=args.force_cpu)
-    print(f"Using device: {device}   |   FP32")
-
-    checkpoint = args.checkpoint
-    model_name = args.model_name
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    tokenizer.pad_token = tokenizer.eos_token
-
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        low_cpu_mem_usage=True,
-        dtype=torch.float32,
-    ).to(device)
-    model.gradient_checkpointing_enable()
-
-    pairs = prepare_conversations(
-        bst_size=args.bst_size,
-        dd_size=args.dd_size,
-        md_dir=args.md_dir,
-        use_bst=not args.no_bst,
-        use_dd=not args.no_dd,
-        use_md=not args.no_md,
+    # dataset is already a HuggingFace Dataset
+    training_args = TrainingArguments(
+        output_dir=args.output_dir,
+        num_train_epochs=args.epochs,
+        per_device_train_batch_size=args.batch_size,
+        gradient_accumulation_steps=args.accum_steps,
+        learning_rate=args.lr,
+        fp16=True,
+        logging_steps=10,
+        save_strategy="epoch",
+        save_total_limit=2,
+        remove_unused_columns=False,
+        report_to="none",
     )
-    if not pairs:
-        print("ERROR: No training pairs loaded. Check your data sources.")
-        return
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=dataset,
+        data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+    )
+    trainer.train()
 
-    split = int(0.9 * len(pairs))
-    train_pairs, val_pairs = pairs[:split], pairs[split:]
 
-    train_ds = SFTDataset(train_pairs, tokenizer, max_length=args.max_length)
-    val_ds = SFTDataset(val_pairs, tokenizer, max_length=args.max_length)
-
-    train_loader = DataLoader(
-        train_ds,
+# ----------------------------------------------------------------------
+#   MPS / CPU manual training loops
+# ----------------------------------------------------------------------
+def train_manual(model, tokenizer, train_dataset, device, args, use_fp16=False):
+    """Manual training loop for MPS (FP16) or CPU (FP32)."""
+    # train_dataset is a TensorDataset (input_ids, attention_mask, labels)
+    loader = DataLoader(
+        train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        collate_fn=lambda b: collate_fn(b, tokenizer),
-    )
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=args.batch_size,
-        shuffle=False,
-        collate_fn=lambda b: collate_fn(b, tokenizer),
     )
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    total_steps = (len(train_loader) // args.accum) * args.epochs
-    warmup_steps = max(1, int(total_steps * args.warmup_ratio))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
+    total_steps = (len(loader) // args.accum_steps) * args.epochs
+    warmup_steps = max(1, int(total_steps * 0.05))
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps=warmup_steps,
         num_training_steps=total_steps,
     )
 
-    if args.resume and os.path.exists(checkpoint):
-        print(f"Resuming from '{checkpoint}'...")
-        model.load_state_dict(torch.load(checkpoint, map_location=device))
-
-    best_val_loss = float("inf")
-    if args.keep_best_only:
-        cleanup_epoch_checkpoints()
-
+    model.train()
     for epoch in range(1, args.epochs + 1):
         print(f"\n--- Epoch {epoch}/{args.epochs} ---")
-        train_loss = train_one_epoch(
-            model, train_loader, optimizer, scheduler, device, args.accum, epoch=epoch
+        total_loss = 0.0
+        optimizer.zero_grad()
+        for step, batch in enumerate(loader):
+            input_ids, attention_mask, labels = [b.to(device) for b in batch]
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                labels=labels,
+            )
+            loss = outputs.loss / args.accum_steps
+            loss.backward()
+            total_loss += loss.item()
+
+            if (step + 1) % args.accum_steps == 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
+                if device.type == "mps":
+                    torch.mps.empty_cache()
+
+            if (step + 1) % 50 == 0:
+                print(f"  Step {step+1:5d}/{len(loader)} | loss = {loss.item() * args.accum_steps:.4f}")
+
+        avg_loss = total_loss / max(1, step + 1) * args.accum_steps
+        print(f"Epoch {epoch} avg loss: {avg_loss:.4f} | LR: {scheduler.get_last_lr()[0]:.2e}")
+
+        # Save checkpoint each epoch
+        epoch_dir = f"{args.output_dir}_epoch{epoch}"
+        os.makedirs(epoch_dir, exist_ok=True)
+        model.save_pretrained(epoch_dir)
+        tokenizer.save_pretrained(epoch_dir)
+        print(f"💾 Adapter saved to {epoch_dir}")
+
+
+# ----------------------------------------------------------------------
+#   Main training function
+# ----------------------------------------------------------------------
+def main():
+    args = parse_args()
+    device, mode = get_device_and_mode(
+        force_cpu=args.force_cpu,
+        manual_device=args.device,
+    )
+
+    # 1. Tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    global EOS_TOKEN   # if needed by old data loaders (not used in chat template)
+    EOS_TOKEN = tokenizer.eos_token
+
+    # 2. Load and format data
+    pairs = load_conversations(args)
+
+    def format_chat(user, bot):
+        messages = [
+            {"role": "user", "content": user},
+            {"role": "assistant", "content": bot},
+        ]
+        return tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=False,
         )
-        if torch.isnan(torch.tensor(train_loss)):
-            print("Training diverged (NaN loss). Try lowering --lr.")
-            break
 
-        val_loss = evaluate(model, val_loader, device)
-        print(f"Train: {train_loss:.4f} | Val: {val_loss:.4f} | LR: {scheduler.get_last_lr()[0]:.2e}")
+    texts = [format_chat(u, b) for u, b in pairs]
 
-        epoch_ckpt = f"iris_sft_epoch{epoch}.pt"
-        torch.save(model.state_dict(), epoch_ckpt)
+    # Tokenize with padding / truncation
+    encodings = tokenizer(
+        texts,
+        truncation=True,
+        max_length=args.max_length,
+        padding="max_length",
+        return_tensors="pt" if mode != "cuda_qlora" else None,
+    )
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), checkpoint)
-            print(f"  >> Best model saved ({checkpoint})")
-            if args.keep_best_only:
-                for old_ckpt in glob.glob("iris_sft_epoch*.pt"):
-                    if old_ckpt != epoch_ckpt:
-                        try:
-                            os.remove(old_ckpt)
-                        except OSError as e:
-                            print(f"[CKPT] Could not delete '{old_ckpt}': {e}")
-        elif args.keep_best_only:
-            try:
-                os.remove(epoch_ckpt)
-            except OSError as e:
-                print(f"[CKPT] Could not delete '{epoch_ckpt}': {e}")
+    # 3. Prepare dataset in the appropriate format
+    if mode == "cuda_qlora":
+        # HuggingFace Dataset (list of dicts) required by Trainer
+        dataset_dicts = [
+            {
+                "input_ids":      encodings["input_ids"][i],
+                "attention_mask": encodings["attention_mask"][i],
+                "labels":         encodings["input_ids"][i],
+            }
+            for i in range(len(encodings["input_ids"]))
+        ]
+        dataset = Dataset.from_list(dataset_dicts)
+    else:
+        # PyTorch TensorDataset for manual loop
+        dataset = TensorDataset(
+            encodings["input_ids"],
+            encodings["attention_mask"],
+            encodings["input_ids"].clone(),   # labels
+        )
 
-        probe = f"{USER_TOKEN} Hello, how are you?\n{BOT_TOKEN} "
-        reply = generate_reply(model, tokenizer, probe, device, max_new_tokens=args.sample_max_new_tokens)
-        print(f"  [Sample]: {reply!r}")
-        if is_degenerate(reply):
-            print("  ⚠️  Output still looks noisy.")
+    # 4. Load base model
+    if mode == "cuda_qlora":
+        from transformers import BitsAndBytesConfig
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_name,
+            quantization_config=bnb_config,
+            device_map="auto",
+            low_cpu_mem_usage=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model.gradient_checkpointing_enable()
+        lora_r = 32
+        lora_alpha = 64
+    elif mode == "mps_fp16":
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_name,
+            torch_dtype=torch.float16,
+            low_cpu_mem_usage=True,
+        ).to(device)
+        model.gradient_checkpointing_enable()
+        lora_r = 16
+        lora_alpha = 32
+    else:   # CPU FP32
+        torch.set_num_threads(4)
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_name,
+            torch_dtype=torch.float32,
+            low_cpu_mem_usage=True,
+        ).to(device)
+        model.gradient_checkpointing_enable()
+        lora_r = 8
+        lora_alpha = 16
 
+    # 5. LoRA configuration
+    lora_config = LoraConfig(
+        r=lora_r,
+        lora_alpha=lora_alpha,
+        target_modules="all-linear",
+        lora_dropout=0.05,
+        bias="none",
+        task_type=TaskType.CAUSAL_LM,
+    )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+
+    # 6. Train
+    if mode == "cuda_qlora":
+        train_cuda(model, tokenizer, dataset, args)
+    else:
+        train_manual(model, tokenizer, dataset, device, args,
+                     use_fp16=(mode == "mps_fp16"))
+
+    # 7. Save final adapter & merged model
+    os.makedirs(args.output_dir, exist_ok=True)
+    model.save_pretrained(args.output_dir)
+    tokenizer.save_pretrained(args.output_dir)
+    print(f"💾 Final adapter saved to {args.output_dir}")
+
+    print("Merging adapter into full model …")
+    merged_model = model.merge_and_unload()
+    merged_model.save_pretrained("./iris_merged_model", safe_serialization=True)
+    tokenizer.save_pretrained("./iris_merged_model")
+    print("✅ Merged model saved to ./iris_merged_model")
+
+    # 8. Optional chat
     if args.chat_after_train:
-        if os.path.exists(checkpoint):
-            model.load_state_dict(torch.load(checkpoint, map_location=device))
-            print("\nLoaded best checkpoint for chatting.")
-        chat(model, tokenizer, device)
+        from iris import chat
+        # Reload the merged model for clean inference
+        chat_model = AutoModelForCausalLM.from_pretrained(
+            "./iris_merged_model",
+            torch_dtype=torch.float16 if device.type != "cpu" else torch.float32,
+            low_cpu_mem_usage=True,
+        ).to(device)
+        chat(chat_model, tokenizer, device)
 
 
 if __name__ == "__main__":

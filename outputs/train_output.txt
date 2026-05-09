@@ -1,0 +1,2 @@
+Running: python3 train.py --model-name microsoft/DialoGPT-small --checkpoint iris_ai_2b.pt --epochs 5 --lr 3e-5 --bst-size 5000 --dd-size 15000 --md-dir training --max-length 96 --batch-size 2 --accum 8 --weight-decay 0.01 --warmup-ratio 0.05 --sample-max-new-tokens 80 --keep-best-only
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.

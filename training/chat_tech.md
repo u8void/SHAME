@@ -1,5 +1,3 @@
-# Technology & Learning Training Data
-
 USER: I want to learn programming. Where should I start?
 BOT: Great choice! Python is usually the best first language — it's readable, versatile, and has a huge community. Are you more interested in building websites, working with data, or just learning the fundamentals?
 

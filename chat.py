@@ -1,35 +1,68 @@
-import os
-
-import torch
+#!/usr/bin/env python3
+"""
+Iris AI – universal chat launcher (CUDA / MPS / CPU)
+Reuses the chat() and generate_reply() from iris.py.
+"""
+import os, torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from iris import chat, get_device   # your existing functions
 
-from iris import chat, get_device
+CHECKPOINT = "./iris_merged_model"
 
+def load_model(device, force_cpu=False):
+    """Load the merged model in the best precision for the given device."""
+    tokenizer = AutoTokenizer.from_pretrained(CHECKPOINT)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
-def main():
-    checkpoint = "gpt2_sft_chatbot_best.pt"
-    model_name = "microsoft/DialoGPT-medium"
+    if device.type == "cuda":
+        # Try 4‑bit first (fits your 3050’s 4 GB), fall back to FP16
+        try:
+            from transformers import BitsAndBytesConfig
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+            )
+            model = AutoModelForCausalLM.from_pretrained(
+                CHECKPOINT,
+                quantization_config=bnb_config,
+                device_map="auto",
+                low_cpu_mem_usage=True,
+            )
+            print("Loaded in 4‑bit for CUDA")
+        except ImportError:
+            model = AutoModelForCausalLM.from_pretrained(
+                CHECKPOINT,
+                torch_dtype=torch.float16,
+                low_cpu_mem_usage=True,
+            ).to(device)
+            print("Loaded in FP16 for CUDA (bitsandbytes not available)")
+    elif device.type == "mps":
+        model = AutoModelForCausalLM.from_pretrained(
+            CHECKPOINT,
+            torch_dtype=torch.float16,
+            low_cpu_mem_usage=True,
+        ).to(device)
+    else:   # CPU
+        model = AutoModelForCausalLM.from_pretrained(
+            CHECKPOINT,
+            torch_dtype=torch.float32,
+            low_cpu_mem_usage=True,
+        ).to(device)
 
-    device = get_device()
-    print(f"Using device: {device}   |   FP32")
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    tokenizer.pad_token = tokenizer.eos_token
-
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        low_cpu_mem_usage=True,
-        dtype=torch.float32,
-    ).to(device)
-
-    if os.path.exists(checkpoint):
-        model.load_state_dict(torch.load(checkpoint, map_location=device))
-        print(f"Loaded checkpoint '{checkpoint}'.")
-    else:
-        print("No checkpoint found, using base model.")
-
-    chat(model, tokenizer, device)
-
+    model.eval()
+    return model, tokenizer
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", choices=["cuda", "mps", "cpu"], default=None)
+    args = parser.parse_args()
+
+    device = get_device(force_cpu=(args.device == "cpu"))
+    print(f"Using device: {device}   |   Loading merged model …")
+
+    model, tokenizer = load_model(device)
+    chat(model, tokenizer, device)   # <-- directly uses your existing loop!
