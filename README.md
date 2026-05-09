@@ -1,3 +1,5 @@
+<img width="500" height="500" alt="Retina_Eye_Care_Logo__1_-removebg-preview" src="https://github.com/user-attachments/assets/034506ea-4183-46f1-b3ac-b3a987b47db4" />
+
 # Iris AI — Technical Documentation
 
 ## Overview
