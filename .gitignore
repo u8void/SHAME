@@ -4,3 +4,4 @@ iris_lora_mps_chat_epoch*/
 iris_merged_model/
 iris_lora_mps_chat/
 __pycache__/
+logs/*

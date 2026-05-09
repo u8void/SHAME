@@ -107,7 +107,6 @@ def _ensure_model():
 def home():
     return render_template("index.html")
 
-
 @app.route("/chat", methods=["POST"])
 def chat():
     data         = request.json or {}
@@ -122,20 +121,47 @@ def chat():
     if PREVIEW_MODE:
         reply = "[Preview Mode] Mock response — AI model disabled."
     else:
-
-        trimmed_history = _trim_history(history, max_lines=6)
-        prompt = trimmed_history + f"{USER_TOKEN} {user_message}\n{BOT_TOKEN} "
-
+        frontend_messages = data.get("messages", [])
+        system_messages = [
+            {
+                "role": "user",
+                "content": "You are Iris, an AI assistant. You are not human and have no personal life. Always reply in the same language the user writes in. Keep answers helpful and concise."
+            },
+            {
+                "role": "assistant",
+                "content": "Understood. I am Iris, an AI assistant. How can I help you?"
+            }
+        ]
+        
+        recent_messages = frontend_messages[-10:]
+        
+        merged_history = []
+        for msg in recent_messages:
+            role = "assistant" if msg.get("role") == "bot" else "user"
+            content = msg.get("content", "")
+            
+            if merged_history and merged_history[-1]["role"] == role:
+                merged_history[-1]["content"] += "\n" + content
+            else:
+                merged_history.append({"role": role, "content": content})
+        if merged_history and merged_history[0]["role"] == "assistant":
+            merged_history = merged_history[1:]
+        conversation = system_messages + merged_history
+        
+        prompt = tokenizer.apply_chat_template(
+            conversation,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+        
         reply = generate_reply(
             model, tokenizer, prompt, device,
-            max_new_tokens    = int(float(settings.get("max_new_tokens",     40))),
-            temperature       = float(settings.get("temperature",           0.6)),
-            top_p             = float(settings.get("top_p",                 0.9)),
+            max_new_tokens    = int(float(settings.get("max_new_tokens",     300))),
+            temperature       = float(settings.get("temperature",           0.3)),
+            top_p             = float(settings.get("top_p",                 0.85)),
             top_k             = int(float(settings.get("top_k",              40))),
-            repetition_penalty= float(settings.get("repetition_penalty",    1.3)),
-            max_sentences     = int(float(settings.get("max_sentences",       1))),
+            repetition_penalty= float(settings.get("repetition_penalty",    1.25))
         )
-
 
         if device.type == "mps":
             torch.mps.empty_cache()
@@ -145,15 +171,6 @@ def chat():
         f.write(f"User: {user_message}\nBot: {reply}\n\n")
 
     return jsonify({"reply": reply})
-
-
-def _trim_history(history: str, max_lines: int) -> str:
-    if not history:
-        return ""
-    lines = [l for l in history.splitlines() if l.strip()]
-    if len(lines) <= max_lines:
-        return history
-    return "\n".join(lines[-max_lines:]) + "\n"
 
 
 @app.route("/train", methods=["POST"])

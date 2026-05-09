@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""
-Iris AI – Unified trainer (CUDA / MPS / CPU)
-Automatically selects 4‑bit QLoRA (CUDA), FP16 LoRA (MPS), or FP32 LoRA (CPU).
-Uses Gemma’s native chat template for all training.
-"""
 import os, glob, argparse, torch
 from torch.utils.data import DataLoader, TensorDataset
 from transformers import (
@@ -14,7 +9,7 @@ from transformers import (
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
 from datasets import Dataset, load_dataset                   # HuggingFace datasets
 
-# Import your existing data loaders (they live in iris.py)
+ 
 from iris import (
     load_blended_skill_talk,
     load_daily_dialog,
@@ -22,9 +17,7 @@ from iris import (
 )
 
 
-# ----------------------------------------------------------------------
-#   Argument parsing
-# ----------------------------------------------------------------------
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Train Iris AI on any device")
     # Model & training

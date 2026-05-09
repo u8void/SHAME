@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""
-Iris AI – universal chat launcher (CUDA / MPS / CPU)
-Reuses the chat() and generate_reply() from iris.py.
-"""
 import os, torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from iris import chat, get_device   # your existing functions
@@ -10,13 +6,12 @@ from iris import chat, get_device   # your existing functions
 CHECKPOINT = "./iris_merged_model"
 
 def load_model(device, force_cpu=False):
-    """Load the merged model in the best precision for the given device."""
+    
     tokenizer = AutoTokenizer.from_pretrained(CHECKPOINT)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     if device.type == "cuda":
-        # Try 4‑bit first (fits your 3050’s 4 GB), fall back to FP16
         try:
             from transformers import BitsAndBytesConfig
             bnb_config = BitsAndBytesConfig(
@@ -31,7 +26,7 @@ def load_model(device, force_cpu=False):
                 device_map="auto",
                 low_cpu_mem_usage=True,
             )
-            print("Loaded in 4‑bit for CUDA")
+            print("Loaded in 4bit for CUDA")
         except ImportError:
             model = AutoModelForCausalLM.from_pretrained(
                 CHECKPOINT,
@@ -45,7 +40,7 @@ def load_model(device, force_cpu=False):
             torch_dtype=torch.float16,
             low_cpu_mem_usage=True,
         ).to(device)
-    else:   # CPU
+    else:
         model = AutoModelForCausalLM.from_pretrained(
             CHECKPOINT,
             torch_dtype=torch.float32,

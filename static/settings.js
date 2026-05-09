@@ -1,24 +1,17 @@
-/**
- * settings.js — Settings panel: Chat settings + Training panel
- * Works in the new Iris AI design language.
- */
+
 
 (function () {
-    // ── DOM refs ──────────────────────────────────────────────────────────
     const settingsBtn        = document.getElementById('settingsBtn');
     const settingsPanel      = document.getElementById('settingsPanel');
     const settingsOverlay    = document.getElementById('settingsOverlay');
     const closeSettingsBtn   = document.getElementById('closeSettingsBtn');
 
-    // Main tabs
     const stabBtns           = document.querySelectorAll('.stab-btn');
     const tabContents        = document.querySelectorAll('.settings-tab-content');
 
-    // Training sub-tabs
     const trainingSubtabs    = document.querySelectorAll('.training-subtab');
     const tsubContents       = document.querySelectorAll('.tsub-content');
 
-    // Chat settings fields
     const csFields = {
         max_new_tokens    : document.getElementById('cs_max_new_tokens'),
         temperature       : document.getElementById('cs_temperature'),
@@ -29,7 +22,6 @@
 
     const saveChatSettingsBtn = document.getElementById('saveChatSettingsBtn');
 
-    // Training fields
     const trFields = {
         modelNameInput          : document.getElementById('modelNameInput'),
         checkpointInput         : document.getElementById('checkpointInput'),
@@ -58,9 +50,7 @@
 
     let logInterval = null;
 
-    // ── Panel open / close ────────────────────────────────────────────────
     function openSettings() {
-        // Populate chat settings from memory
         const s = window.getChatSettings ? window.getChatSettings() : {};
         if (csFields.max_new_tokens)     csFields.max_new_tokens.value     = s.max_new_tokens     ?? 200;
         if (csFields.temperature)        csFields.temperature.value        = s.temperature        ?? 0.6;
@@ -70,8 +60,6 @@
 
         settingsPanel.classList.add('open');
         settingsOverlay.classList.add('visible');
-
-        // Check training status when opening
         refreshTrainingStatus();
     }
 
@@ -88,7 +76,6 @@
     closeSettingsBtn?.addEventListener('click', closeSettings);
     settingsOverlay?.addEventListener('click', closeSettings);
 
-    // ── Main tab switching ────────────────────────────────────────────────
     stabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             const tab = btn.dataset.tab;
@@ -97,7 +84,6 @@
             btn.classList.add('active');
             document.getElementById(`stab-content-${tab}`)?.classList.add('active');
 
-            // When switching to training, refresh status and logs
             if (tab === 'training') {
                 refreshTrainingStatus();
                 fetchLogs();
@@ -105,7 +91,6 @@
         });
     });
 
-    // ── Training sub-tab switching ─────────────────────────────────────────
     trainingSubtabs.forEach(btn => {
         btn.addEventListener('click', () => {
             const tsub = btn.dataset.tsub;
@@ -118,7 +103,6 @@
         });
     });
 
-    // ── Chat settings save ─────────────────────────────────────────────────
     saveChatSettingsBtn?.addEventListener('click', () => {
         const newSettings = {
             max_new_tokens    : parseInt(csFields.max_new_tokens?.value)     || 200,
@@ -132,7 +116,6 @@
         showToast('Chat settings saved');
     });
 
-    // ── Training start/stop ────────────────────────────────────────────────
     startTrainingBtn?.addEventListener('click', startTraining);
     stopTrainingBtn?.addEventListener('click', stopTraining);
 
@@ -163,7 +146,6 @@
         if (trainLogs) trainLogs.textContent = 'Starting training…\n';
         setTrainingRunning(true);
 
-        // Switch to logs tab automatically
         switchToLogsTab();
 
         try {
@@ -245,9 +227,7 @@
         document.getElementById('tsub-content-logs')?.classList.add('active');
     }
 
-    // ── Toast notification ────────────────────────────────────────────────
     function showToast(message) {
-        // Remove any existing toast
         const existing = document.getElementById('saveToast');
         if (existing) existing.remove();
 
@@ -257,7 +237,6 @@
         toast.innerHTML = `<span class="save-toast-dot"></span>${message}`;
         document.body.appendChild(toast);
 
-        // Trigger animation
         requestAnimationFrame(() => {
             requestAnimationFrame(() => toast.classList.add('visible'));
         });
