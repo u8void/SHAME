@@ -5,28 +5,34 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     get_linear_schedule_with_warmup,
+    BitsAndBytesConfig,
+    BitsAndBytesConfig, 
+    TrainingArguments, 
+    Trainer,
+    DataCollatorForLanguageModeling,
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
-from datasets import Dataset, load_dataset                   # HuggingFace datasets
-
+from datasets import Dataset, load_dataset                 
  
 from iris import (
     load_blended_skill_talk,
     load_daily_dialog,
     load_markdown_files,
+    load_mbzuai_egyptian_mixture,
+    chat,
+    load_hf_maliki_dataset,
+    load_claude_reasoning_dataset,
+    load_dolci_think_dataset
 )
-
-
+import random
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train Iris AI on any device")
-    # Model & training
     parser.add_argument("--model-name", default="google/gemma-2-2b-it")
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--max-pairs", type=int, default=5000,
                         help="Maximum training pairs to use")
-    # Data sources
     parser.add_argument("--bst-size", type=int, default=None,
                         help="Max BST pairs (overrides --max-pairs if set)")
     parser.add_argument("--dd-size", type=int, default=None,
@@ -36,7 +42,6 @@ def parse_args():
     parser.add_argument("--no-bst", action="store_true")
     parser.add_argument("--no-dd", action="store_true")
     parser.add_argument("--no-md", action="store_true")
-    # Memory / device
     parser.add_argument("--max-length", type=int, default=64,
                         help="Max token length (reduce for low VRAM/RAM)")
     parser.add_argument("--batch-size", type=int, default=1)
@@ -46,43 +51,52 @@ def parse_args():
                         help="Force CPU training even if GPU available")
     parser.add_argument("--device", choices=["cuda", "mps", "cpu"], default=None,
                         help="Manually select device")
-    # Output
     parser.add_argument("--output-dir", default="./iris_lora_unified")
     parser.add_argument("--chat-after-train", action="store_true")
     parser.add_argument("--keep-best-only", action="store_true")
+    parser.add_argument("--use-mbzuai", action="store_true")
+    parser.add_argument("--maliki-size", type=int, default=None,
+                    help="Number of Maliki Fiqh pairs to include")
+    parser.add_argument("--claude-reasoning", type=int, default=None,
+                    help="Number of Claude reasoning pairs to include")
+    parser.add_argument("--strip-reasoning", action="store_true",
+                    help="Remove <think> blocks from Claude reasoning data")
+    parser.add_argument("--dolci-think", type=int, default=None,
+                    help="Number of Dolci-Think reasoning pairs to include")
     return parser.parse_args()
 
-
-# ----------------------------------------------------------------------
-#   Data loading (uses the functions from iris.py)
-# ----------------------------------------------------------------------
 def load_conversations(args):
     pairs = []
-    # Blended Skill Talk
+
     if not args.no_bst:
         pairs += load_blended_skill_talk(
             subset_size=args.bst_size if args.bst_size else args.max_pairs
         )
-    # DailyDialog (may be broken, but safe to try)
     if not args.no_dd:
         pairs += load_daily_dialog(
             subset_size=args.dd_size if args.dd_size else None
         )
-    # Markdown files
     if not args.no_md:
         pairs += load_markdown_files(md_dir=args.md_dir)
+    if args.use_mbzuai:
+        pairs += load_mbzuai_egyptian_mixture(subset_size=args.max_pairs)
+    if args.maliki_size:
+        pairs += load_hf_maliki_dataset(subset_size=args.maliki_size)
+    if args.claude_reasoning:
+        pairs += load_claude_reasoning_dataset(
+        subset_size=args.claude_reasoning,
+        keep_reasoning=not args.strip_reasoning,
+        )
+    if args.dolci_think:
+        pairs += load_dolci_think_dataset(subset_size=args.dolci_think)
 
-    import random
+    
     random.shuffle(pairs)
     if len(pairs) > args.max_pairs:
         pairs = pairs[:args.max_pairs]
     print(f"Total training pairs: {len(pairs)}")
     return pairs
 
-
-# ----------------------------------------------------------------------
-#   Device selection
-# ----------------------------------------------------------------------
 def get_device_and_mode(force_cpu=False, manual_device=None):
     if manual_device:
         device_str = manual_device
@@ -106,16 +120,7 @@ def get_device_and_mode(force_cpu=False, manual_device=None):
         print("CPU detected → LoRA FP32 + manual loop")
         return device, "cpu_fp32"
 
-
-# ----------------------------------------------------------------------
-#   CUDA training (4‑bit QLoRA + HuggingFace Trainer)
-# ----------------------------------------------------------------------
 def train_cuda(model, tokenizer, dataset, args):
-    from transformers import (
-        BitsAndBytesConfig, TrainingArguments, Trainer,
-        DataCollatorForLanguageModeling,
-    )
-    # dataset is already a HuggingFace Dataset
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
@@ -138,12 +143,7 @@ def train_cuda(model, tokenizer, dataset, args):
     trainer.train()
 
 
-# ----------------------------------------------------------------------
-#   MPS / CPU manual training loops
-# ----------------------------------------------------------------------
 def train_manual(model, tokenizer, train_dataset, device, args, use_fp16=False):
-    """Manual training loop for MPS (FP16) or CPU (FP32)."""
-    # train_dataset is a TensorDataset (input_ids, attention_mask, labels)
     loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
@@ -189,17 +189,12 @@ def train_manual(model, tokenizer, train_dataset, device, args, use_fp16=False):
         avg_loss = total_loss / max(1, step + 1) * args.accum_steps
         print(f"Epoch {epoch} avg loss: {avg_loss:.4f} | LR: {scheduler.get_last_lr()[0]:.2e}")
 
-        # Save checkpoint each epoch
         epoch_dir = f"{args.output_dir}_epoch{epoch}"
         os.makedirs(epoch_dir, exist_ok=True)
         model.save_pretrained(epoch_dir)
         tokenizer.save_pretrained(epoch_dir)
         print(f"💾 Adapter saved to {epoch_dir}")
 
-
-# ----------------------------------------------------------------------
-#   Main training function
-# ----------------------------------------------------------------------
 def main():
     args = parse_args()
     device, mode = get_device_and_mode(
@@ -207,14 +202,12 @@ def main():
         manual_device=args.device,
     )
 
-    # 1. Tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    global EOS_TOKEN   # if needed by old data loaders (not used in chat template)
+    global EOS_TOKEN 
     EOS_TOKEN = tokenizer.eos_token
 
-    # 2. Load and format data
     pairs = load_conversations(args)
 
     def format_chat(user, bot):
@@ -228,7 +221,6 @@ def main():
 
     texts = [format_chat(u, b) for u, b in pairs]
 
-    # Tokenize with padding / truncation
     encodings = tokenizer(
         texts,
         truncation=True,
@@ -237,9 +229,7 @@ def main():
         return_tensors="pt" if mode != "cuda_qlora" else None,
     )
 
-    # 3. Prepare dataset in the appropriate format
     if mode == "cuda_qlora":
-        # HuggingFace Dataset (list of dicts) required by Trainer
         dataset_dicts = [
             {
                 "input_ids":      encodings["input_ids"][i],
@@ -250,16 +240,13 @@ def main():
         ]
         dataset = Dataset.from_list(dataset_dicts)
     else:
-        # PyTorch TensorDataset for manual loop
         dataset = TensorDataset(
             encodings["input_ids"],
             encodings["attention_mask"],
-            encodings["input_ids"].clone(),   # labels
+            encodings["input_ids"].clone(),  
         )
 
-    # 4. Load base model
     if mode == "cuda_qlora":
-        from transformers import BitsAndBytesConfig
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=True,
@@ -285,7 +272,7 @@ def main():
         model.gradient_checkpointing_enable()
         lora_r = 16
         lora_alpha = 32
-    else:   # CPU FP32
+    else:  
         torch.set_num_threads(4)
         model = AutoModelForCausalLM.from_pretrained(
             args.model_name,
@@ -296,7 +283,6 @@ def main():
         lora_r = 8
         lora_alpha = 16
 
-    # 5. LoRA configuration
     lora_config = LoraConfig(
         r=lora_r,
         lora_alpha=lora_alpha,
@@ -308,29 +294,25 @@ def main():
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    # 6. Train
     if mode == "cuda_qlora":
         train_cuda(model, tokenizer, dataset, args)
     else:
         train_manual(model, tokenizer, dataset, device, args,
                      use_fp16=(mode == "mps_fp16"))
 
-    # 7. Save final adapter & merged model
     os.makedirs(args.output_dir, exist_ok=True)
     model.save_pretrained(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
-    print(f"💾 Final adapter saved to {args.output_dir}")
+    print(f"[INFO] Final adapter saved to {args.output_dir}")
 
     print("Merging adapter into full model …")
     merged_model = model.merge_and_unload()
     merged_model.save_pretrained("./iris_merged_model", safe_serialization=True)
     tokenizer.save_pretrained("./iris_merged_model")
-    print("✅ Merged model saved to ./iris_merged_model")
+    print("[SUCCESS] Merged model saved to ./iris_merged_model")
 
-    # 8. Optional chat
     if args.chat_after_train:
-        from iris import chat
-        # Reload the merged model for clean inference
+        
         chat_model = AutoModelForCausalLM.from_pretrained(
             "./iris_merged_model",
             torch_dtype=torch.float16 if device.type != "cpu" else torch.float32,

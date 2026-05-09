@@ -11,7 +11,9 @@ from transformers import (
 )
 from datasets import load_dataset
 import re
-
+import pandas as pd
+import random
+import csv
 
 
 try:
@@ -100,6 +102,115 @@ def load_daily_dialog(subset_size=None):
                 pairs.append((u, b))
     total = len(pairs)
     if subset_size and subset_size < total:
+        import random
+        random.shuffle(pairs)
+        pairs = pairs[:subset_size]
+    return pairs
+
+
+def load_mbzuai_egyptian_mixture(subset_size=None):
+    pairs = []
+    try:
+        print("[MBZUAI] Downloading MBZUAI-Paris/Egyptian-SFT-Mixture from Hugging Face...")
+        ds = load_dataset("MBZUAI-Paris/Egyptian-SFT-Mixture", split="train")
+        
+        for row in ds:
+            messages = row.get("messages", [])
+            
+            # Ensure there is at least a user prompt and an assistant reply
+            if len(messages) >= 2 and messages[0].get("role") == "user" and messages[1].get("role") == "assistant":
+                q = str(messages[0].get("content", "")).strip()
+                a = str(messages[1].get("content", "")).strip()
+                
+                if q and a:
+                    pairs.append((q, a))
+                    
+        print(f"[MBZUAI] Successfully loaded {len(pairs)} high-quality Egyptian SFT pairs!")
+    except Exception as e:
+        print(f"[MBZUAI] Failed to load dataset: {e}")
+        return []
+        
+    if subset_size and len(pairs) > subset_size:
+        random.shuffle(pairs)
+        pairs = pairs[:subset_size]
+        
+    return pairs
+
+def load_dolci_think_dataset(subset_size=None):
+    from datasets import load_dataset
+    import random
+    pairs = []
+    try:
+        print("[DOLCI] Downloading Dolci-Think-SFT subset from Hugging Face...")
+        ds = load_dataset("allenai/Dolci-Think-SFT-7B", split="train[:50000]")
+        
+        for row in ds:
+            messages = row.get("messages", [])
+            if len(messages) >= 2 and messages[0].get("role") == "user" and messages[1].get("role") == "assistant":
+                q = str(messages[0].get("content", "")).strip()
+                a = str(messages[1].get("content", "")).strip()
+                
+                if q and a:
+                    pairs.append((q, a))
+                    
+        print(f"[DOLCI] Successfully loaded {len(pairs)} reasoning pairs!")
+    except Exception as e:
+        print(f"[DOLCI] Failed to load dataset: {e}")
+        return []
+        
+    if subset_size and len(pairs) > subset_size:
+        random.shuffle(pairs)
+        pairs = pairs[:subset_size]
+        
+    return pairs
+
+def load_hf_maliki_dataset(subset_size=None):
+    pairs = []
+    try:
+        print("[MALIKI] Downloading/Loading Istilah_Maliki_Dataset from Hugging Face...")
+        # Load the dataset directly
+        ds = load_dataset("islamic-datasets/Istilah_Maliki_Dataset", split="train")
+        
+        # Loop through and grab the exact column names shown in your screenshot
+        for row in ds:
+            q = str(row.get('question', '')).strip()
+            a = str(row.get('answer', '')).strip()
+            
+            if q and a: 
+                pairs.append((q, a))
+                
+        print(f"[MALIKI] Successfully loaded {len(pairs)} pairs from Hugging Face")
+    except Exception as e:
+        print(f"[MALIKI] Failed to load dataset: {e}")
+        return []
+        
+    if subset_size and len(pairs) > subset_size:
+        random.shuffle(pairs)
+        pairs = pairs[:subset_size]
+        
+    return pairs
+
+def load_claude_reasoning_dataset(subset_size=None, keep_reasoning=True):
+    ds = load_dataset("angrygiraffe/claude-opus-4.6-4.7-reasoning-8.7k", split="train")
+    
+    pairs = []
+    for row in ds:
+        messages = row["messages"]
+        # Find the last user→assistant turn
+        for i in range(len(messages) - 1):
+            if messages[i]["role"] == "user" and messages[i + 1]["role"] == "assistant":
+                user = messages[i]["content"].strip()
+                bot = messages[i + 1]["content"].strip()
+                
+                if not keep_reasoning:
+                    bot = re.sub(r'<think>.*?</think>', '', bot, flags=re.DOTALL).strip()
+                
+                if len(bot) < 3000 and user and bot:
+                    pairs.append((user, bot))
+    
+    print(f"[CLAUDE] Loaded {len(pairs)} reasoning pairs")
+    
+    if subset_size and len(pairs) > subset_size:
         import random
         random.shuffle(pairs)
         pairs = pairs[:subset_size]
