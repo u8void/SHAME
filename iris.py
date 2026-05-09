@@ -137,31 +137,35 @@ def load_mbzuai_egyptian_mixture(subset_size=None):
     return pairs
 
 def load_dolci_think_dataset(subset_size=None):
-    from datasets import load_dataset
-    import random
     pairs = []
     try:
-        print("[DOLCI] Downloading Dolci-Think-SFT subset from Hugging Face...")
-        ds = load_dataset("allenai/Dolci-Think-SFT-7B", split="train[:50000]")
+        print("[DOLCI] Streaming Dolci-Think-SFT from Hugging Face...")
         
+        # CRITICAL: Added streaming=True. It will not download the massive files!
+        ds = load_dataset("allenai/Dolci-Think-SFT-7B", split="train", streaming=True)
+        
+        count = 0
         for row in ds:
+            # Stop pulling from the internet the exact second we reach our subset size
+            if subset_size and count >= subset_size:
+                break
+                
             messages = row.get("messages", [])
+            
             if len(messages) >= 2 and messages[0].get("role") == "user" and messages[1].get("role") == "assistant":
                 q = str(messages[0].get("content", "")).strip()
                 a = str(messages[1].get("content", "")).strip()
                 
                 if q and a:
                     pairs.append((q, a))
+                    count += 1 # Only count valid pairs
                     
-        print(f"[DOLCI] Successfully loaded {len(pairs)} reasoning pairs!")
+        print(f"[DOLCI] Successfully streamed {len(pairs)} reasoning pairs!")
     except Exception as e:
         print(f"[DOLCI] Failed to load dataset: {e}")
         return []
         
-    if subset_size and len(pairs) > subset_size:
-        random.shuffle(pairs)
-        pairs = pairs[:subset_size]
-        
+    # We don't shuffle here because streaming already gives us a random-ish top slice
     return pairs
 
 def load_hf_maliki_dataset(subset_size=None):
