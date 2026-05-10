@@ -154,13 +154,16 @@ def chat():
             add_generation_prompt=True
         )
         
+        kwargs = {}
+        if settings.get("max_new_tokens"): kwargs["max_new_tokens"] = int(float(settings["max_new_tokens"]))
+        if settings.get("temperature"): kwargs["temperature"] = float(settings["temperature"])
+        if settings.get("top_p"): kwargs["top_p"] = float(settings["top_p"])
+        if settings.get("top_k"): kwargs["top_k"] = int(float(settings["top_k"]))
+        if settings.get("repetition_penalty"): kwargs["repetition_penalty"] = float(settings["repetition_penalty"])
+
         reply = generate_reply(
             model, tokenizer, prompt, device,
-            max_new_tokens    = int(float(settings.get("max_new_tokens",     300))),
-            temperature       = float(settings.get("temperature",           0.3)),
-            top_p             = float(settings.get("top_p",                 0.85)),
-            top_k             = int(float(settings.get("top_k",              40))),
-            repetition_penalty= float(settings.get("repetition_penalty",    1.25))
+            **kwargs
         )
 
         if device.type == "mps":

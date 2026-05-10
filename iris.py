@@ -14,6 +14,26 @@ import re
 import pandas as pd
 import random
 import csv
+import json
+
+def load_generation_config():
+    config_path = os.path.join(os.path.dirname(__file__), "config", "iris.conf")
+    default_config = {
+        "max_new_tokens": 200,
+        "do_sample": True,
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "top_k": 40,
+        "repetition_penalty": 1.0,
+        "no_repeat_ngram_size": 0
+    }
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r') as f:
+                default_config.update(json.load(f))
+        except Exception as e:
+            print(f"Warning: Failed to load config from {config_path}: {e}")
+    return default_config
 
 
 try:
@@ -407,8 +427,17 @@ _STOP_RE = re.compile(
 )
 
 def generate_reply(model, tokenizer, prompt_text, device,
-                   max_new_tokens=300, temperature=0.3, top_p=0.85, top_k=40,
-                   repetition_penalty=1.25):
+                   max_new_tokens=None, temperature=None, top_p=None, top_k=None,
+                   repetition_penalty=None):
+    gen_config = load_generation_config()
+    max_new_tokens = max_new_tokens if max_new_tokens is not None else gen_config.get("max_new_tokens", 200)
+    temperature = temperature if temperature is not None else gen_config.get("temperature", 0.7)
+    top_p = top_p if top_p is not None else gen_config.get("top_p", 0.9)
+    top_k = top_k if top_k is not None else gen_config.get("top_k", 40)
+    repetition_penalty = repetition_penalty if repetition_penalty is not None else gen_config.get("repetition_penalty", 1.0)
+    do_sample = gen_config.get("do_sample", True)
+    no_repeat_ngram_size = gen_config.get("no_repeat_ngram_size", 0)
+    
     end_of_turn_id = tokenizer.convert_tokens_to_ids("<end_of_turn>")
     stop_ids = [tokenizer.eos_token_id]
     if end_of_turn_id is not None:
@@ -425,12 +454,12 @@ def generate_reply(model, tokenizer, prompt_text, device,
             input_ids=input_ids,
             attention_mask=attention_mask,
             max_new_tokens=max_new_tokens,
-            do_sample=True,
+            do_sample=do_sample,
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
             repetition_penalty=repetition_penalty,
-            no_repeat_ngram_size=4,
+            no_repeat_ngram_size=no_repeat_ngram_size,
             use_cache=True,
             renormalize_logits=True,
             eos_token_id=stop_ids,
@@ -447,46 +476,37 @@ def generate_reply(model, tokenizer, prompt_text, device,
     return reply or "I'm not sure what to say."
 
 def chat(model, tokenizer, device):
-    messages = [
-        {
-            "role": "user",
-            "content": (
-                "You are Iris, an AI assistant. You are not human and have no personal life. "
-                "Always reply in the same language the user writes in. "
-                "If the user writes in Arabic, reply in Arabic. "
-                "If the user writes in English, reply in English. "
-                "Keep answers helpful and concise."
-            )
-        },
-        {
-            "role": "assistant",
-            "content": "Understood. I am Iris, an AI assistant. How can I help you?"
-        }
-    ]
+    print("Chat started! Type 'quit' to exit.")
+    
+    # Store the conversation history
+    messages = []
+    
     while True:
-        user = input("You: ").strip()
-        if user.lower() in ("quit", "exit", "q"):
+        user_input = input("You: ")
+        if user_input.lower() in ["quit", "exit"]:
             break
-        if not user:
-            continue
-        messages.append({"role": "user", "content": user})
-        if tokenizer.chat_template is not None:
-            prompt = tokenizer.apply_chat_template(
-                messages, 
-                tokenize=False,
-                add_generation_prompt=True
-            )
-        else:
-            prompt = ""
-            for msg in messages:
-                role = USER_TOKEN if msg["role"] == "user" else BOT_TOKEN
-                prompt += f"{role} {msg['content']}\n"
-            prompt += f"{BOT_TOKEN} "
-        reply = generate_reply(
-            model, tokenizer, prompt, device,
-            max_new_tokens=50,
+            
+        messages.append({"role": "user", "content": user_input})
+        
+        # Apply the exact template Gemma expects
+        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = tokenizer(prompt, return_tensors="pt").to(device)
+        
+        gen_config = load_generation_config()
+        outputs = model.generate(
+            **inputs, 
+            max_new_tokens=gen_config.get("max_new_tokens", 200), 
+            do_sample=gen_config.get("do_sample", True), 
+            temperature=gen_config.get("temperature", 0.7),
+            top_p=gen_config.get("top_p", 0.9),
+            top_k=gen_config.get("top_k", 40),
+            repetition_penalty=gen_config.get("repetition_penalty", 1.0),
+            no_repeat_ngram_size=gen_config.get("no_repeat_ngram_size", 0),
+            pad_token_id=tokenizer.eos_token_id
         )
-        print(f"Bot: {reply}\n")
-        messages.append({"role": "assistant", "content": reply})
-        if len(messages) > 20:
-            messages = messages[-20:]
+        
+        # Extract just the new bot reply
+        response = tokenizer.decode(outputs[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True).strip()
+        print(f"Bot: {response}\n")
+        
+        messages.append({"role": "assistant", "content": response})

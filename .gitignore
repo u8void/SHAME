@@ -1,21 +1,3 @@
-# macOS
-.DS_Store
-
-# python
-.venv/
-__pycache__/
-*.py[co]
-
-# website
-website/output/
-website/data/
-
-# planning docs
-docs/
-
-# agents
-.agents/
-.claude/skills/
-.superpowers/
-.playwright-cli/
-skills-lock.json
+iris_lora_unified/
+iris_lora_unified_*/
+iris_merged_model/

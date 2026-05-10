@@ -240,10 +240,12 @@ def main():
         ]
         dataset = Dataset.from_list(dataset_dicts)
     else:
+        labels = encodings["input_ids"].clone()
+        labels[encodings["attention_mask"] == 0] = -100
         dataset = TensorDataset(
             encodings["input_ids"],
             encodings["attention_mask"],
-            encodings["input_ids"].clone(),  
+            labels,  
         )
 
     if mode == "cuda_qlora":
