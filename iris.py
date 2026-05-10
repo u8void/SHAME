@@ -490,23 +490,9 @@ def chat(model, tokenizer, device):
         
         # Apply the exact template Gemma expects
         prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = tokenizer(prompt, return_tensors="pt").to(device)
         
-        gen_config = load_generation_config()
-        outputs = model.generate(
-            **inputs, 
-            max_new_tokens=gen_config.get("max_new_tokens", 200), 
-            do_sample=gen_config.get("do_sample", True), 
-            temperature=gen_config.get("temperature", 0.7),
-            top_p=gen_config.get("top_p", 0.9),
-            top_k=gen_config.get("top_k", 40),
-            repetition_penalty=gen_config.get("repetition_penalty", 1.0),
-            no_repeat_ngram_size=gen_config.get("no_repeat_ngram_size", 0),
-            pad_token_id=tokenizer.eos_token_id
-        )
-        
-        # Extract just the new bot reply
-        response = tokenizer.decode(outputs[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True).strip()
+        # Use generate_reply to handle inference_mode, context length, and config
+        response = generate_reply(model, tokenizer, prompt, device)
         print(f"Bot: {response}\n")
         
         messages.append({"role": "assistant", "content": response})

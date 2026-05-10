@@ -5,7 +5,6 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     get_linear_schedule_with_warmup,
-    BitsAndBytesConfig,
     BitsAndBytesConfig, 
     TrainingArguments, 
     Trainer,
@@ -120,6 +119,8 @@ def get_device_and_mode(force_cpu=False, manual_device=None):
         print("CPU detected → LoRA FP32 + manual loop")
         return device, "cpu_fp32"
 
+from transformers import default_data_collator
+
 def train_cuda(model, tokenizer, dataset, args):
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -138,7 +139,7 @@ def train_cuda(model, tokenizer, dataset, args):
         model=model,
         args=training_args,
         train_dataset=dataset,
-        data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+        data_collator=default_data_collator,
     )
     trainer.train()
 
@@ -203,6 +204,7 @@ def main():
     )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    tokenizer.padding_side = "right"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     global EOS_TOKEN 
@@ -230,14 +232,23 @@ def main():
     )
 
     if mode == "cuda_qlora":
-        dataset_dicts = [
-            {
-                "input_ids":      encodings["input_ids"][i],
-                "attention_mask": encodings["attention_mask"][i],
-                "labels":         encodings["input_ids"][i],
-            }
-            for i in range(len(encodings["input_ids"]))
-        ]
+        dataset_dicts = []
+        for i in range(len(encodings["input_ids"])):
+            input_ids = encodings["input_ids"][i]
+            attention_mask = encodings["attention_mask"][i]
+            
+            # Create labels and mask padding tokens based on attention_mask
+            # This preserves the legitimate eos_token
+            labels = list(input_ids)
+            for j in range(len(labels)):
+                if attention_mask[j] == 0:
+                    labels[j] = -100
+                    
+            dataset_dicts.append({
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "labels": labels,
+            })
         dataset = Dataset.from_list(dataset_dicts)
     else:
         labels = encodings["input_ids"].clone()
