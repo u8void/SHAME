@@ -78,7 +78,7 @@ _HALLUCINATION_SIGNALS = re.compile(
     r'|findpost|autority|enumio|Sorensen|Goldberg|Feldman'
     r'|\ud795|\ufa4c|#+#|/\*!|\*/'
     r'|http(?:http|https)'     # doubled protocol
-    r'|(?:\w{20,})',           # single word longer than 20 chars (garbage token)
+    r'|(?:\w{20,}))',          # Added the missing closing ')' here
     re.IGNORECASE
 )
 
