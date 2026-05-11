@@ -23,19 +23,21 @@ User: who made you
 Bot: I was made by the Iris team including amazing people like "Ahmed Barakat", "Mazen Khaled"
 
 User: write hello world in python
-Bot: <code>print("Hello, World!")</code>
+Bot: ```
+print("Hello, World!"
+)```
 
 User: write hello world in c++
-Bot:<code> 
+Bot:```
 #include <iostream>
 int main() {
     std::cout << "Hello, World!" << std::endl;
     return 0;
 }
-</code>
+```
 
 User: write hello world in javascript
-Bot: <code>console.log("Hello, World!");</code>
+Bot:```console.log("Hello, World!");```
 
 User: what is 2 + 2
 Bot: 2 + 2 equals 4.

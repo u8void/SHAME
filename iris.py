@@ -71,40 +71,21 @@ def is_degenerate(text):
         return True
     return False
 
-
-# Tokens that reliably signal the start of a hallucination spiral
 _HALLUCINATION_SIGNALS = re.compile(
-    r'(MigrationBuilder|nakalista|ÉS|ÉM|ÉN|<<<|>>>'
-    r'|findpost|autority|enumio|Sorensen|Goldberg|Feldman'
-    r'|\ud795|\ufa4c|#+#|/\*!|\*/'
-    r'|http(?:http|https)'     # doubled protocol
-    r'|(?:\w{20,}))',          # Added the missing closing ')' here
+    r'(MigrationBuilder|nakalista'
+    r'|\ud795|\ufa4c|#+#'
+    r'|http(?:http|https))',
     re.IGNORECASE
 )
 
 def truncate_at_hallucination(text: str) -> str:
-    """
-    Split the reply into sentences and drop everything from the first
-    sentence that contains a hallucination signal.  Returns at least
-    one sentence even if the very first one is suspect.
-    """
-    # Split on sentence-ending punctuation, keeping the delimiter
     sentences = re.split(r'(?<=[.!?])\s+', text.strip())
     clean = []
     for sent in sentences:
         if _HALLUCINATION_SIGNALS.search(sent):
-            break          # stop before this sentence
+            break         
         clean.append(sent)
     result = " ".join(clean).strip() if clean else text.strip()
-    # Final safety: hard-cap at 3000 chars to prevent very long outputs
-    if len(result) > 3000:
-        # Cut at the last sentence boundary before 3000 chars
-        cut = result[:3000]
-        last_stop = max(cut.rfind('.'), cut.rfind('!'), cut.rfind('?'))
-        if last_stop > 100:
-            result = cut[:last_stop + 1]
-        else:
-            result = cut
     return result
 
 
