@@ -10,14 +10,12 @@
 <body>
     <aside class="sidebar" id="sidebar">
         <div class="header-row">
-            <div class="left-group">
-                <button class="icon-btn" id="toggleBtn" aria-label="Toggle sidebar">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
-                </button>
-                <div class="brand-wrapper">
-                    <img src="{{ url_for('static', filename='iris_logo.png') }}" alt="Iris AI" class="iris-logo" onerror="this.style.display='none'">
-                    <span class="iris-name nav-text">Iris AI</span>
-                </div>
+            <button class="icon-btn" id="toggleBtn" aria-label="Toggle sidebar">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+            </button>
+            <div class="brand-wrapper">
+                <img src="{{ url_for('static', filename='iris_logo.png') }}" alt="Iris AI" class="iris-logo" onerror="this.style.display='none'">
+                <span class="iris-name nav-text">Iris AI</span>
             </div>
             <button class="icon-btn nav-text search-btn" id="searchToggleBtn" aria-label="Search chats">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
@@ -101,42 +99,57 @@
 
             <div class="settings-field">
                 <label for="cs_max_new_tokens">
-                    Max New Tokens
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Max New Tokens</span>
+                        <span id="val_max_new_tokens" style="color:var(--iris-purple); font-weight:bold;">40</span>
+                    </div>
                     <span class="field-hint">Number of tokens the model generates per reply.</span>
                 </label>
-                <input type="number" id="cs_max_new_tokens" value="40" min="1" max="512">
+                <input type="range" id="cs_max_new_tokens" value="40" min="1" max="4096" oninput="document.getElementById('val_max_new_tokens').innerText = this.value">
             </div>
 
             <div class="settings-field">
                 <label for="cs_temperature">
-                    Temperature
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Temperature</span>
+                        <span id="val_temperature" style="color:var(--iris-purple); font-weight:bold;">0.6</span>
+                    </div>
                     <span class="field-hint">Higher = more creative. Lower = more predictable.</span>
                 </label>
-                <input type="number" id="cs_temperature" value="0.6" step="0.05" min="0.01" max="2">
+                <input type="range" id="cs_temperature" value="0.6" step="0.05" min="0.01" max="2" oninput="document.getElementById('val_temperature').innerText = this.value">
             </div>
 
             <div class="settings-field">
                 <label for="cs_top_p">
-                    Top P
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Top P</span>
+                        <span id="val_top_p" style="color:var(--iris-purple); font-weight:bold;">0.9</span>
+                    </div>
                     <span class="field-hint">Nucleus sampling threshold.</span>
                 </label>
-                <input type="number" id="cs_top_p" value="0.9" step="0.05" min="0" max="1">
+                <input type="range" id="cs_top_p" value="0.9" step="0.05" min="0" max="1" oninput="document.getElementById('val_top_p').innerText = this.value">
             </div>
 
             <div class="settings-field">
                 <label for="cs_top_k">
-                    Top K
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Top K</span>
+                        <span id="val_top_k" style="color:var(--iris-purple); font-weight:bold;">40</span>
+                    </div>
                     <span class="field-hint">Limits vocabulary to the top K likely tokens.</span>
                 </label>
-                <input type="number" id="cs_top_k" value="40" min="1" max="200">
+                <input type="range" id="cs_top_k" value="40" min="1" max="200" oninput="document.getElementById('val_top_k').innerText = this.value">
             </div>
 
             <div class="settings-field">
                 <label for="cs_repetition_penalty">
-                    Repetition Penalty
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Repetition Penalty</span>
+                        <span id="val_repetition_penalty" style="color:var(--iris-purple); font-weight:bold;">1.3</span>
+                    </div>
                     <span class="field-hint">Penalizes repeating words. 1.05–1.3 works well.</span>
                 </label>
-                <input type="number" id="cs_repetition_penalty" value="1.3" step="0.05" min="1" max="2">
+                <input type="range" id="cs_repetition_penalty" value="1.3" step="0.05" min="1" max="2" oninput="document.getElementById('val_repetition_penalty').innerText = this.value">
             </div>
 
             <button class="settings-save-btn" id="saveChatSettingsBtn">Save Chat Settings</button>

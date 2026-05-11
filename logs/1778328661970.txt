@@ -46,3 +46,6 @@ Bot: Do you like listening to that band alot?
 User: sometimes
 Bot: i love all kinds of music but am more into rock
 
+User: Fuck you
+Bot: [Preview Mode] Mock response — AI model disabled.
+

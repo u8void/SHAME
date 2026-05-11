@@ -72,6 +72,42 @@ def is_degenerate(text):
     return False
 
 
+# Tokens that reliably signal the start of a hallucination spiral
+_HALLUCINATION_SIGNALS = re.compile(
+    r'(MigrationBuilder|nakalista|ÉS|ÉM|ÉN|<<<|>>>'
+    r'|findpost|autority|enumio|Sorensen|Goldberg|Feldman'
+    r'|\ud795|\ufa4c|#+#|/\*!|\*/'
+    r'|http(?:http|https)'     # doubled protocol
+    r'|(?:\w{20,})',           # single word longer than 20 chars (garbage token)
+    re.IGNORECASE
+)
+
+def truncate_at_hallucination(text: str) -> str:
+    """
+    Split the reply into sentences and drop everything from the first
+    sentence that contains a hallucination signal.  Returns at least
+    one sentence even if the very first one is suspect.
+    """
+    # Split on sentence-ending punctuation, keeping the delimiter
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    clean = []
+    for sent in sentences:
+        if _HALLUCINATION_SIGNALS.search(sent):
+            break          # stop before this sentence
+        clean.append(sent)
+    result = " ".join(clean).strip() if clean else text.strip()
+    # Final safety: hard-cap at 3000 chars to prevent very long outputs
+    if len(result) > 3000:
+        # Cut at the last sentence boundary before 3000 chars
+        cut = result[:3000]
+        last_stop = max(cut.rfind('.'), cut.rfind('!'), cut.rfind('?'))
+        if last_stop > 100:
+            result = cut[:last_stop + 1]
+        else:
+            result = cut
+    return result
+
+
 def load_blended_skill_talk(subset_size=None):
     try:
         ds = load_dataset("blended_skill_talk", split="train", trust_remote_code=True)
@@ -471,8 +507,7 @@ def generate_reply(model, tokenizer, prompt_text, device,
         skip_special_tokens=True,
         clean_up_tokenization_spaces=False,
     ).strip()
-    reply = re.sub(r'<[^>]+>', '', reply).strip()
-    reply = _SPACE_RE.sub(' ', reply).strip()
+    reply = truncate_at_hallucination(reply)
     return reply or "I'm not sure what to say."
 
 def chat(model, tokenizer, device):

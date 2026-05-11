@@ -9,6 +9,17 @@ document.addEventListener("DOMContentLoaded", () => {
         top_k: 40,
         repetition_penalty: 1.3
     };
+
+    fetch('/get_settings')
+        .then(res => res.json())
+        .then(data => {
+            if (Object.keys(data).length > 0) {
+                chatSettings = { ...chatSettings, ...data };
+                localStorage.setItem('iris_chat_settings', JSON.stringify(chatSettings));
+            }
+        })
+        .catch(e => console.error("Failed to load backend settings:", e));
+
     window.getChatSettings = () => chatSettings;
     window.setChatSettings = (s) => { chatSettings = s; };
     const chatInput          = document.getElementById("chatInput");
@@ -159,15 +170,22 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!text) return '';
 
         const codeBlocks = [];
-        let formatted = text.replace(/<code>([\s\S]*?)<\/code>/gi, (match, codeContent) => {
+        let formatted = text.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
             const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
-            codeBlocks.push(codeContent.trim());
+            codeBlocks.push({ lang: lang || 'Code', content: codeContent.trim() });
+            return placeholder;
+        });
+
+        formatted = formatted.replace(/<code>([\s\S]*?)<\/code>/gi, (match, codeContent) => {
+            const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
+            codeBlocks.push({ lang: 'Code', content: codeContent.trim() });
             return placeholder;
         });
 
         formatted = escapeHtml(formatted);
 
         formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        formatted = formatted.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
 
         formatted = formatted.replace(/(?:^|\n| )(\d+\.\s+[\s\S]*?)(?=(?:\n\s*\d+\.\s+)|(?:\s+\d+\.\s+)|$)/g, (match, p1) => {
             const content = p1.replace(/^\d+\.\s+/, '').trim();
@@ -177,13 +195,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
         formatted = formatted.replace(/(<li>[\s\S]*?<\/li>(?:\s*<li>[\s\S]*?<\/li>)*)/g, '<ol>$1</ol>');
 
-        codeBlocks.forEach((code, index) => {
+        formatted = formatted.replace(/\n/g, '<br>');
+
+        codeBlocks.forEach((codeObj, index) => {
             const placeholder = `__CODE_BLOCK_${index}__`;
+            const code = codeObj.content;
+            const lang = codeObj.lang;
             const codeHtml = `
                 <div class="code-container">
                     <div class="code-header">
-                        <span class="code-lang">Code</span>
-                        <button class="copy-btn" onclick="copyToClipboard(this, \`${escapeHtml(code).replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)">
+                        <span class="code-lang">${escapeHtml(lang)}</span>
+                        <button class="copy-btn" onclick="copyToClipboard(this, \`${escapeHtml(code).replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\\$/g, '\\$')}\`)">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                             Copy
                         </button>
@@ -193,7 +215,6 @@ document.addEventListener("DOMContentLoaded", () => {
             `;
             formatted = formatted.replace(placeholder, codeHtml);
         });
-        formatted = formatted.replace(/\n/g, '<br>');
 
         return formatted;
     }

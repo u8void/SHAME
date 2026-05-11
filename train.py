@@ -29,7 +29,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train Iris AI on any device")
     parser.add_argument("--model-name", default="google/gemma-2-2b-it")
     parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--lr", type=float, default=2e-4)
+    parser.add_argument("--lr", type=float, default=2e-5)
     parser.add_argument("--max-pairs", type=int, default=5000,
                         help="Maximum training pairs to use")
     parser.add_argument("--bst-size", type=int, default=None,
@@ -319,6 +319,16 @@ def main():
     print(f"[INFO] Final adapter saved to {args.output_dir}")
 
     print("Merging adapter into full model …")
+    
+    # CRITICAL BUG FIX: Untie embeddings before merging for models with tied embeddings (like Gemma).
+    # Because lm_head is tied to embed_tokens, merging the LoRA adapter directly into lm_head 
+    # corrupts the input embeddings of the model, completely destroying the tokenizer mappings.
+    base_model_to_merge = model.base_model.model
+    if hasattr(base_model_to_merge, "lm_head") and hasattr(base_model_to_merge.model, "embed_tokens"):
+        if base_model_to_merge.lm_head.weight is base_model_to_merge.model.embed_tokens.weight:
+            print("[INFO] Untying lm_head from embed_tokens to prevent input embedding corruption...")
+            base_model_to_merge.lm_head.weight = torch.nn.Parameter(base_model_to_merge.lm_head.weight.clone())
+            
     merged_model = model.merge_and_unload()
     merged_model.save_pretrained("./iris_merged_model", safe_serialization=True)
     tokenizer.save_pretrained("./iris_merged_model")

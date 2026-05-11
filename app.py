@@ -154,12 +154,20 @@ def chat():
             add_generation_prompt=True
         )
         
-        kwargs = {}
-        if settings.get("max_new_tokens"): kwargs["max_new_tokens"] = int(float(settings["max_new_tokens"]))
-        if settings.get("temperature"): kwargs["temperature"] = float(settings["temperature"])
-        if settings.get("top_p"): kwargs["top_p"] = float(settings["top_p"])
-        if settings.get("top_k"): kwargs["top_k"] = int(float(settings["top_k"]))
-        if settings.get("repetition_penalty"): kwargs["repetition_penalty"] = float(settings["repetition_penalty"])
+        # Always read from iris.conf — frontend settings are ignored to prevent localStorage cache bugs
+        from iris import load_generation_config
+        gen_config = load_generation_config()
+        kwargs = {
+            "max_new_tokens"     : int(gen_config.get("max_new_tokens", 512)),
+            "temperature"        : float(gen_config.get("temperature", 0.7)),
+            "top_p"              : float(gen_config.get("top_p", 0.9)),
+            "top_k"              : int(gen_config.get("top_k", 40)),
+            "repetition_penalty" : float(gen_config.get("repetition_penalty", 1.0)),
+        }
+        # Allow frontend to override max_new_tokens only if explicitly set to something bigger
+        frontend_max = settings.get("max_new_tokens")
+        if frontend_max and int(float(frontend_max)) > kwargs["max_new_tokens"]:
+            kwargs["max_new_tokens"] = int(float(frontend_max))
 
         reply = generate_reply(
             model, tokenizer, prompt, device,
@@ -246,6 +254,40 @@ def stop_train():
     return jsonify({"status": "stopped"})
 
 
+import json
+
+@app.route("/get_settings", methods=["GET"])
+def get_settings():
+    config_path = os.path.join("config", "iris.conf")
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                return jsonify(json.load(f))
+    except Exception:
+        pass
+    return jsonify({})
+
+@app.route("/save_settings", methods=["POST"])
+def save_settings():
+    data = request.json or {}
+    config_path = os.path.join("config", "iris.conf")
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        else:
+            config = {}
+    except Exception:
+        config = {}
+        
+    config.update(data)
+    
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+        
+    return jsonify({"status": "success"})
 
 if __name__ == "__main__":
     mode_label = "PREVIEW MODE" if PREVIEW_MODE else (

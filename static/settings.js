@@ -52,11 +52,11 @@
 
     function openSettings() {
         const s = window.getChatSettings ? window.getChatSettings() : {};
-        if (csFields.max_new_tokens)     csFields.max_new_tokens.value     = s.max_new_tokens     ?? 200;
-        if (csFields.temperature)        csFields.temperature.value        = s.temperature        ?? 0.6;
-        if (csFields.top_p)              csFields.top_p.value              = s.top_p              ?? 0.9;
-        if (csFields.top_k)              csFields.top_k.value              = s.top_k              ?? 40;
-        if (csFields.repetition_penalty) csFields.repetition_penalty.value = s.repetition_penalty ?? 1.3;
+        if (csFields.max_new_tokens)     { csFields.max_new_tokens.value     = s.max_new_tokens     ?? 200; document.getElementById('val_max_new_tokens').innerText = csFields.max_new_tokens.value; }
+        if (csFields.temperature)        { csFields.temperature.value        = s.temperature        ?? 0.6; document.getElementById('val_temperature').innerText = csFields.temperature.value; }
+        if (csFields.top_p)              { csFields.top_p.value              = s.top_p              ?? 0.9; document.getElementById('val_top_p').innerText = csFields.top_p.value; }
+        if (csFields.top_k)              { csFields.top_k.value              = s.top_k              ?? 40; document.getElementById('val_top_k').innerText = csFields.top_k.value; }
+        if (csFields.repetition_penalty) { csFields.repetition_penalty.value = s.repetition_penalty ?? 1.3; document.getElementById('val_repetition_penalty').innerText = csFields.repetition_penalty.value; }
 
         settingsPanel.classList.add('open');
         settingsOverlay.classList.add('visible');
@@ -103,7 +103,7 @@
         });
     });
 
-    saveChatSettingsBtn?.addEventListener('click', () => {
+    saveChatSettingsBtn?.addEventListener('click', async () => {
         const newSettings = {
             max_new_tokens    : parseInt(csFields.max_new_tokens?.value)     || 200,
             temperature       : parseFloat(csFields.temperature?.value)      || 0.6,
@@ -113,6 +113,17 @@
         };
         if (window.setChatSettings) window.setChatSettings(newSettings);
         localStorage.setItem('iris_chat_settings', JSON.stringify(newSettings));
+        
+        try {
+            await fetch('/save_settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newSettings)
+            });
+        } catch (e) {
+            console.error("Failed to save settings to server:", e);
+        }
+        
         showToast('Chat settings saved');
     });
 
