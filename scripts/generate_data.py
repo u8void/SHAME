@@ -274,10 +274,10 @@ if __name__ == "__main__":
     format_egyptian_arabic(num_samples=500)
 
     # 6. Summarization Skills (300)
-    format_summarization(num_samples=300)
+    #format_summarization(num_samples=300)
 
     # 7. Deep Reasoning (Orca) (500)
-    format_orca_reasoning(num_samples=500)
+    #format_orca_reasoning(num_samples=500)
 
     # 8. Science Intelligence (SciQ) (400)
     format_science_sciq(num_samples=400)
