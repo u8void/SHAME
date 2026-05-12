@@ -62,6 +62,8 @@ def parse_args():
                     help="Remove <think> blocks from Claude reasoning data")
     parser.add_argument("--dolci-think", type=int, default=None,
                     help="Number of Dolci-Think reasoning pairs to include")
+    parser.add_argument("--deepthink", type=int, default=None,
+                    help="Number of Deepthink Reasoning pairs to include")
     return parser.parse_args()
 
 def load_conversations(args):
@@ -83,11 +85,17 @@ def load_conversations(args):
         pairs += load_hf_maliki_dataset(subset_size=args.maliki_size)
     if args.claude_reasoning:
         pairs += load_claude_reasoning_dataset(
-        subset_size=args.claude_reasoning,
-        keep_reasoning=not args.strip_reasoning,
+            subset_size=args.claude_reasoning,
+            keep_reasoning=not args.strip_reasoning,
         )
     if args.dolci_think:
         pairs += load_dolci_think_dataset(subset_size=args.dolci_think)
+    if args.deepthink:
+        from iris import load_deepthink_dataset
+        pairs += load_deepthink_dataset(
+            subset_size=args.deepthink,
+            keep_reasoning=not args.strip_reasoning
+        )
 
     
     random.shuffle(pairs)

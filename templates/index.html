@@ -248,6 +248,29 @@
                     </label>
                 </div>
 
+                <p class="settings-section-label" style="margin-top:20px">Reasoning Datasets</p>
+                <div class="settings-field-row">
+                    <div class="settings-field">
+                        <label for="claudeReasoningInput">Claude Reasoning (Pairs)</label>
+                        <input type="number" id="claudeReasoningInput" value="0">
+                    </div>
+                    <div class="settings-field">
+                        <label for="dolciThinkInput">Dolci Think (Pairs)</label>
+                        <input type="number" id="dolciThinkInput" value="0">
+                    </div>
+                </div>
+                <div class="settings-field">
+                    <label for="deepthinkInput">Deepthink Reasoning (Pairs)</label>
+                    <input type="number" id="deepthinkInput" value="0">
+                </div>
+                <div class="toggle-group">
+                    <label class="toggle-label">
+                        <input type="checkbox" id="stripReasoningInput">
+                        <span class="toggle-track"></span>
+                        Strip Reasoning (<think> blocks)
+                    </label>
+                </div>
+
                 <div class="training-actions">
                     <button class="settings-save-btn" id="startTrainingBtn">Start Training</button>
                     <button class="stop-training-btn" id="stopTrainingBtn" disabled>Stop Training</button>

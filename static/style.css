@@ -479,6 +479,64 @@ body.chat-active .center-panel {
     border-bottom-left-radius: 6px;
 }
 
+/* ── Thinking Blocks ── */
+.thought-wrapper {
+    margin: 8px 0 16px 0;
+    border: 1px solid rgba(163, 133, 255, 0.15);
+    background: rgba(163, 133, 255, 0.03);
+    border-radius: 12px;
+    overflow: hidden;
+    transition: all 0.3s var(--ease-out-quart);
+}
+
+.thought-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: rgba(163, 133, 255, 0.05);
+    cursor: pointer;
+    user-select: none;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--iris-purple);
+    opacity: 0.9;
+    transition: background 0.2s;
+}
+
+.thought-header:hover {
+    background: rgba(163, 133, 255, 0.1);
+}
+
+.thought-header .chevron {
+    margin-left: auto;
+    transition: transform 0.3s var(--ease-out-quart);
+    opacity: 0.5;
+}
+
+.thought-wrapper.expanded .thought-header .chevron {
+    transform: rotate(180deg);
+}
+
+.thought-content {
+    max-height: 0;
+    padding: 0 14px;
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: #999;
+    opacity: 0;
+    overflow: hidden;
+    transition: all 0.3s var(--ease-out-quart);
+    border-top: 1px solid transparent;
+}
+
+.thought-wrapper.expanded .thought-content {
+    max-height: 1000px; /* Large enough for most thoughts */
+    padding: 12px 14px;
+    opacity: 1;
+    border-top: 1px solid rgba(163, 133, 255, 0.1);
+}
+
 /* AI typing indicator */
 .typing-indicator .message-content {
     display: flex;

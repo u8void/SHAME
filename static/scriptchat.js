@@ -169,8 +169,24 @@ document.addEventListener("DOMContentLoaded", () => {
     function formatMessage(text) {
         if (!text) return '';
 
+        // Handle Thinking Blocks <think>...</think>
+        let formatted = text.replace(/<think>([\s\S]*?)<\/think>/gi, (match, thought) => {
+            return `
+                <div class="thought-wrapper">
+                    <div class="thought-header" onclick="toggleThought(this)">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                        <span>Thought Process</span>
+                        <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    </div>
+                    <div class="thought-content">
+                        ${escapeHtml(thought.trim()).replace(/\n/g, '<br>')}
+                    </div>
+                </div>
+            `;
+        });
+
         const codeBlocks = [];
-        let formatted = text.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
+        formatted = formatted.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
             const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
             codeBlocks.push({ lang: lang || 'Code', content: codeContent.trim() });
             return placeholder;
@@ -182,41 +198,77 @@ document.addEventListener("DOMContentLoaded", () => {
             return placeholder;
         });
 
-        formatted = escapeHtml(formatted);
+        // We escape the rest of the text, but we need to be careful not to escape our thought-wrapper HTML
+        // So we split and re-join or use a safer approach.
+        // Actually, for simplicity in this specific regex-based formatter:
+        // formatted already contains HTML from thinking blocks. 
+        // Let's only escape the non-HTML parts. 
+        // (Wait, the existing formatter was already doing escapeHtml on the whole string and then replacing placeholders).
+        
+        // Revised approach: escape first, then replace placeholders for code and thinking.
+        // But thinking blocks are already escaped inside.
 
-        formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        formatted = formatted.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
+        // Let's just keep the existing flow but integrate thinking like code blocks.
+        return _formatRefined(text);
+    }
 
-        formatted = formatted.replace(/(?:^|\n| )(\d+\.\s+[\s\S]*?)(?=(?:\n\s*\d+\.\s+)|(?:\s+\d+\.\s+)|$)/g, (match, p1) => {
-            const content = p1.replace(/^\d+\.\s+/, '').trim();
-            const refinedContent = content.replace(/^(.+?:\s+)/, '<strong>$1</strong><br>');
-            return `<li>${refinedContent}</li>`;
+    function _formatRefined(text) {
+        if (!text) return '';
+        const blocks = [];
+
+        // 1. Extract Thinking
+        let work = text.replace(/<think>([\s\S]*?)<\/think>/gi, (match, thought) => {
+            const id = `__THOUGHT_${blocks.length}__`;
+            blocks.push({ type: 'thought', content: thought.trim() });
+            return id;
         });
 
-        formatted = formatted.replace(/(<li>[\s\S]*?<\/li>(?:\s*<li>[\s\S]*?<\/li>)*)/g, '<ol>$1</ol>');
+        // 2. Extract Code
+        work = work.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
+            const id = `__CODE_${blocks.length}__`;
+            blocks.push({ type: 'code', lang: lang || 'Code', content: codeContent.trim() });
+            return id;
+        });
 
-        formatted = formatted.replace(/\n/g, '<br>');
+        // 3. Escape HTML and handle Markdown
+        work = escapeHtml(work);
+        work = work.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        work = work.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
+        work = work.replace(/\n/g, '<br>');
 
-        codeBlocks.forEach((codeObj, index) => {
-            const placeholder = `__CODE_BLOCK_${index}__`;
-            const code = codeObj.content;
-            const lang = codeObj.lang;
-            const codeHtml = `
-                <div class="code-container">
-                    <div class="code-header">
-                        <span class="code-lang">${escapeHtml(lang)}</span>
-                        <button class="copy-btn" onclick="copyToClipboard(this, \`${escapeHtml(code).replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\\$/g, '\\$')}\`)">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                            Copy
-                        </button>
+        // 4. Re-inject blocks
+        blocks.forEach((block, index) => {
+            const id = block.type === 'thought' ? `__THOUGHT_${index}__` : `__CODE_${index}__`;
+            let html = '';
+            if (block.type === 'thought') {
+                html = `
+                    <div class="thought-wrapper">
+                        <div class="thought-header" onclick="this.parentElement.classList.toggle('expanded')">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                            <span>Thought Process</span>
+                            <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                        </div>
+                        <div class="thought-content">${escapeHtml(block.content).replace(/\n/g, '<br>')}</div>
                     </div>
-                    <pre><code>${escapeHtml(code)}</code></pre>
-                </div>
-            `;
-            formatted = formatted.replace(placeholder, codeHtml);
+                `;
+            } else {
+                html = `
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-lang">${escapeHtml(block.lang)}</span>
+                            <button class="copy-btn" onclick="copyToClipboard(this, \`${escapeHtml(block.content).replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\\$/g, '\\$')}\`)">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                                Copy
+                            </button>
+                        </div>
+                        <pre><code>${escapeHtml(block.content)}</code></pre>
+                    </div>
+                `;
+            }
+            work = work.replace(id, html);
         });
 
-        return formatted;
+        return work;
     }
     window.copyToClipboard = (btn, text) => {
         navigator.clipboard.writeText(text).then(() => {

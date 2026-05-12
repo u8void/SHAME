@@ -10,11 +10,116 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 from datasets import load_dataset
-import re
 import pandas as pd
 import random
 import csv
 import json
+
+
+# ── Math solver ─────────────────────────────────────────────────────────────
+# Intercepts math/algebra questions and returns exact answers via sympy,
+# bypassing the language model entirely so we never hallucinate numbers.
+
+_MATH_TRIGGER = re.compile(
+    r'(?:'
+    r'what\s+is\s+|solve\s+|find\s+|calculate\s+|compute\s+'
+    r'|simplify\s+|evaluate\s+'
+    r')?'
+    r'('
+    # equation with variable(s): 3x+5=11, 2x^2-4=0, etc.
+    r'[0-9a-zA-Z\s\+\-\*\/\^\(\)\.=]+=[0-9a-zA-Z\s\+\-\*\/\^\(\)\.]+\s*\?*'
+    r'|'
+    # pure arithmetic: what is 6*7, 100/4+3, etc.
+    r'[\d\s\+\-\*\/\^\(\)\.]+\s*\?*'
+    r')',
+    re.IGNORECASE,
+)
+
+def solve_math(user_text: str):
+    """
+    Try to solve the math/algebra in `user_text`.
+    Returns a formatted string answer, or None if the text isn't math.
+    """
+    try:
+        from sympy import symbols, solve, Eq, sympify, simplify, S
+        from sympy.parsing.sympy_parser import (
+            parse_expr, standard_transformations,
+            implicit_multiplication_application, convert_xor
+        )
+    except ImportError:
+        return None
+
+    text = user_text.strip().rstrip('?').strip()
+
+    # Normalise: 6x → 6*x, 2x^2 → 2*x**2
+    def normalise(expr: str) -> str:
+        expr = re.sub(r'([0-9])([a-zA-Z])', r'\1*\2', expr)  # 6x → 6*x
+        expr = re.sub(r'\^', '**', expr)                      # ^ → **
+        return expr
+
+    transformations = (
+        standard_transformations
+        + (implicit_multiplication_application, convert_xor)
+    )
+
+    # ── Case 1: equation  (contains '=') ─────────────────────────────────
+    if '=' in text:
+        parts = text.split('=', 1)
+        lhs_raw, rhs_raw = normalise(parts[0].strip()), normalise(parts[1].strip())
+
+        # Collect single-letter variable names
+        var_names = sorted(set(re.findall(r'\b([a-zA-Z])\b', lhs_raw + ' ' + rhs_raw)))
+        if not var_names:
+            return None
+
+        try:
+            var_syms = {v: symbols(v) for v in var_names}
+            lhs = parse_expr(lhs_raw, local_dict=var_syms, transformations=transformations)
+            rhs = parse_expr(rhs_raw, local_dict=var_syms, transformations=transformations)
+            eq = Eq(lhs, rhs)
+            solutions = solve(eq, list(var_syms.values()))
+        except Exception:
+            return None
+
+        if not solutions:
+            return "This equation has no solution."
+
+        var_list = list(var_syms.keys())
+        if isinstance(solutions, list):
+            if len(solutions) == 1:
+                val = solutions[0]
+                val_str = str(val) if val == int(val) else str(val)
+                return f"{var_list[0]} = {val_str}"
+            else:
+                parts_str = ", ".join(
+                    f"{var_list[0]} = {s}" for s in solutions
+                )
+                return f"Solutions: {parts_str}"
+        elif isinstance(solutions, dict):
+            parts_str = ", ".join(f"{k} = {v}" for k, v in solutions.items())
+            return parts_str
+        return str(solutions)
+
+    _NL_PREFIX = re.compile(
+        r'^(?:what\s+is|solve|find|calculate|compute|simplify|evaluate)\s+',
+        re.IGNORECASE,
+    )
+    arith_text = _NL_PREFIX.sub('', text).strip()
+    var_names = re.findall(r'\b([a-zA-Z])\b', arith_text)
+    if var_names:
+        return None  
+
+    arith = normalise(arith_text)
+    if not re.fullmatch(r'[\d\s\+\-\*\/\(\)\.]+', arith):
+        return None
+    try:
+        result = sympify(arith)
+        result = simplify(result)
+        if result == int(result):
+            return str(int(result))
+        return str(result)
+    except Exception:
+        return None
 
 def load_generation_config():
     config_path = os.path.join(os.path.dirname(__file__), "config", "iris.conf")
@@ -257,35 +362,111 @@ def load_claude_reasoning_dataset(subset_size=None, keep_reasoning=True):
         pairs = pairs[:subset_size]
     return pairs
 
+def load_deepthink_dataset(subset_size=None, keep_reasoning=True):
+    """Loads the Deepthink Reasoning dataset from Hugging Face."""
+    try:
+        from datasets import load_dataset
+        ds = load_dataset("prithivMLmods/Deepthink-Reasoning", split="train")
+    except Exception as e:
+        print(f"[DEEPTHINK] Failed to load dataset: {e}")
+        return []
+    
+    pairs = []
+    for row in ds:
+        # Check common key patterns for instruction/response datasets
+        user = row.get("instruction") or row.get("prompt") or row.get("user")
+        bot = row.get("output") or row.get("response") or row.get("assistant")
+        
+        if user and bot:
+            user = user.strip()
+            bot = bot.strip()
+            
+            if not keep_reasoning:
+                bot = re.sub(r'<think>.*?</think>', '', bot, flags=re.DOTALL).strip()
+            
+            if len(bot) < 4000 and user and bot:
+                pairs.append((user, bot))
+    
+    print(f"[DEEPTHINK] Loaded {len(pairs)} reasoning pairs")
+    
+    if subset_size and len(pairs) > subset_size:
+        import random
+        random.shuffle(pairs)
+        pairs = pairs[:subset_size]
+    return pairs
+
 def load_markdown_files(md_dir="md", pattern="*.md"):
+    """
+    Robustly loads USER/BOT pairs from markdown files.
+    Supports multi-line content by accumulating lines until the next tag.
+    Also supports an optional SYSTEM tag.
+    """
     pairs = []
     search_path = os.path.join(md_dir, pattern)
     files = glob.glob(search_path)
     if not files:
         return pairs
-    user_re = re.compile(r"^(?:USER|User)\s*:\s*(.+)", re.IGNORECASE)
-    bot_re  = re.compile(r"^(?:BOT|Bot)\s*:\s*(.+)",  re.IGNORECASE)
+
+    # Regex to catch tags at the start of a line
+    tag_re = re.compile(r"^(SYSTEM|USER|BOT|User|Bot)\s*:\s*(.*)", re.IGNORECASE)
+
     for filepath in sorted(files):
-        file_pairs = 0
-        pending_user = None
+        current_user = []
+        current_bot = []
+        current_system = []
+        last_tag = None
+
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 for line in f:
-                    line = line.rstrip("\n")
-                    if line.strip().startswith("#") or line.strip().startswith("<!--"):
+                    stripped = line.strip()
+                    # Skip comments/headers but NOT if they are part of a multi-line block
+                    if not last_tag and (stripped.startswith("#") or stripped.startswith("<!--")):
                         continue
-                    u_match = user_re.match(line.strip())
-                    b_match = bot_re.match(line.strip())
-                    if u_match:
-                        pending_user = u_match.group(1).strip()
-                    elif b_match and pending_user:
-                        bot_text = b_match.group(1).strip()
-                        if pending_user and bot_text:
-                            pairs.append((pending_user, bot_text))
-                            file_pairs += 1
-                        pending_user = None
+                    
+                    match = tag_re.match(line) # Don't strip() to preserve indent in content
+                    if match:
+                        # If we hit a new tag and had a pair pending, save it
+                        if match.group(1).upper() in ("USER", "SYSTEM") and current_user and current_bot:
+                            user_text = "\n".join(current_user).strip()
+                            bot_text = "\n".join(current_bot).strip()
+                            if current_system:
+                                sys_text = "\n".join(current_system).strip()
+                                user_text = f"{sys_text}\n\n{user_text}"
+                            pairs.append((user_text, bot_text))
+                            current_user = []
+                            current_bot = []
+
+                        tag = match.group(1).upper()
+                        content = match.group(2)
+                        last_tag = tag
+                        if tag == "SYSTEM":
+                            current_system.append(content)
+                        elif tag == "USER":
+                            current_user.append(content)
+                        elif tag == "BOT":
+                            current_bot.append(content)
+                    else:
+                        # Continue accumulating content for the last tag
+                        if last_tag == "SYSTEM":
+                            current_system.append(line.rstrip())
+                        elif last_tag == "USER":
+                            current_user.append(line.rstrip())
+                        elif last_tag == "BOT":
+                            current_bot.append(line.rstrip())
+
+                # End of file: save last pair
+                if current_user and current_bot:
+                    user_text = "\n".join(current_user).strip()
+                    bot_text = "\n".join(current_bot).strip()
+                    if current_system:
+                        sys_text = "\n".join(current_system).strip()
+                        user_text = f"{sys_text}\n\n{user_text}"
+                    pairs.append((user_text, bot_text))
         except Exception as e:
-            pass
+            print(f"[Warning] Error reading {filepath}: {e}")
+    
+    print(f"[Markdown] Loaded {len(pairs)} pairs from {len(files)} files.")
     return pairs
 
 
@@ -454,7 +635,10 @@ def generate_reply(model, tokenizer, prompt_text, device,
     repetition_penalty = repetition_penalty if repetition_penalty is not None else gen_config.get("repetition_penalty", 1.0)
     do_sample = gen_config.get("do_sample", True)
     no_repeat_ngram_size = gen_config.get("no_repeat_ngram_size", 0)
-    
+    # Minimum mean token probability below which the model admits it doesn't know.
+    # Range 0.0–1.0. Lower = more permissive. Raise to be stricter.
+    confidence_threshold = float(gen_config.get("confidence_threshold", 0.10))
+
     end_of_turn_id = tokenizer.convert_tokens_to_ids("<end_of_turn>")
     stop_ids = [tokenizer.eos_token_id]
     if end_of_turn_id is not None:
@@ -467,7 +651,7 @@ def generate_reply(model, tokenizer, prompt_text, device,
         if input_ids.size(1) > max_ctx:
             input_ids = input_ids[:, -max_ctx:]
             attention_mask = attention_mask[:, -max_ctx:]
-        output_ids = model.generate(
+        gen_out = model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
             max_new_tokens=max_new_tokens,
@@ -481,20 +665,45 @@ def generate_reply(model, tokenizer, prompt_text, device,
             renormalize_logits=True,
             eos_token_id=stop_ids,
             pad_token_id=tokenizer.eos_token_id,
+            output_scores=True,
+            return_dict_in_generate=True,
         )
+        output_ids = gen_out.sequences
+        scores = gen_out.scores  # tuple of (vocab_size,) tensors, one per generated token
+
     generated = output_ids[0, input_ids.size(1):]
+
+    if scores and confidence_threshold > 0.0:
+        import math
+        entropies = []
+        for i, s in enumerate(scores):
+            if i >= len(generated):
+                break
+            probs = F.softmax(s[0].float(), dim=-1)
+            entropy = -(probs * probs.clamp(min=1e-9).log()).sum().item()
+            entropies.append(entropy)
+        mean_entropy = sum(entropies) / len(entropies) if entropies else 0.0
+        if mean_entropy > confidence_threshold:
+            return "I'm not sure about that — it seems to be outside what I've been trained on."
+
     reply = tokenizer.decode(
         generated,
         skip_special_tokens=True,
         clean_up_tokenization_spaces=False,
     ).strip()
+    stop_match = _STOP_RE.search(reply)
+    if stop_match:
+        reply = reply[:stop_match.start()].strip()
+
+    if reply and reply.rstrip().endswith(':') and '\n' not in reply:
+        return "I'm not sure about that — it seems to be outside what I've been trained on."
+
     reply = truncate_at_hallucination(reply)
     return reply or "I'm not sure what to say."
 
 def chat(model, tokenizer, device):
     print("Chat started! Type 'quit' to exit.")
     
-    # Store the conversation history
     messages = []
     
     while True:

@@ -10,7 +10,7 @@ from flask import Flask, request, jsonify, render_template
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-from iris import USER_TOKEN, BOT_TOKEN, get_device, generate_reply
+from iris import USER_TOKEN, BOT_TOKEN, get_device, generate_reply, solve_math
 
 
 parser = argparse.ArgumentParser(description="Run the Iris AI Flask App")
@@ -118,62 +118,37 @@ def chat():
     if not user_message:
         return jsonify({"reply": "Please send a valid message."}), 400
 
+    # ── Math fast-path: solve equations/arithmetic with sympy ───────────────
+    math_answer = solve_math(user_message)
+    if math_answer is not None:
+        log_path = os.path.join(LOGS_DIR, f"{chat_id}.txt")
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"User: {user_message}\nBot: {math_answer}\n\n")
+        return jsonify({"reply": math_answer})
+    # ────────────────────────────────────────────────────────────────────────
+
     if PREVIEW_MODE:
         reply = "[Preview Mode] Mock response — AI model disabled."
     else:
+        # Use the Agent Controller to handle the conversation and actions
+        from controller import ai_agent_handle
         frontend_messages = data.get("messages", [])
-        system_messages = [
-            {
-                "role": "user",
-                "content": "You are Iris, an AI assistant. You are not human and have no personal life. Always reply in the same language the user writes in. Keep answers helpful and concise."
-            },
-            {
-                "role": "assistant",
-                "content": "Understood. I am Iris, an AI assistant. How can I help you?"
-            }
-        ]
         
-        recent_messages = frontend_messages[-10:]
-        
-        merged_history = []
-        for msg in recent_messages:
+        # Convert frontend messages to the format expected by ai_agent_handle
+        agent_history = []
+        for msg in frontend_messages[:-1]: # exclude last message as it's the one we're processing
             role = "assistant" if msg.get("role") == "bot" else "user"
-            content = msg.get("content", "")
+            agent_history.append({"role": role, "content": msg.get("content", "")})
             
-            if merged_history and merged_history[-1]["role"] == role:
-                merged_history[-1]["content"] += "\n" + content
-            else:
-                merged_history.append({"role": role, "content": content})
-        if merged_history and merged_history[0]["role"] == "assistant":
-            merged_history = merged_history[1:]
-        conversation = system_messages + merged_history
-        
-        prompt = tokenizer.apply_chat_template(
-            conversation,
-            tokenize=False,
-            add_generation_prompt=True
+        reply = ai_agent_handle(
+            user_message, 
+            model, 
+            tokenizer, 
+            device, 
+            agent_history
         )
         
-        # Always read from iris.conf — frontend settings are ignored to prevent localStorage cache bugs
-        from iris import load_generation_config
-        gen_config = load_generation_config()
-        kwargs = {
-            "max_new_tokens"     : int(gen_config.get("max_new_tokens", 512)),
-            "temperature"        : float(gen_config.get("temperature", 0.7)),
-            "top_p"              : float(gen_config.get("top_p", 0.9)),
-            "top_k"              : int(gen_config.get("top_k", 40)),
-            "repetition_penalty" : float(gen_config.get("repetition_penalty", 1.0)),
-        }
-        # Allow frontend to override max_new_tokens only if explicitly set to something bigger
-        frontend_max = settings.get("max_new_tokens")
-        if frontend_max and int(float(frontend_max)) > kwargs["max_new_tokens"]:
-            kwargs["max_new_tokens"] = int(float(frontend_max))
-
-        reply = generate_reply(
-            model, tokenizer, prompt, device,
-            **kwargs
-        )
-
+        # The ai_agent_handle takes care of generation and tool mapping.
         if device.type == "mps":
             torch.mps.empty_cache()
 
@@ -213,6 +188,16 @@ def train():
     if data.get("no_dd"):             cmd.append("--no-dd")
     if data.get("no_md"):             cmd.append("--no-md")
     if data.get("use_chat_template"): cmd.append("--use-chat-template")
+    
+    # Reasoning Parameters
+    if data.get("claude_reasoning"):
+        cmd.extend(["--claude-reasoning", str(data.get("claude_reasoning"))])
+    if data.get("dolci_think"):
+        cmd.extend(["--dolci-think", str(data.get("dolci_think"))])
+    if data.get("deepthink"):
+        cmd.extend(["--deepthink", str(data.get("deepthink"))])
+    if data.get("strip_reasoning"):
+        cmd.append("--strip-reasoning")
 
     os.makedirs(os.path.dirname(TRAIN_LOG_FILE), exist_ok=True)
     log_file = open(TRAIN_LOG_FILE, "w", encoding="utf-8")
