@@ -64,6 +64,10 @@ def parse_args():
                     help="Number of Dolci-Think reasoning pairs to include")
     parser.add_argument("--deepthink", type=int, default=None,
                     help="Number of Deepthink Reasoning pairs to include")
+    parser.add_argument("--openhermes", type=int, default=None,
+                    help="Number of OpenHermes-2.5 pairs to include")
+    parser.add_argument("--orca-math", type=int, default=None,
+                    help="Number of Orca-Math reasoning pairs to include")
     return parser.parse_args()
 
 def load_conversations(args):
@@ -96,6 +100,12 @@ def load_conversations(args):
             subset_size=args.deepthink,
             keep_reasoning=not args.strip_reasoning
         )
+    if args.openhermes:
+        from iris import load_openhermes_dataset
+        pairs += load_openhermes_dataset(subset_size=args.openhermes)
+    if args.orca_math:
+        from iris import load_orcamath_dataset
+        pairs += load_orcamath_dataset(subset_size=args.orca_math)
 
     
     random.shuffle(pairs)

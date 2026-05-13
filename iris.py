@@ -395,6 +395,57 @@ def load_deepthink_dataset(subset_size=None, keep_reasoning=True):
         pairs = pairs[:subset_size]
     return pairs
 
+def load_openhermes_dataset(subset_size=None):
+    """Loads the OpenHermes-2.5 dataset from Hugging Face."""
+    try:
+        from datasets import load_dataset
+        ds = load_dataset("teknium/OpenHermes-2.5", split="train")
+    except Exception as e:
+        print(f"[OPENHERMES] Failed to load dataset: {e}")
+        return []
+    
+    pairs = []
+    for row in ds:
+        convs = row.get("conversations", [])
+        for i in range(len(convs) - 1):
+            if convs[i].get("from") == "human" and convs[i+1].get("from") == "gpt":
+                user = convs[i].get("value", "").strip()
+                bot = convs[i+1].get("value", "").strip()
+                if len(bot) < 4000 and user and bot:
+                    pairs.append((user, bot))
+    
+    print(f"[OPENHERMES] Loaded {len(pairs)} high-quality pairs")
+    
+    if subset_size and len(pairs) > subset_size:
+        import random
+        random.shuffle(pairs)
+        pairs = pairs[:subset_size]
+    return pairs
+
+def load_orcamath_dataset(subset_size=None):
+    """Loads the Orca-Math dataset from Hugging Face."""
+    try:
+        from datasets import load_dataset
+        ds = load_dataset("microsoft/orca-math-word-problems-200k", split="train")
+    except Exception as e:
+        print(f"[ORCAMATH] Failed to load dataset: {e}")
+        return []
+    
+    pairs = []
+    for row in ds:
+        user = row.get("question", "").strip()
+        bot = row.get("answer", "").strip()
+        if len(bot) < 4000 and user and bot:
+            pairs.append((user, bot))
+            
+    print(f"[ORCAMATH] Loaded {len(pairs)} math reasoning pairs")
+    
+    if subset_size and len(pairs) > subset_size:
+        import random
+        random.shuffle(pairs)
+        pairs = pairs[:subset_size]
+    return pairs
+
 def load_markdown_files(md_dir="md", pattern="*.md"):
     """
     Robustly loads USER/BOT pairs from markdown files.

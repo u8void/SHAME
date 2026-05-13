@@ -131,6 +131,8 @@ def chat():
         reply = "[Preview Mode] Mock response — AI model disabled."
     else:
         # Use the Agent Controller to handle the conversation and actions
+        import controller
+        controller.IS_INTERACTIVE = False
         from controller import ai_agent_handle
         frontend_messages = data.get("messages", [])
         
@@ -196,6 +198,10 @@ def train():
         cmd.extend(["--dolci-think", str(data.get("dolci_think"))])
     if data.get("deepthink"):
         cmd.extend(["--deepthink", str(data.get("deepthink"))])
+    if data.get("openhermes"):
+        cmd.extend(["--openhermes", str(data.get("openhermes"))])
+    if data.get("orca_math"):
+        cmd.extend(["--orca-math", str(data.get("orca_math"))])
     if data.get("strip_reasoning"):
         cmd.append("--strip-reasoning")
 

@@ -23,7 +23,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
 
-
+IS_INTERACTIVE = True
 try:
     import pyperclip
     CLIPBOARD_AVAILABLE = True
@@ -266,72 +266,81 @@ def ai_agent_handle(user_input: str, model, tokenizer, device, history: list) ->
 
 
     action = action_dict.get("action", "chat")
-    try:
-        if action == "open_website":
-            url = action_dict.get("url", "")
-            if not url:
-                return "I need a URL to open a website."
-            return handle_website_from_url(url)
-        elif action == "open_app":
-            app = action_dict.get("name", "")
-            return handle_app_by_name(app, load_config())
-        elif action == "youtube_video":
-            query = action_dict.get("query", "")
-            return handle_youtube_video_from_query(query)
-        elif action == "youtube_channel":
-            name = action_dict.get("name", "")
-            return handle_youtube_channel_from_name(name)
-        elif action == "spotify_song":
-            query = action_dict.get("query", "")
-            return handle_spotify_song(query)
-        elif action == "send_email":
-            to = action_dict.get("to", "")
-            subject = action_dict.get("subject", "")
-            body = action_dict.get("body", "")
-            return handle_email_from_parts(to, subject, body, load_config())
-        elif action == "open_file":
-            path = action_dict.get("path", "")
-            return handle_open_file(path)
-        elif action == "search_files":
-            query = action_dict.get("query", "")
-            folder = action_dict.get("folder", os.getcwd())
-            return handle_search_files(query, folder)
-        elif action == "run_command":
-            cmd = action_dict.get("command", "")
-            return handle_run_command(cmd)
-        elif action == "open_terminal":
-            cmd = action_dict.get("command", "")
-            return handle_open_terminal(cmd)
-        elif action == "volume_up":
-            return handle_volume("up")
-        elif action == "volume_down":
-            return handle_volume("down")
-        elif action == "volume_mute":
-            return handle_volume("mute")
-        elif action == "volume_set":
-            pct = int(action_dict.get("percent", 50))
-            return handle_volume_set(pct)
-        elif action == "brightness_up":
-            return handle_brightness("up")
-        elif action == "brightness_down":
-            return handle_brightness("down")
-        elif action == "brightness_set":
-            pct = int(action_dict.get("percent", 50))
-            return handle_brightness_set(pct)
-        elif action == "system_info":
-            what = action_dict.get("what", "all")
-            return get_system_info(what)
-        elif action == "clipboard_copy":
-            text = action_dict.get("text", "")
-            return clipboard_copy(text)
-        elif action == "clipboard_read":
-            return clipboard_read()
-        elif action == "chat":
-            return action_dict.get("response", "I'm not sure how to help with that.")
-        else:
-            return f"I don't know how to handle action '{action}' yet."
-    except Exception as e:
-        return f"Action '{action}' failed: {e}"
+    
+    def execute_action():
+        try:
+            if action == "open_website":
+                url = action_dict.get("url", "")
+                if not url:
+                    return "I need a URL to open a website."
+                return handle_website_from_url(url)
+            elif action == "open_app":
+                app = action_dict.get("name", "")
+                return handle_app_by_name(app, load_config())
+            elif action == "youtube_video":
+                query = action_dict.get("query", "")
+                return handle_youtube_video_from_query(query)
+            elif action == "youtube_channel":
+                name = action_dict.get("name", "")
+                return handle_youtube_channel_from_name(name)
+            elif action == "spotify_song":
+                query = action_dict.get("query", "")
+                return handle_spotify_song(query)
+            elif action == "send_email":
+                to = action_dict.get("to", "")
+                subject = action_dict.get("subject", "")
+                body = action_dict.get("body", "")
+                return handle_email_from_parts(to, subject, body, load_config())
+            elif action == "open_file":
+                path = action_dict.get("path", "")
+                return handle_open_file(path)
+            elif action == "search_files":
+                query = action_dict.get("query", "")
+                folder = action_dict.get("folder", os.getcwd())
+                return handle_search_files(query, folder)
+            elif action == "run_command":
+                cmd = action_dict.get("command", "")
+                return handle_run_command(cmd)
+            elif action == "open_terminal":
+                cmd = action_dict.get("command", "")
+                return handle_open_terminal(cmd)
+            elif action == "volume_up":
+                return handle_volume("up")
+            elif action == "volume_down":
+                return handle_volume("down")
+            elif action == "volume_mute":
+                return handle_volume("mute")
+            elif action == "volume_set":
+                pct = int(action_dict.get("percent", 50))
+                return handle_volume_set(pct)
+            elif action == "brightness_up":
+                return handle_brightness("up")
+            elif action == "brightness_down":
+                return handle_brightness("down")
+            elif action == "brightness_set":
+                pct = int(action_dict.get("percent", 50))
+                return handle_brightness_set(pct)
+            elif action == "system_info":
+                what = action_dict.get("what", "all")
+                return get_system_info(what)
+            elif action == "clipboard_copy":
+                text = action_dict.get("text", "")
+                return clipboard_copy(text)
+            elif action == "clipboard_read":
+                return clipboard_read()
+            elif action == "chat":
+                return action_dict.get("response", "I'm not sure how to help with that.")
+            else:
+                return f"I don't know how to handle action '{action}' yet."
+        except Exception as e:
+            return f"Action '{action}' failed: {e}"
+
+    action_result = execute_action()
+    
+    think_match = re.search(r'<think>.*?</think>', reply, re.DOTALL)
+    if think_match:
+        return f"{think_match.group(0)}\n\n{action_result}"
+    return action_result
 
 
 
@@ -523,7 +532,7 @@ def _resolve_contact(raw: str, contacts: dict) -> str:
 
 def _interactive_email_build(config: dict) -> dict | None:
     import sys
-    if not sys.stdin.isatty():
+    if not IS_INTERACTIVE:
         return None
 
     contacts = config.get("email", {}).get("contacts", {})
@@ -589,12 +598,12 @@ def handle_email_from_parts(to_raw: str, subject: str, body: str, config: dict) 
         to_addr, subject, body = data["to"], data["subject"], data["body"]
     else:
         if not subject:
-            if sys.stdin.isatty():
+            if IS_INTERACTIVE:
                 subject = input(f"  Subject for email to {to_addr}: ").strip() or "(no subject)"
             else:
                 subject = "(no subject)"
         if not body:
-            if sys.stdin.isatty():
+            if IS_INTERACTIVE:
                 print("  Body (type END on a new line to finish):")
                 lines = []
                 while True:
@@ -606,7 +615,7 @@ def handle_email_from_parts(to_raw: str, subject: str, body: str, config: dict) 
             else:
                 body = "(no body)"
 
-    if sys.stdin.isatty():
+    if IS_INTERACTIVE:
         print(f"\n  ── Preview ─────────────────────────────────")
         print(f"  To:      {to_addr}")
         print(f"  Subject: {subject}")
