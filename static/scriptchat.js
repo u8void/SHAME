@@ -155,7 +155,16 @@ document.addEventListener("DOMContentLoaded", () => {
         div.id = "typingIndicator";
         const content = document.createElement("div");
         content.classList.add("message-content");
-        content.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
+        content.innerHTML = `
+            <div class="thinking-text">
+                <div class="thinking-dot-container">
+                    <span class="thinking-dot"></span>
+                    <span class="thinking-dot"></span>
+                    <span class="thinking-dot"></span>
+                </div>
+                <span>Thinking and finding the best answer...</span>
+            </div>
+        `;
         div.appendChild(content);
         chatMessages.appendChild(div);
         chatMessages.scrollTop = chatMessages.scrollHeight;

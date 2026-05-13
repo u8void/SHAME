@@ -4,3 +4,4 @@ iris_merged_model/
 ___pycache__/
 logs/*
 outputs/*
+iris_14b_model/

@@ -1,34 +1,26 @@
 
-import gc
 import os
 import argparse
 import threading
 import subprocess
 
-import torch
 from flask import Flask, request, jsonify, render_template
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
-
-from iris import USER_TOKEN, BOT_TOKEN, get_device, generate_reply, solve_math
+# ── Unified Iris Backend (MLX/CUDA/CPU) ─────────────────────────────────────
+from iris import load_model, get_device, generate_reply, solve_math, USER_TOKEN, BOT_TOKEN
 
 
 parser = argparse.ArgumentParser(description="Run the Iris AI Flask App")
 parser.add_argument("--preview-only", action="store_true",
                     help="Launch UI without loading the AI model")
-parser.add_argument("--force-cpu", action="store_true",
-                    help="Force CPU inference (overrides MPS auto-detect)")
 args, _ = parser.parse_known_args()
 
 
 PREVIEW_MODE = args.preview_only
-FORCE_CPU    = args.force_cpu or os.environ.get("FORCE_CPU", "").lower() in ("1", "true", "yes")
 
 
 app = Flask(__name__)
 
-MERGED_MODEL_PATH = "./iris_merged_model"
-BASE_MODEL_NAME   = "google/gemma-2-2b-it"
 LOGS_DIR          = "logs"
 TRAIN_LOG_FILE    = "outputs/train_output.txt"
 
@@ -44,6 +36,7 @@ training_proc = None
 
 
 def init_model():
+    """Load phi-4 + LoRA adapters via MLX (once, thread-safe)."""
     global model, tokenizer, device
 
     if PREVIEW_MODE or model is not None:
@@ -53,48 +46,10 @@ def init_model():
         if model is not None:
             return
 
-        device = get_device(force_cpu=FORCE_CPU)
-        print(f"[INFO] Device: {device}")
-
-        model_path = MERGED_MODEL_PATH if os.path.exists(MERGED_MODEL_PATH) else BASE_MODEL_NAME
-        if model_path == BASE_MODEL_NAME:
-            print(f"[WARNING] Merged model not found — falling back to {BASE_MODEL_NAME}")
-        else:
-            print(f"[INFO] Loading model from {model_path}")
-
-
-        dtype = torch.float32 if FORCE_CPU else torch.float16
-        print(f"[INFO] Loading with dtype={dtype} ...")
-
-
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_path,
-            use_fast=True,
-        )
-        tokenizer.pad_token = tokenizer.eos_token
-
-
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            torch_dtype=dtype,
-            low_cpu_mem_usage=True,
-        )
-
-
-        model.eval()
-        for p in model.parameters():
-            p.requires_grad_(False)
-
-
-        model = model.to(device)
-
-        gc.collect()
-        if device.type == "mps":
-            torch.mps.empty_cache()
-        elif device.type == "cuda":
-            torch.cuda.empty_cache()
-
-        print("[INFO] Model ready.")
+        print("[INFO] Loading Iris model (Unified Backend)...")
+        model, tokenizer = load_model()
+        device = get_device()
+        print(f"[INFO] Model ready. device={device}")
 
 
 @app.before_request
@@ -151,8 +106,7 @@ def chat():
         )
         
         # The ai_agent_handle takes care of generation and tool mapping.
-        if device.type == "mps":
-            torch.mps.empty_cache()
+        # MLX manages its own memory — no manual cache clearing needed.
 
     log_path = os.path.join(LOGS_DIR, f"{chat_id}.txt")
     with open(log_path, "a", encoding="utf-8") as f:
@@ -281,9 +235,7 @@ def save_settings():
     return jsonify({"status": "success"})
 
 if __name__ == "__main__":
-    mode_label = "PREVIEW MODE" if PREVIEW_MODE else (
-        "CPU float32" if FORCE_CPU else "MPS float16"
-    )
+    mode_label = "PREVIEW MODE" if PREVIEW_MODE else "MLX (phi-4-4bit + LoRA adapters)"
     print(f"[INFO] Starting Iris AI — {mode_label}")
 
     port = int(os.environ.get("PORT", "5050"))

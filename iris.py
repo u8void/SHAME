@@ -1,47 +1,101 @@
+"""
+iris.py — Unified Intelligence Engine for Iris AI
+==================================================
+Consolidated backend supporting MLX, CUDA, and CPU.
+Includes data loaders, training utilities, and a math solver.
+"""
+
 import os
 import re
-import glob
-import torch
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    get_linear_schedule_with_warmup,
-)
-from datasets import load_dataset
-import pandas as pd
-import random
-import csv
 import json
+import glob
+import platform
+import threading
+import random
+from typing import Optional, Tuple, Dict, Any
 
+# ── Imports ──────────────────────────────────────────────────────────────────
+try:
+    import torch
+    import torch.nn.functional as F
+    from torch.utils.data import Dataset, DataLoader
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
 
-# ── Math solver ─────────────────────────────────────────────────────────────
-# Intercepts math/algebra questions and returns exact answers via sympy,
-# bypassing the language model entirely so we never hallucinate numbers.
+try:
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+
+try:
+    from datasets import load_dataset
+    DATASETS_AVAILABLE = True
+except ImportError:
+    DATASETS_AVAILABLE = False
+
+try:
+    from tqdm import tqdm
+    TQDM_AVAILABLE = True
+except ImportError:
+    TQDM_AVAILABLE = False
+
+# ── Constants ─────────────────────────────────────────────────────────────────
+USER_TOKEN = "User:"
+BOT_TOKEN  = "Bot:"
+EOS_TOKEN  = "<|endoftext|>"
+
+_HERE         = os.path.dirname(os.path.abspath(__file__))
+ADAPTER_PATH  = os.path.join(_HERE, "adapters")
+PEFT_ADAPTER  = os.path.join(_HERE, "adapters_peft")
+FUSED_MODEL_PATH = os.path.join(_HERE, "iris_14b_model")
+CONFIG_PATH   = os.path.join(_HERE, "config", "iris.conf")
+
+# Default Models
+MLX_MODEL_ID  = "mlx-community/phi-4-4bit"
+HF_MODEL_ID   = "microsoft/phi-4"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1.  Backend Detection & Device Shim
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _detect_backend() -> str:
+    if platform.system() == "Darwin" and platform.machine() == "arm64":
+        try:
+            import mlx.core
+            return "mlx"
+        except ImportError:
+            pass
+    if TORCH_AVAILABLE and torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
+
+BACKEND = _detect_backend()
+
+class _Device:
+    def __init__(self, type_: str):
+        self.type = type_
+    def __repr__(self):
+        return f"device(type='{self.type}')"
+
+def get_device(force_cpu=False):
+    if force_cpu: return _Device("cpu")
+    return _Device(BACKEND)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2.  Math Solver (Sympy)
+# ─────────────────────────────────────────────────────────────────────────────
 
 _MATH_TRIGGER = re.compile(
-    r'(?:'
-    r'what\s+is\s+|solve\s+|find\s+|calculate\s+|compute\s+'
-    r'|simplify\s+|evaluate\s+'
-    r')?'
-    r'('
-    # equation with variable(s): 3x+5=11, 2x^2-4=0, etc.
-    r'[0-9a-zA-Z\s\+\-\*\/\^\(\)\.=]+=[0-9a-zA-Z\s\+\-\*\/\^\(\)\.]+\s*\?*'
-    r'|'
-    # pure arithmetic: what is 6*7, 100/4+3, etc.
-    r'[\d\s\+\-\*\/\^\(\)\.]+\s*\?*'
-    r')',
-    re.IGNORECASE,
+    r'(?:what\s+is\s+|solve\s+|find\s+|calculate\s+|compute\s+|simplify\s+|evaluate\s+)?'
+    r'([0-9a-zA-Z\s\+\-\*\/\^\(\)\.=]+=[0-9a-zA-Z\s\+\-\*\/\^\(\)\.]+\s*\?*|[\d\s\+\-\*\/\^\(\)\.]+\s*\?*)',
+    re.IGNORECASE
 )
 
-def solve_math(user_text: str):
-    """
-    Try to solve the math/algebra in `user_text`.
-    Returns a formatted string answer, or None if the text isn't math.
-    """
+def solve_math(user_text: str) -> Optional[str]:
     try:
-        from sympy import symbols, solve, Eq, sympify, simplify, S
+        from sympy import symbols, solve, Eq, sympify, simplify
         from sympy.parsing.sympy_parser import (
             parse_expr, standard_transformations,
             implicit_multiplication_application, convert_xor
@@ -50,725 +104,267 @@ def solve_math(user_text: str):
         return None
 
     text = user_text.strip().rstrip('?').strip()
-
-    # Normalise: 6x → 6*x, 2x^2 → 2*x**2
     def normalise(expr: str) -> str:
-        expr = re.sub(r'([0-9])([a-zA-Z])', r'\1*\2', expr)  # 6x → 6*x
-        expr = re.sub(r'\^', '**', expr)                      # ^ → **
+        expr = re.sub(r'([0-9])([a-zA-Z])', r'\1*\2', expr)
+        expr = re.sub(r'\^', '**', expr)
         return expr
 
-    transformations = (
-        standard_transformations
-        + (implicit_multiplication_application, convert_xor)
-    )
+    transformations = standard_transformations + (implicit_multiplication_application, convert_xor)
 
-    # ── Case 1: equation  (contains '=') ─────────────────────────────────
     if '=' in text:
         parts = text.split('=', 1)
         lhs_raw, rhs_raw = normalise(parts[0].strip()), normalise(parts[1].strip())
-
-        # Collect single-letter variable names
         var_names = sorted(set(re.findall(r'\b([a-zA-Z])\b', lhs_raw + ' ' + rhs_raw)))
-        if not var_names:
-            return None
-
+        if not var_names: return None
         try:
             var_syms = {v: symbols(v) for v in var_names}
             lhs = parse_expr(lhs_raw, local_dict=var_syms, transformations=transformations)
             rhs = parse_expr(rhs_raw, local_dict=var_syms, transformations=transformations)
             eq = Eq(lhs, rhs)
             solutions = solve(eq, list(var_syms.values()))
-        except Exception:
-            return None
-
-        if not solutions:
-            return "This equation has no solution."
-
-        var_list = list(var_syms.keys())
+        except Exception: return None
+        if not solutions: return "This equation has no solution."
         if isinstance(solutions, list):
-            if len(solutions) == 1:
-                val = solutions[0]
-                val_str = str(val) if val == int(val) else str(val)
-                return f"{var_list[0]} = {val_str}"
-            else:
-                parts_str = ", ".join(
-                    f"{var_list[0]} = {s}" for s in solutions
-                )
-                return f"Solutions: {parts_str}"
-        elif isinstance(solutions, dict):
-            parts_str = ", ".join(f"{k} = {v}" for k, v in solutions.items())
-            return parts_str
+            if len(solutions) == 1: return f"{var_names[0]} = {solutions[0]}"
+            return "Solutions: " + ", ".join(f"{var_names[0]} = {s}" for s in solutions)
         return str(solutions)
 
-    _NL_PREFIX = re.compile(
-        r'^(?:what\s+is|solve|find|calculate|compute|simplify|evaluate)\s+',
-        re.IGNORECASE,
-    )
-    arith_text = _NL_PREFIX.sub('', text).strip()
-    var_names = re.findall(r'\b([a-zA-Z])\b', arith_text)
-    if var_names:
-        return None  
-
+    arith_text = re.sub(r'^(?:what\s+is|solve|find|calculate|compute|simplify|evaluate)\s+', '', text, flags=re.IGNORECASE).strip()
+    if re.findall(r'\b([a-zA-Z])\b', arith_text): return None
     arith = normalise(arith_text)
-    if not re.fullmatch(r'[\d\s\+\-\*\/\(\)\.]+', arith):
-        return None
+    if not re.fullmatch(r'[\d\s\+\-\*\/\(\)\.]+', arith): return None
     try:
-        result = sympify(arith)
-        result = simplify(result)
-        if result == int(result):
-            return str(int(result))
-        return str(result)
-    except Exception:
-        return None
+        res = simplify(sympify(arith))
+        return str(int(res)) if res == int(res) else str(res)
+    except Exception: return None
 
-def load_generation_config():
-    config_path = os.path.join(os.path.dirname(__file__), "config", "iris.conf")
-    default_config = {
-        "max_new_tokens": 200,
-        "do_sample": True,
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "top_k": 40,
-        "repetition_penalty": 1.0,
-        "no_repeat_ngram_size": 0
-    }
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, 'r') as f:
-                default_config.update(json.load(f))
-        except Exception as e:
-            print(f"Warning: Failed to load config from {config_path}: {e}")
-    return default_config
-
-
-try:
-    from tqdm import tqdm
-    TQDM_AVAILABLE = True
-except ImportError:
-    TQDM_AVAILABLE = False
-
-USER_TOKEN = "User:"
-BOT_TOKEN  = "Bot:"
-EOS_TOKEN  = "<|endoftext|>"
-
-
-def get_device(force_cpu=False):
-    if force_cpu:
-        return torch.device("cpu")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
-
-
-def is_degenerate(text):
-    s = (text or "").strip()
-    if not s:
-        return True
-    if len(s) < 10:
-        return True
-    letters = sum(c.isalpha() for c in s)
-    if letters < 0.5 * len(s):
-        return True
-    unique = len(set(s.lower()))
-    if unique < 15 and len(s) > 20:
-        return True
-    return False
-
-_HALLUCINATION_SIGNALS = re.compile(
-    r'(MigrationBuilder|nakalista'
-    r'|\ud795|\ufa4c|#+#'
-    r'|http(?:http|https))',
-    re.IGNORECASE
-)
-
-def truncate_at_hallucination(text: str) -> str:
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-    clean = []
-    for sent in sentences:
-        if _HALLUCINATION_SIGNALS.search(sent):
-            break         
-        clean.append(sent)
-    result = " ".join(clean).strip() if clean else text.strip()
-    return result
-
+# ─────────────────────────────────────────────────────────────────────────────
+# 3.  Data Loaders
+# ─────────────────────────────────────────────────────────────────────────────
 
 def load_blended_skill_talk(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
     try:
         ds = load_dataset("blended_skill_talk", split="train", trust_remote_code=True)
-    except Exception as e:
-        return []
-
-    pairs = []
-    for row in ds:
-        utterances = row.get("previous_utterance", [])
-        free_msgs  = row.get("free_messages", [])
-        for i in range(0, len(utterances) - 1, 2):
-            u = utterances[i].strip()
-            b = utterances[i + 1].strip()
-            if u and b:
-                pairs.append((u, b))
-        if utterances and free_msgs:
-            last_user = utterances[-1].strip()
-            for reply in free_msgs:
-                reply = (reply or "").strip()
-                if reply:
-                    pairs.append((last_user, reply))
-                    break
-    total = len(pairs)
-    if subset_size and subset_size < total:
-        import random
-        random.shuffle(pairs)
-        pairs = pairs[:subset_size]
-    return pairs
+        pairs = []
+        for row in ds:
+            utts, free = row.get("previous_utterance", []), row.get("free_messages", [])
+            for i in range(0, len(utts) - 1, 2):
+                if utts[i] and utts[i+1]: pairs.append((utts[i].strip(), utts[i+1].strip()))
+            if utts and free:
+                for r in free:
+                    if r: pairs.append((utts[-1].strip(), r.strip())); break
+        if subset_size and subset_size < len(pairs):
+            random.shuffle(pairs); return pairs[:subset_size]
+        return pairs
+    except Exception: return []
 
 def load_daily_dialog(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
     try:
-        ds = load_dataset("daily_dialog", split="train",
-                          trust_remote_code=False, revision="main")
-    except Exception:
-        try:
-            ds = load_dataset("daily_dialog", split="train",
-                              trust_remote_code=True)
-        except Exception as e:
-            return []
-
-    pairs = []
-    for row in ds:
-        dialog = row["dialog"]
-        for i in range(len(dialog) - 1):
-            u = dialog[i].strip()
-            b = dialog[i + 1].strip()
-            if u and b:
-                pairs.append((u, b))
-    total = len(pairs)
-    if subset_size and subset_size < total:
-        import random
-        random.shuffle(pairs)
-        pairs = pairs[:subset_size]
-    return pairs
-
-
-def load_mbzuai_egyptian_mixture(subset_size=None):
-    pairs = []
-    try:
-        print("[MBZUAI] Downloading MBZUAI-Paris/Egyptian-SFT-Mixture from Hugging Face...")
-        ds = load_dataset("MBZUAI-Paris/Egyptian-SFT-Mixture", split="train")
-        
+        ds = load_dataset("daily_dialog", split="train", trust_remote_code=True)
+        pairs = []
         for row in ds:
-            messages = row.get("messages", [])
-            
-            # Ensure there is at least a user prompt and an assistant reply
-            if len(messages) >= 2 and messages[0].get("role") == "user" and messages[1].get("role") == "assistant":
-                q = str(messages[0].get("content", "")).strip()
-                a = str(messages[1].get("content", "")).strip()
-                
-                if q and a:
-                    pairs.append((q, a))
-                    
-        print(f"[MBZUAI] Successfully loaded {len(pairs)} high-quality Egyptian SFT pairs!")
-    except Exception as e:
-        print(f"[MBZUAI] Failed to load dataset: {e}")
-        return []
-        
-    if subset_size and len(pairs) > subset_size:
-        random.shuffle(pairs)
-        pairs = pairs[:subset_size]
-        
-    return pairs
-
-def load_dolci_think_dataset(subset_size=None):
-    pairs = []
-    try:
-        print("[DOLCI] Streaming Dolci-Think-SFT from Hugging Face...")
-        
-        # CRITICAL: Added streaming=True. It will not download the massive files!
-        ds = load_dataset("allenai/Dolci-Think-SFT-7B", split="train", streaming=True)
-        
-        count = 0
-        for row in ds:
-            # Stop pulling from the internet the exact second we reach our subset size
-            if subset_size and count >= subset_size:
-                break
-                
-            messages = row.get("messages", [])
-            
-            if len(messages) >= 2 and messages[0].get("role") == "user" and messages[1].get("role") == "assistant":
-                q = str(messages[0].get("content", "")).strip()
-                a = str(messages[1].get("content", "")).strip()
-                
-                if q and a:
-                    pairs.append((q, a))
-                    count += 1 # Only count valid pairs
-                    
-        print(f"[DOLCI] Successfully streamed {len(pairs)} reasoning pairs!")
-    except Exception as e:
-        print(f"[DOLCI] Failed to load dataset: {e}")
-        return []
-        
-    # We don't shuffle here because streaming already gives us a random-ish top slice
-    return pairs
-
-def load_hf_maliki_dataset(subset_size=None):
-    pairs = []
-    try:
-        print("[MALIKI] Downloading/Loading Istilah_Maliki_Dataset from Hugging Face...")
-        # Load the dataset directly
-        ds = load_dataset("islamic-datasets/Istilah_Maliki_Dataset", split="train")
-        
-        # Loop through and grab the exact column names shown in your screenshot
-        for row in ds:
-            q = str(row.get('question', '')).strip()
-            a = str(row.get('answer', '')).strip()
-            
-            if q and a: 
-                pairs.append((q, a))
-                
-        print(f"[MALIKI] Successfully loaded {len(pairs)} pairs from Hugging Face")
-    except Exception as e:
-        print(f"[MALIKI] Failed to load dataset: {e}")
-        return []
-        
-    if subset_size and len(pairs) > subset_size:
-        random.shuffle(pairs)
-        pairs = pairs[:subset_size]
-        
-    return pairs
-
-def load_claude_reasoning_dataset(subset_size=None, keep_reasoning=True):
-    ds = load_dataset("angrygiraffe/claude-opus-4.6-4.7-reasoning-8.7k", split="train")
-    
-    pairs = []
-    for row in ds:
-        messages = row["messages"]
-        # Find the last user→assistant turn
-        for i in range(len(messages) - 1):
-            if messages[i]["role"] == "user" and messages[i + 1]["role"] == "assistant":
-                user = messages[i]["content"].strip()
-                bot = messages[i + 1]["content"].strip()
-                
-                if not keep_reasoning:
-                    bot = re.sub(r'<think>.*?</think>', '', bot, flags=re.DOTALL).strip()
-                
-                if len(bot) < 3000 and user and bot:
-                    pairs.append((user, bot))
-    
-    print(f"[CLAUDE] Loaded {len(pairs)} reasoning pairs")
-    
-    if subset_size and len(pairs) > subset_size:
-        import random
-        random.shuffle(pairs)
-        pairs = pairs[:subset_size]
-    return pairs
-
-def load_deepthink_dataset(subset_size=None, keep_reasoning=True):
-    """Loads the Deepthink Reasoning dataset from Hugging Face."""
-    try:
-        from datasets import load_dataset
-        ds = load_dataset("prithivMLmods/Deepthink-Reasoning", split="train")
-    except Exception as e:
-        print(f"[DEEPTHINK] Failed to load dataset: {e}")
-        return []
-    
-    pairs = []
-    for row in ds:
-        # Check common key patterns for instruction/response datasets
-        user = row.get("instruction") or row.get("prompt") or row.get("user")
-        bot = row.get("output") or row.get("response") or row.get("assistant")
-        
-        if user and bot:
-            user = user.strip()
-            bot = bot.strip()
-            
-            if not keep_reasoning:
-                bot = re.sub(r'<think>.*?</think>', '', bot, flags=re.DOTALL).strip()
-            
-            if len(bot) < 4000 and user and bot:
-                pairs.append((user, bot))
-    
-    print(f"[DEEPTHINK] Loaded {len(pairs)} reasoning pairs")
-    
-    if subset_size and len(pairs) > subset_size:
-        import random
-        random.shuffle(pairs)
-        pairs = pairs[:subset_size]
-    return pairs
-
-def load_openhermes_dataset(subset_size=None):
-    """Loads the OpenHermes-2.5 dataset from Hugging Face."""
-    try:
-        from datasets import load_dataset
-        ds = load_dataset("teknium/OpenHermes-2.5", split="train")
-    except Exception as e:
-        print(f"[OPENHERMES] Failed to load dataset: {e}")
-        return []
-    
-    pairs = []
-    for row in ds:
-        convs = row.get("conversations", [])
-        for i in range(len(convs) - 1):
-            if convs[i].get("from") == "human" and convs[i+1].get("from") == "gpt":
-                user = convs[i].get("value", "").strip()
-                bot = convs[i+1].get("value", "").strip()
-                if len(bot) < 4000 and user and bot:
-                    pairs.append((user, bot))
-    
-    print(f"[OPENHERMES] Loaded {len(pairs)} high-quality pairs")
-    
-    if subset_size and len(pairs) > subset_size:
-        import random
-        random.shuffle(pairs)
-        pairs = pairs[:subset_size]
-    return pairs
-
-def load_orcamath_dataset(subset_size=None):
-    """Loads the Orca-Math dataset from Hugging Face."""
-    try:
-        from datasets import load_dataset
-        ds = load_dataset("microsoft/orca-math-word-problems-200k", split="train")
-    except Exception as e:
-        print(f"[ORCAMATH] Failed to load dataset: {e}")
-        return []
-    
-    pairs = []
-    for row in ds:
-        user = row.get("question", "").strip()
-        bot = row.get("answer", "").strip()
-        if len(bot) < 4000 and user and bot:
-            pairs.append((user, bot))
-            
-    print(f"[ORCAMATH] Loaded {len(pairs)} math reasoning pairs")
-    
-    if subset_size and len(pairs) > subset_size:
-        import random
-        random.shuffle(pairs)
-        pairs = pairs[:subset_size]
-    return pairs
+            d = row["dialog"]
+            for i in range(len(d)-1):
+                if d[i] and d[i+1]: pairs.append((d[i].strip(), d[i+1].strip()))
+        if subset_size and subset_size < len(pairs):
+            random.shuffle(pairs); return pairs[:subset_size]
+        return pairs
+    except Exception: return []
 
 def load_markdown_files(md_dir="md", pattern="*.md"):
-    """
-    Robustly loads USER/BOT pairs from markdown files.
-    Supports multi-line content by accumulating lines until the next tag.
-    Also supports an optional SYSTEM tag.
-    """
     pairs = []
-    search_path = os.path.join(md_dir, pattern)
-    files = glob.glob(search_path)
-    if not files:
-        return pairs
-
-    # Regex to catch tags at the start of a line
-    tag_re = re.compile(r"^(SYSTEM|USER|BOT|User|Bot)\s*:\s*(.*)", re.IGNORECASE)
-
-    for filepath in sorted(files):
-        current_user = []
-        current_bot = []
-        current_system = []
-        last_tag = None
-
+    tag_re = re.compile(r"^(SYSTEM|USER|BOT)\s*:\s*(.*)", re.IGNORECASE)
+    for path in glob.glob(os.path.join(md_dir, pattern)):
+        u, b, s, last = [], [], [], None
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 for line in f:
-                    stripped = line.strip()
-                    # Skip comments/headers but NOT if they are part of a multi-line block
-                    if not last_tag and (stripped.startswith("#") or stripped.startswith("<!--")):
-                        continue
-                    
-                    match = tag_re.match(line) # Don't strip() to preserve indent in content
-                    if match:
-                        # If we hit a new tag and had a pair pending, save it
-                        if match.group(1).upper() in ("USER", "SYSTEM") and current_user and current_bot:
-                            user_text = "\n".join(current_user).strip()
-                            bot_text = "\n".join(current_bot).strip()
-                            if current_system:
-                                sys_text = "\n".join(current_system).strip()
-                                user_text = f"{sys_text}\n\n{user_text}"
-                            pairs.append((user_text, bot_text))
-                            current_user = []
-                            current_bot = []
-
-                        tag = match.group(1).upper()
-                        content = match.group(2)
-                        last_tag = tag
-                        if tag == "SYSTEM":
-                            current_system.append(content)
-                        elif tag == "USER":
-                            current_user.append(content)
-                        elif tag == "BOT":
-                            current_bot.append(content)
-                    else:
-                        # Continue accumulating content for the last tag
-                        if last_tag == "SYSTEM":
-                            current_system.append(line.rstrip())
-                        elif last_tag == "USER":
-                            current_user.append(line.rstrip())
-                        elif last_tag == "BOT":
-                            current_bot.append(line.rstrip())
-
-                # End of file: save last pair
-                if current_user and current_bot:
-                    user_text = "\n".join(current_user).strip()
-                    bot_text = "\n".join(current_bot).strip()
-                    if current_system:
-                        sys_text = "\n".join(current_system).strip()
-                        user_text = f"{sys_text}\n\n{user_text}"
-                    pairs.append((user_text, bot_text))
-        except Exception as e:
-            print(f"[Warning] Error reading {filepath}: {e}")
-    
-    print(f"[Markdown] Loaded {len(pairs)} pairs from {len(files)} files.")
+                    m = tag_re.match(line)
+                    if m:
+                        if m.group(1).upper() in ("USER", "SYSTEM") and u and b:
+                            pairs.append(("\n".join(s+u).strip(), "\n".join(b).strip()))
+                            u, b = [], []
+                        tag, content = m.group(1).upper(), m.group(2)
+                        last = tag
+                        if tag == "SYSTEM": s.append(content)
+                        elif tag == "USER": u.append(content)
+                        elif tag == "BOT": b.append(content)
+                    elif last:
+                        if last == "SYSTEM": s.append(line.rstrip())
+                        elif last == "USER": u.append(line.rstrip())
+                        elif last == "BOT": b.append(line.rstrip())
+                if u and b: pairs.append(("\n".join(s+u).strip(), "\n".join(b).strip()))
+        except Exception: pass
     return pairs
 
+def load_mbzuai_egyptian_mixture(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        ds = load_dataset("MBZUAI-Paris/Egyptian-SFT-Mixture", split="train")
+        pairs = [(m[0]["content"].strip(), m[1]["content"].strip()) for row in ds if (m := row.get("messages")) and len(m) >= 2]
+        if subset_size and len(pairs) > subset_size: random.shuffle(pairs); return pairs[:subset_size]
+        return pairs
+    except Exception: return []
 
-def cleanup_epoch_checkpoints(pattern="gpt2_sft_epoch*.pt"):
-    for path in glob.glob(pattern):
+def load_hf_maliki_dataset(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        ds = load_dataset("islamic-datasets/Istilah_Maliki_Dataset", split="train")
+        pairs = [(row.get("question","").strip(), row.get("answer","").strip()) for row in ds]
+        if subset_size and len(pairs) > subset_size: random.shuffle(pairs); return pairs[:subset_size]
+        return pairs
+    except Exception: return []
+
+def load_claude_reasoning_dataset(subset_size=None, keep_reasoning=True):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        ds = load_dataset("angrygiraffe/claude-opus-4.6-4.7-reasoning-8.7k", split="train")
+        pairs = []
+        for row in ds:
+            m = row["messages"]
+            for i in range(len(m)-1):
+                if m[i]["role"] == "user" and m[i+1]["role"] == "assistant":
+                    u, b = m[i]["content"].strip(), m[i+1]["content"].strip()
+                    if not keep_reasoning: b = re.sub(r'<think>.*?</think>', '', b, flags=re.DOTALL).strip()
+                    if u and b: pairs.append((u,b))
+        if subset_size and len(pairs) > subset_size: random.shuffle(pairs); return pairs[:subset_size]
+        return pairs
+    except Exception: return []
+
+def load_dolci_think_dataset(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        ds = load_dataset("allenai/Dolci-Think-SFT-7B", split="train", streaming=True)
+        pairs = []
+        for row in ds:
+            if subset_size and len(pairs) >= subset_size: break
+            m = row.get("messages")
+            if m and len(m) >= 2: pairs.append((m[0]["content"].strip(), m[1]["content"].strip()))
+        return pairs
+    except Exception: return []
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4.  Training Utilities (Torch)
+# ─────────────────────────────────────────────────────────────────────────────
+
+if TORCH_AVAILABLE:
+    class SFTDataset(Dataset):
+        def __init__(self, conversations, tokenizer, max_length=128):
+            self.samples = []
+            for u, b in conversations:
+                prompt = f"{USER_TOKEN} {u}\n{BOT_TOKEN} "
+                full = prompt + b + EOS_TOKEN
+                full_ids = tokenizer.encode(full, truncation=True, max_length=max_length)
+                prompt_len = min(len(tokenizer.encode(prompt)), len(full_ids))
+                mask = [0]*prompt_len + [1]*(len(full_ids)-prompt_len)
+                self.samples.append({"input_ids": full_ids, "loss_mask": mask})
+        def __len__(self): return len(self.samples)
+        def __getitem__(self, idx): return self.samples[idx]
+
+    def collate_fn(batch, tokenizer):
+        pad = tokenizer.pad_token_id
+        max_len = max(len(s["input_ids"]) for s in batch)
+        ids, masks = [], []
+        for s in batch:
+            ids.append(s["input_ids"] + [pad]*(max_len - len(s["input_ids"])))
+            masks.append(s["loss_mask"] + [0]*(max_len - len(s["loss_mask"])))
+        return {"input_ids": torch.tensor(ids, dtype=torch.long), "loss_mask": torch.tensor(masks, dtype=torch.float)}
+
+def cleanup_epoch_checkpoints(pattern="*.pt"):
+    for p in glob.glob(pattern):
+        try: os.remove(p)
+        except Exception: pass
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5.  Unified Inference Backend
+# ─────────────────────────────────────────────────────────────────────────────
+
+_model_lock = threading.Lock()
+_cached_model = None
+_cached_tok   = None
+
+def load_generation_config() -> dict:
+    defaults = {"max_new_tokens": 512, "temperature": 0.7, "top_p": 0.9, "repetition_penalty": 1.0}
+    if os.path.exists(CONFIG_PATH):
         try:
-            os.remove(path)
-        except OSError as e:
-            pass
+            with open(CONFIG_PATH) as f: defaults.update(json.load(f))
+        except Exception: pass
+    return defaults
 
+# ── MLX Generation ──
+def _generate_mlx(model, tokenizer, prompt: str, max_tokens: int, temp: float, top_p: float, rep_pen: float) -> str:
+    from mlx_lm import generate
+    try:
+        from mlx_lm.sample_utils import make_sampler
+        sampler = make_sampler(temp=temp, top_p=top_p, repetition_penalty=rep_pen)
+        return generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, sampler=sampler, verbose=False)
+    except Exception:
+        try: return generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, temp=temp, top_p=top_p, repetition_penalty=rep_pen, verbose=False)
+        except Exception: return generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)
 
-def prepare_conversations(
-    bst_size=10000,
-    dd_size=30000,
-    md_dir="training_data",
-    use_bst=True,
-    use_dd=True,
-    use_md=True,
-):
-    import random
-    all_pairs = []
-    if use_bst:
-        all_pairs += load_blended_skill_talk(subset_size=bst_size)
-    if use_dd:
-        all_pairs += load_daily_dialog(subset_size=dd_size)
-    if use_md:
-        all_pairs += load_markdown_files(md_dir=md_dir)
-    all_pairs = [
-        (u, b) for u, b in all_pairs
-        if not is_degenerate(u) and not is_degenerate(b)
-    ]
-    random.shuffle(all_pairs)
-    return all_pairs
-
-class SFTDataset(Dataset):
-    def __init__(self, conversations, tokenizer, max_length=128):
-        self.max_length = max_length
-        self.samples = []
-        texts = []
-        prompt_lengths = []
-        for user, bot in conversations:
-            prompt = f"{USER_TOKEN} {user}\n{BOT_TOKEN} "
-            full   = prompt + bot + EOS_TOKEN
-            texts.append(full)
-            prompt_lengths.append(len(tokenizer.encode(prompt)))
-        batch_enc = tokenizer(
-            texts,
-            truncation=True,
-            max_length=max_length,
-            padding=False,
-            return_length=False,
-        )
-        iterator = enumerate(zip(batch_enc["input_ids"], prompt_lengths))
-        if TQDM_AVAILABLE:
-            iterator = tqdm(iterator, total=len(conversations), desc="Encoding")
-        for _, (full_ids, orig_prompt_len) in iterator:
-            prompt_len = min(orig_prompt_len, len(full_ids))
-            loss_mask  = [0] * prompt_len + [1] * (len(full_ids) - prompt_len)
-            self.samples.append({"input_ids": full_ids, "loss_mask": loss_mask})
-    def __len__(self):
-        return len(self.samples)
-    def __getitem__(self, idx):
-        return self.samples[idx]
-
-
-def collate_fn(batch, tokenizer):
-    pad_val = tokenizer.pad_token_id
-    max_len  = max(len(s["input_ids"]) for s in batch)
-    input_ids, loss_mask = [], []
-    for s in batch:
-        ids = s["input_ids"]
-        m   = s["loss_mask"]
-        input_ids.append(ids + [pad_val] * (max_len - len(ids)))
-        loss_mask.append(m   + [0]       * (max_len - len(m)))
-    return {
-        "input_ids": torch.tensor(input_ids, dtype=torch.long),
-        "loss_mask": torch.tensor(loss_mask, dtype=torch.float),
-    }
-
-
-def train_one_epoch(model, loader, optimizer, scheduler, device, accum_steps,
-                    max_grad_norm=1.0, epoch=None):
-    model.train()
-    total_loss = 0.0
-    total_toks = 0
-    optimizer.zero_grad()
-    bar  = tqdm(loader, desc=f"Epoch {epoch}", leave=False) if TQDM_AVAILABLE else loader
-    step = 0
-    for step, batch in enumerate(bar):
-        input_ids = batch["input_ids"].to(device)
-        loss_mask = batch["loss_mask"].to(device)
-        x = input_ids[:, :-1]
-        y = input_ids[:, 1:]
-        m = loss_mask[:, 1:]
-        logits = model(x).logits
-        loss_flat = F.cross_entropy(
-            logits.reshape(-1, logits.size(-1)),
-            y.reshape(-1),
-            reduction="none",
-            ignore_index=model.config.eos_token_id,
-        )
-        masked_loss = (loss_flat * m.reshape(-1)).sum()
-        n_tokens    = m.sum().clamp(min=1)
-        loss        = masked_loss / n_tokens / accum_steps
-        loss.backward()
-        total_loss += masked_loss.item()
-        total_toks += n_tokens.item()
-        if (step + 1) % accum_steps == 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-            optimizer.step()
-            scheduler.step()
-            optimizer.zero_grad()
-            if device.type == "mps":
-                torch.mps.empty_cache()
-            if TQDM_AVAILABLE:
-                bar.set_postfix(loss=f"{masked_loss.item()/n_tokens.item():.4f}")
-    if (step + 1) % accum_steps != 0:
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-        optimizer.step()
-        scheduler.step()
-        optimizer.zero_grad()
-        if device.type == "mps":
-            torch.mps.empty_cache()
-    return total_loss / max(total_toks, 1)
-
-
-@torch.no_grad()
-def evaluate(model, loader, device):
-    model.eval()
-    total_loss = 0.0
-    total_toks = 0
-    for batch in loader:
-        input_ids = batch["input_ids"].to(device)
-        loss_mask = batch["loss_mask"].to(device)
-        x = input_ids[:, :-1]
-        y = input_ids[:, 1:]
-        m = loss_mask[:, 1:]
-        logits    = model(x).logits
-        loss_flat = F.cross_entropy(
-            logits.reshape(-1, logits.size(-1)),
-            y.reshape(-1),
-            reduction="none",
-            ignore_index=model.config.eos_token_id,
-        )
-        masked_loss = (loss_flat * m.reshape(-1)).sum()
-        total_loss += masked_loss.item()
-        total_toks += m.sum().item()
-    return total_loss / max(total_toks, 1)
-
-
-_CLEANUP_RE = re.compile(r'</?[a-zA-Z0-9]+[^>]*>|\|[a-zA-Z_]+\|')
-_SPACE_RE   = re.compile(r'\s+')
-_STOP_RE = re.compile(
-    r'\n\s*(?:User|Bot|You|modelo|modell|zabud)\s*[:\-]?',
-    re.IGNORECASE
-)
-
-def generate_reply(model, tokenizer, prompt_text, device,
-                   max_new_tokens=None, temperature=None, top_p=None, top_k=None,
-                   repetition_penalty=None):
-    gen_config = load_generation_config()
-    max_new_tokens = max_new_tokens if max_new_tokens is not None else gen_config.get("max_new_tokens", 200)
-    temperature = temperature if temperature is not None else gen_config.get("temperature", 0.7)
-    top_p = top_p if top_p is not None else gen_config.get("top_p", 0.9)
-    top_k = top_k if top_k is not None else gen_config.get("top_k", 40)
-    repetition_penalty = repetition_penalty if repetition_penalty is not None else gen_config.get("repetition_penalty", 1.0)
-    do_sample = gen_config.get("do_sample", True)
-    no_repeat_ngram_size = gen_config.get("no_repeat_ngram_size", 0)
-    # Minimum mean token probability below which the model admits it doesn't know.
-    # Range 0.0–1.0. Lower = more permissive. Raise to be stricter.
-    confidence_threshold = float(gen_config.get("confidence_threshold", 0.10))
-
-    end_of_turn_id = tokenizer.convert_tokens_to_ids("<end_of_turn>")
-    stop_ids = [tokenizer.eos_token_id]
-    if end_of_turn_id is not None:
-        stop_ids.append(end_of_turn_id)
+# ── Transformers Generation ──
+def _generate_hf(model, tokenizer, prompt: str, max_tokens: int, temp: float, top_p: float, rep_pen: float) -> str:
+    device = next(model.parameters()).device
+    enc = tokenizer(prompt, return_tensors="pt")
+    input_ids = enc["input_ids"].to(device)
     with torch.inference_mode():
-        enc = tokenizer(prompt_text, return_tensors="pt", truncation=False)
-        input_ids = enc["input_ids"].to(device)
-        attention_mask = enc["attention_mask"].to(device)
-        max_ctx = getattr(model.config, "max_position_embeddings", 8192) - max_new_tokens
-        if input_ids.size(1) > max_ctx:
-            input_ids = input_ids[:, -max_ctx:]
-            attention_mask = attention_mask[:, -max_ctx:]
-        gen_out = model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            max_new_tokens=max_new_tokens,
-            do_sample=do_sample,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k,
-            repetition_penalty=repetition_penalty,
-            no_repeat_ngram_size=no_repeat_ngram_size,
-            use_cache=True,
-            renormalize_logits=True,
-            eos_token_id=stop_ids,
-            pad_token_id=tokenizer.eos_token_id,
-            output_scores=True,
-            return_dict_in_generate=True,
-        )
-        output_ids = gen_out.sequences
-        scores = gen_out.scores  # tuple of (vocab_size,) tensors, one per generated token
+        out = model.generate(input_ids=input_ids, max_new_tokens=max_tokens, do_sample=(temp > 0), temperature=temp, top_p=top_p, repetition_penalty=rep_pen, pad_token_id=tokenizer.eos_token_id)
+    return tokenizer.decode(out[0, input_ids.size(1):], skip_special_tokens=True).strip()
 
-    generated = output_ids[0, input_ids.size(1):]
+def load_model():
+    global _cached_model, _cached_tok
+    if _cached_model: return _cached_model, _cached_tok
+    with _model_lock:
+        if _cached_model: return _cached_model, _cached_tok
+        if BACKEND == "mlx":
+            from mlx_lm import load
+            if os.path.isdir(FUSED_MODEL_PATH):
+                print(f"[iris] Loading FUSED model from {FUSED_MODEL_PATH}...")
+                _cached_model, _cached_tok = load(FUSED_MODEL_PATH)
+            else:
+                adapter = ADAPTER_PATH if os.path.isdir(ADAPTER_PATH) else None
+                tag = f" + adapters from {adapter}" if adapter else ""
+                print(f"[iris] Loading {MLX_MODEL_ID}{tag}...")
+                _cached_model, _cached_tok = load(MLX_MODEL_ID, adapter_path=adapter)
+        else:
+            device = torch.device("cuda" if BACKEND == "cuda" else "cpu")
+            _cached_tok = AutoTokenizer.from_pretrained(HF_MODEL_ID)
+            if _cached_tok.pad_token is None: _cached_tok.pad_token = _cached_tok.eos_token
+            if BACKEND == "cuda":
+                _cached_model = AutoModelForCausalLM.from_pretrained(HF_MODEL_ID, device_map="auto", load_in_4bit=True)
+            else:
+                _cached_model = AutoModelForCausalLM.from_pretrained(HF_MODEL_ID).to(device)
+            if os.path.isdir(PEFT_ADAPTER):
+                from peft import PeftModel
+                _cached_model = PeftModel.from_pretrained(_cached_model, PEFT_ADAPTER).merge_and_unload()
+        return _cached_model, _cached_tok
 
-    if scores and confidence_threshold > 0.0:
-        import math
-        entropies = []
-        for i, s in enumerate(scores):
-            if i >= len(generated):
-                break
-            probs = F.softmax(s[0].float(), dim=-1)
-            entropy = -(probs * probs.clamp(min=1e-9).log()).sum().item()
-            entropies.append(entropy)
-        mean_entropy = sum(entropies) / len(entropies) if entropies else 0.0
-        if mean_entropy > confidence_threshold:
-            return "I'm not sure about that — it seems to be outside what I've been trained on."
-
-    reply = tokenizer.decode(
-        generated,
-        skip_special_tokens=True,
-        clean_up_tokenization_spaces=False,
-    ).strip()
-    stop_match = _STOP_RE.search(reply)
-    if stop_match:
-        reply = reply[:stop_match.start()].strip()
-
-    if reply and reply.rstrip().endswith(':') and '\n' not in reply:
-        return "I'm not sure about that — it seems to be outside what I've been trained on."
-
-    reply = truncate_at_hallucination(reply)
-    return reply or "I'm not sure what to say."
-
-def chat(model, tokenizer, device):
-    print("Chat started! Type 'quit' to exit.")
+def generate_reply(model, tokenizer, prompt_text, device=None, **kwargs):
+    cfg = load_generation_config()
+    max_t = int(kwargs.get("max_new_tokens") or cfg["max_new_tokens"])
+    temp  = float(kwargs.get("temperature") or cfg["temperature"])
+    top_p = float(kwargs.get("top_p") or cfg["top_p"])
+    rep_p = float(kwargs.get("repetition_penalty") or cfg["repetition_penalty"])
     
-    messages = []
-    
-    while True:
-        user_input = input("You: ")
-        if user_input.lower() in ["quit", "exit"]:
-            break
-            
-        messages.append({"role": "user", "content": user_input})
+    try:
+        if BACKEND == "mlx": raw = _generate_mlx(model, tokenizer, prompt_text, max_t, temp, top_p, rep_p)
+        else: raw = _generate_hf(model, tokenizer, prompt_text, max_t, temp, top_p, rep_p)
         
-        # Apply the exact template Gemma expects
-        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        
-        # Use generate_reply to handle inference_mode, context length, and config
-        response = generate_reply(model, tokenizer, prompt, device)
-        print(f"Bot: {response}\n")
-        
-        messages.append({"role": "assistant", "content": response})
+        # Cleanup
+        reply = raw.strip()
+        reply = re.split(r'\n\s*(?:User|Bot|You)\s*[:\-]', reply, flags=re.IGNORECASE)[0].strip()
+        # Hallucination cleanup
+        sentences = re.split(r'(?<=[.!?])\s+', reply)
+        clean = []
+        for s in sentences:
+            if re.search(r'(MigrationBuilder|nakalista|\ud795|\ufa4c|#+#|http(?:http|https))', s, re.IGNORECASE): break
+            clean.append(s)
+        return " ".join(clean).strip() or "I'm not sure what to say."
+    except Exception as e: return f"Error: {e}"
+
+if __name__ == "__main__":
+    m, t = load_model()
+    print(f"Backend: {BACKEND} | Model ready.")
+    print("Iris: " + generate_reply(m, t, "User: Hello!\nBot: "))

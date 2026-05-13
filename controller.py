@@ -33,17 +33,15 @@ except ImportError:
 
 
 try:
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-    from iris import generate_reply, get_device
+    from iris import load_model as _mlx_load_model, get_device, generate_reply, solve_math
     IRIS_AVAILABLE = True
 except ImportError:
     IRIS_AVAILABLE = False
-    print("[WARNING] iris.py / transformers not found. Running in rule-only mode (no AI chat).")
+    print("[WARNING] iris.py not found or dependencies missing. Running in rule-only mode.")
 
 
-CONFIG_FILE = "./config/control.conf"
-MERGED_MODEL = "./iris_merged_model"
+CONFIG_FILE  = "./config/control.conf"
+# Configuration
 
 DEFAULT_CONFIG = {
     "email": {
@@ -891,48 +889,14 @@ def clipboard_read():
 
 
 def load_iris_model():
+    """
+    Load the phi-4 MLX model + LoRA adapters.
+    Returns (model, tokenizer, device) matching the old API.
+    """
     if not IRIS_AVAILABLE:
         return None, None, None
-    if not os.path.isdir(MERGED_MODEL):
-        print(f"[WARNING] {MERGED_MODEL} not found. Chat responses will be unavailable.")
-        print("          Run train.py first to produce the merged model.")
-        return None, None, None
+    model, tokenizer = _mlx_load_model()
     device = get_device()
-    print(f"[Iris] Loading model from {MERGED_MODEL} on {device} …")
-    tokenizer = AutoTokenizer.from_pretrained(MERGED_MODEL)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    try:
-        if device.type == "cuda":
-            from transformers import BitsAndBytesConfig
-            bnb = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=torch.float16,
-            )
-            model = AutoModelForCausalLM.from_pretrained(
-                MERGED_MODEL,
-                quantization_config=bnb,
-                device_map="auto",
-                low_cpu_mem_usage=True,
-            )
-        else:
-            dtype = torch.float16 if device.type == "mps" else torch.float32
-            model = AutoModelForCausalLM.from_pretrained(
-                MERGED_MODEL,
-                torch_dtype=dtype,
-                low_cpu_mem_usage=True,
-            ).to(device)
-    except Exception:
-        dtype = torch.float16 if device.type != "cpu" else torch.float32
-        model = AutoModelForCausalLM.from_pretrained(
-            MERGED_MODEL,
-            torch_dtype=dtype,
-            low_cpu_mem_usage=True,
-        ).to(device)
-    model.eval()
-    print("[Iris] Model ready.\n")
     return model, tokenizer, device
 
 def iris_chat_reply(model, tokenizer, device, history: list, user_text: str) -> str:

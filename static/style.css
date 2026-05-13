@@ -537,28 +537,51 @@ body.chat-active .center-panel {
     border-top: 1px solid rgba(163, 133, 255, 0.1);
 }
 
-/* AI typing indicator */
+/* AI thinking indicator */
 .typing-indicator .message-content {
     display: flex;
-    gap: 5px;
-    align-items: center;
+    flex-direction: column;
+    gap: 8px;
     padding: 16px 22px;
+    color: var(--iris-purple);
+    font-size: 14px;
+    font-weight: 500;
+    font-style: italic;
+    background: rgba(163, 133, 255, 0.05);
+    border: 1px dashed rgba(163, 133, 255, 0.3);
 }
 
-.typing-dot {
-    width: 7px;
-    height: 7px;
+.thinking-text {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    animation: thinkingPulse 2s infinite ease-in-out;
+}
+
+.thinking-dot-container {
+    display: flex;
+    gap: 4px;
+}
+
+.thinking-dot {
+    width: 4px;
+    height: 4px;
     border-radius: 50%;
-    background: var(--text-dim);
-    animation: typingPulse 1.4s infinite ease-in-out;
+    background: var(--iris-purple);
+    animation: thinkingDot 1.4s infinite ease-in-out;
 }
 
-.typing-dot:nth-child(2) { animation-delay: 0.2s; }
-.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+.thinking-dot:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dot:nth-child(3) { animation-delay: 0.4s; }
 
-@keyframes typingPulse {
-    0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
-    40% { opacity: 1; transform: scale(1); }
+@keyframes thinkingPulse {
+    0%, 100% { opacity: 0.7; transform: scale(0.98); }
+    50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes thinkingDot {
+    0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+    40% { opacity: 1; transform: translateY(-3px); }
 }
 
 @keyframes sendButtonHover {

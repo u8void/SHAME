@@ -12,18 +12,26 @@ Iris AI is a fine-tuned conversational assistant built on top of `google/gemma-2
 
 ```
 iris/
-├── iris.py            # Core library: data loading, training utilities, generation, chat loop
-├── train.py           # Unified training entry point (auto-selects backend)
-├── chat.py            # Terminal chat client (loads merged model)
-├── app.py             # Flask web server with chat and training endpoints
-├── training/          # Default directory for custom *.md training files
-├── outputs/           # Training log output (created at runtime)
-├── logs/              # Per-session chat logs (created at runtime)
-├── iris_lora_unified/ # LoRA adapter output (default)
-├── iris_merged_model/ # Merged full model output (used by chat.py and app.py)
+├── iris.py            # Unified Backend: MLX, CUDA, and CPU support + data loaders
+├── train.py           # Legacy Torch training entry point
+├── app.py             # Flask web server (unified backend)
+├── controller.py      # PC Agent controller (unified backend)
+├── training/          # Custom markdown training files
+├── mlx_data/          # MLX training data (JSONL)
+├── iris_14b_model/    # Quantized model
 └── templates/
-    └── index.html     # Web UI template (required by app.py)
+    └── index.html     # Web UI template
 ```
+
+---
+
+## Hardware Support
+
+Iris AI now uses a **Unified Backend** that automatically detects your hardware:
+
+- **Apple Silicon (M1-M4)**: Uses `mlx_lm` for high-speed inference and training.
+- **NVIDIA GPU**: Uses `transformers` with `bitsandbytes` 4-bit quantization.
+- **CPU**: Universal fallback using standard `transformers`.
 
 ---
 
@@ -31,7 +39,22 @@ iris/
 
 ### `iris.py`
 
-The shared library used by all other modules. Contains data loading, dataset construction, the training loop, and the inference pipeline.
+The core engine. Automatically routes requests to the correct hardware backend.
+
+#### Functions
+
+- `load_model()`: Loads the appropriate model (Phi-4 by default).
+- `generate_reply(model, tokenizer, prompt, ...)`: Unified generation with support for both MLX and Transformers.
+- `solve_math(text)`: Sympy-based math interceptor.
+- `load_*_dataset()`: Collection of data loaders for training.
+
+### `train_mlx.py`
+
+Recommended for Mac users. A simple wrapper for the MLX LoRA training pipeline.
+
+```bash
+python3 train_mlx.py --iters 3000 --batch-size 1 --lr 2e-5
+```
 
 #### Constants
 
