@@ -1,4 +1,3 @@
-
 """
 iris_controller.py — Iris AI PC Agent
 ======================================
@@ -24,6 +23,103 @@ from email.mime.multipart import MIMEMultipart
 from pathlib import Path
 
 IS_INTERACTIVE = True
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  WEB SEARCH  (DuckDuckGo HTML — no API key required)
+# ──────────────────────────────────────────────────────────────────────────────
+
+import html as _html
+
+_WEB_SEARCH_TRIGGERS = re.compile(
+    r"""(?xi)
+    \b(
+      what | who  | when | where | why  | how  | which | whose |
+      latest | recent | current | today | news | update | price |
+      weather | score | result | explain | define | meaning | tell\s+me |
+      search | look\s+up | find\s+out | is\s+it | are\s+there |
+      difference\s+between | compare | vs\.?
+    )\b
+    |
+    \?$                         # ends with a question mark
+    """,
+    re.IGNORECASE,
+)
+
+_WEB_SEARCH_SKIP = re.compile(
+    r"""(?xi)
+    \b(
+      open | launch | play | send | copy | run | set\s+volume |
+      brightness | clipboard | email | spotify | youtube |
+      terminal | command
+    )\b
+    """,
+    re.IGNORECASE,
+)
+
+
+def should_web_search(text: str) -> bool:
+    """Return True when the query looks like a factual / informational question."""
+    if _WEB_SEARCH_SKIP.search(text):
+        return False
+    return bool(_WEB_SEARCH_TRIGGERS.search(text))
+
+
+def web_search(query: str, max_results: int = 5) -> str:
+    """
+    Search DuckDuckGo and return the top snippet results as plain text.
+    Uses only the stdlib — no extra packages needed.
+    """
+    try:
+        q   = urllib.parse.quote_plus(query)
+        url = f"https://html.duckduckgo.com/html/?q={q}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0 Safari/537.36"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        )
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode    = ssl.CERT_NONE
+
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+            body = resp.read().decode("utf-8", errors="ignore")
+
+        # ── parse titles ──────────────────────────────────────────────────────
+        titles   = re.findall(
+            r'class=["\']result__a["\'][^>]*>(.*?)</a>',
+            body, re.DOTALL,
+        )
+        # ── parse snippets ────────────────────────────────────────────────────
+        snippets = re.findall(
+            r'class=["\']result__snippet["\'][^>]*>(.*?)</(?:a|span)>',
+            body, re.DOTALL,
+        )
+
+        def clean(s: str) -> str:
+            s = re.sub(r'<[^>]+>', '', s)
+            return _html.unescape(s).strip()
+
+        results = []
+        for i, (t, s) in enumerate(zip(titles[:max_results], snippets[:max_results])):
+            t, s = clean(t), clean(s)
+            if t or s:
+                results.append(f"[Result {i+1}] {t}\n{s}")
+
+        if not results:
+            return "(No web results found for this query.)"
+
+        return "\n\n".join(results)
+
+    except Exception as exc:
+        return f"(Web search unavailable: {exc})"
+
+
 try:
     import pyperclip
     CLIPBOARD_AVAILABLE = True
@@ -31,17 +127,15 @@ except ImportError:
     CLIPBOARD_AVAILABLE = False
     print("[INFO] Install 'pyperclip' for clipboard support: pip install pyperclip")
 
-
 try:
-    from iris import load_model as _mlx_load_model, get_device, generate_reply, solve_math
+    # Added BookRetriever to import
+    from iris import load_model as _mlx_load_model, get_device, generate_reply, solve_math, BookRetriever
     IRIS_AVAILABLE = True
 except ImportError:
     IRIS_AVAILABLE = False
     print("[WARNING] iris.py not found or dependencies missing. Running in rule-only mode.")
 
-
 CONFIG_FILE  = "./config/control.conf"
-# Configuration
 
 DEFAULT_CONFIG = {
     "email": {
@@ -70,20 +164,15 @@ DEFAULT_CONFIG = {
     "browser": "default"
 }
 
-
 def load_config() -> dict:
     if not os.path.exists(CONFIG_FILE):
+        os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
         with open(CONFIG_FILE, "w") as f:
             json.dump(DEFAULT_CONFIG, f, indent=2)
         print(f"[INFO] Created config template at {CONFIG_FILE}")
         print("       Edit it with your email credentials and app paths before sending mail.")
     with open(CONFIG_FILE) as f:
         return json.load(f)
-
-
-
-
-
 
 _INTENTS = [
     (
@@ -162,7 +251,6 @@ _INTENTS = [
     ),
 ]
 
-
 def detect_intent(text: str):
     t = text.strip()
     for intent_name, pattern in _INTENTS:
@@ -170,11 +258,6 @@ def detect_intent(text: str):
         if m:
             return intent_name, m
     return "ai_agent", None
-
-
-
-
-
 
 AI_AGENT_SYSTEM_PROMPT = """
 You are an AI PC assistant. The user will ask you to perform tasks.
@@ -187,31 +270,40 @@ Available actions:
 - open_app(name)
 - youtube_video(query)
 - youtube_channel(name)
-- spotify_song(query)                    // plays a song on Spotify
-- send_email(to, subject, body)          // to can be email or contact name
-- open_file(path)                        // absolute or relative path
-- search_files(query, folder)            // finds files/folders by name
-- run_command(command)                   // executes a shell command (background)
-- open_terminal(command)                 // opens a VISIBLE terminal window (Mac only)
-- volume_up, volume_down, volume_mute    // control system volume
-- volume_set(percent)                    // set volume 0-100
+- spotify_song(query)
+- send_email(to, subject, body)
+- open_file(path)
+- search_files(query, folder)
+- run_command(command)
+- open_terminal(command)
+- volume_up, volume_down, volume_mute
+- volume_set(percent)
 - brightness_up, brightness_down, brightness_set(percent)
-- system_info(what)                      // "cpu", "memory", "disk", "ip", "hostname", "all"
+- system_info(what)
 - clipboard_copy(text)
-- clipboard_read                         // returns current clipboard text
-- chat(response)                         // just reply conversationally
+- clipboard_read
+- fix_file(path, instructions)           // Reads a file, applies your instructions, and overwrites it.
+- chat(response)
 
 For actions that need parameters, output JSON exactly like:
 {"action": "open_website", "url": "https://example.com"}
 {"action": "run_command", "command": "ping -c 4 google.com"}
+{"action": "fix_file", "path": "app.py", "instructions": "Fix the route handler logic"}
 {"action": "chat", "response": "Hello! How can I help?"}
 
-If the user's request is unclear or not an action, use the "chat" action with a helpful message. Output ONLY the JSON, no other text.
+CRITICAL RULES:
+1. If the user asks to "send" or "show" code/information TO THEM in this chat, use the "chat" action.
+2. ONLY use "send_email" if the user explicitly specifies an email recipient or says "email this".
+3. NEVER refuse a request for code. Provide full, complete implementations when asked.
+4. For layouts (like product grids), avoid using `Container maxWidth="sm"` as it forces items to stack vertically. Use `maxWidth="lg"` or `"xl"` for horizontal arrangements.
+5. Output ONLY the JSON object. No other conversational text should be outside the JSON.
+6. When WEB SEARCH RESULTS are provided in your context, use them to give an accurate, up-to-date answer. Summarise the findings naturally in your "chat" response — do not expose raw result numbers to the user.
+7. If the user says your previous answer was wrong (e.g., "Wrong Answer", "WA", "bug"), DO NOT repeat the same logic. Thoroughly re-evaluate the problem, find the flaw in your reasoning, and provide a fixed or completely different approach.
 """.strip()
+
 
 def parse_ai_response(text: str) -> dict | None:
     """Try to extract a JSON object from Iris's output."""
-
     match = re.search(r'\{.*\}', text, re.DOTALL)
     if not match:
         return None
@@ -219,52 +311,65 @@ def parse_ai_response(text: str) -> dict | None:
         return json.loads(match.group())
     except json.JSONDecodeError:
         return None
-def ai_agent_handle(user_input: str, model, tokenizer, device, history: list) -> str:
-    """Use Iris to decide which action to perform."""
+
+def ai_agent_handle(user_input: str, model, tokenizer, device, retriever, history: list) -> str:
+    """Use Iris to decide which action to perform, injecting RAG context if available."""
     if model is None:
         return "Iris model not available – only direct commands work right now."
 
+    # ── RAG: search local knowledge base ────────────────────────────────────
+    context = retriever.retrieve(user_input, top_k=3) if retriever else ""
 
+    # ── Web search: run automatically for informational queries ─────────────
+    web_results = ""
+    if should_web_search(user_input):
+        print(f"[Web Search] Searching for: {user_input}")
+        web_results = web_search(user_input)
+        print(f"[Web Search] Got {len(web_results)} chars of results.")
 
-    system_instruction = AI_AGENT_SYSTEM_PROMPT
+    sys_prompt = AI_AGENT_SYSTEM_PROMPT
+
+    if context:
+        sys_prompt += (
+            "\n\nYou also have access to the following reference material. "
+            "Use it to accurately answer the user's request if relevant:\n"
+            f"REFERENCE EXCERPT:\n{context}"
+        )
+
+    if web_results:
+        sys_prompt += (
+            "\n\nWEB SEARCH RESULTS (fetched live for this query — use these "
+            "to give an accurate, up-to-date answer):\n"
+            f"{web_results}"
+        )
+
+    system_msg = {"role": "system", "content": sys_prompt}
     raw_messages = history[-8:] + [{"role": "user", "content": user_input}]
-
 
     merged_messages = []
     for msg in raw_messages:
         if merged_messages and merged_messages[-1]["role"] == msg["role"]:
             merged_messages[-1]["content"] += "\n" + msg["content"]
         else:
-
             merged_messages.append({"role": msg["role"], "content": msg["content"]})
-
 
     if merged_messages and merged_messages[0]["role"] == "assistant":
         merged_messages.pop(0)
 
-
-    if merged_messages:
-        merged_messages[0]["content"] = f"{system_instruction}\n\nUser: {merged_messages[0]['content']}"
-    else:
-        merged_messages = [{"role": "user", "content": f"{system_instruction}\n\nUser: {user_input}"}]
-
-    messages = merged_messages
+    messages = [system_msg] + merged_messages
 
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     reply = generate_reply(model, tokenizer, prompt, device, max_new_tokens=2048)
 
     action_dict = parse_ai_response(reply)
     if action_dict is None:
-
         return reply
-
 
     history.append({"role": "user", "content": user_input})
     history.append({"role": "assistant", "content": reply})
 
-
     action = action_dict.get("action", "chat")
-    
+
     def execute_action():
         try:
             if action == "open_website":
@@ -326,6 +431,10 @@ def ai_agent_handle(user_input: str, model, tokenizer, device, history: list) ->
                 return clipboard_copy(text)
             elif action == "clipboard_read":
                 return clipboard_read()
+            elif action == "fix_file":
+                path = action_dict.get("path", "")
+                instructions = action_dict.get("instructions", "")
+                return handle_fix_file(path, instructions, model, tokenizer, device)
             elif action == "chat":
                 return action_dict.get("response", "I'm not sure how to help with that.")
             else:
@@ -334,22 +443,17 @@ def ai_agent_handle(user_input: str, model, tokenizer, device, history: list) ->
             return f"Action '{action}' failed: {e}"
 
     action_result = execute_action()
-    
+
     think_match = re.search(r'<think>.*?</think>', reply, re.DOTALL)
     if think_match:
         return f"{think_match.group(0)}\n\n{action_result}"
     return action_result
-
-
-
-
 
 def _open_url(url: str):
     if not url.startswith("http"):
         url = "https://" + url
     print(f"  [→ Browser] {url}")
     webbrowser.open(url)
-
 
 def handle_website(match: re.Match):
     url = match.group(1).strip()
@@ -359,7 +463,6 @@ def handle_website(match: re.Match):
 def handle_website_from_url(url: str):
     _open_url(url)
     return f"Opening {url}."
-
 
 def _launch_app(cmd: str):
     system = platform.system()
@@ -401,7 +504,6 @@ def handle_app_by_name(app_name: str, config: dict = None):
         return f"Launching {app_name}."
     else:
         return f"I couldn't find '{app_name}'. Add it to {CONFIG_FILE} under 'apps'."
-
 
 def _youtube_search_url(query: str) -> str:
     q = urllib.parse.quote_plus(query)
@@ -510,7 +612,6 @@ def handle_youtube_channel_from_name(name: str):
         _open_url(search_url)
         return f"Searching YouTube for channel '{name}'."
 
-
 def handle_spotify(match: re.Match):
     return handle_spotify_song(match.group(1).strip())
 
@@ -521,7 +622,6 @@ def handle_spotify_song(query: str):
     url = f"https://open.spotify.com/search/{q}"
     _open_url(url)
     return f"Playing '{query}' on Spotify."
-
 
 def _resolve_contact(raw: str, contacts: dict) -> str:
     if raw and "@" in raw:
@@ -623,7 +723,6 @@ def handle_email_from_parts(to_raw: str, subject: str, body: str, config: dict) 
             return "Email cancelled."
     return _send_email(to_addr, subject, body, config)
 
-
 def handle_open_file(path_str: str):
     path = Path(path_str).expanduser().resolve()
     if not path.exists():
@@ -700,7 +799,6 @@ def handle_open_terminal(command: str = None):
         else:
 
             for term in ["gnome-terminal", "xterm", "konsole"]:
-                import shutil
                 if shutil.which(term):
                     if command:
                         subprocess.Popen([term, "-e", f"bash -c '{command}; exec bash'"])
@@ -710,7 +808,6 @@ def handle_open_terminal(command: str = None):
             return "Could not find a terminal emulator."
     except Exception as e:
         return f"Failed to open terminal: {e}"
-
 
 def handle_volume(action: str):
     system = platform.system()
@@ -725,7 +822,6 @@ def handle_volume(action: str):
             return "Unknown volume action."
     elif system == "Windows":
 
-        import shutil
         nircmd = shutil.which("nircmd")
         if not nircmd:
             return "Volume control on Windows needs nircmd (https://www.nirsoft.net/utils/nircmd.html)"
@@ -762,7 +858,6 @@ def handle_volume_set(pct: int):
         cmd = f"amixer -D pulse sset Master {pct}%"
     print(f"  [→ Volume set] {cmd}")
     return handle_run_command(cmd)
-
 
 def handle_brightness(action: str):
     system = platform.system()
@@ -828,7 +923,6 @@ def handle_brightness_set(pct: int):
     print(f"  [→ Brightness set] {cmd}")
     return handle_run_command(cmd) if system == "Darwin" else f"Brightness set to {pct}%."
 
-
 def get_system_info(what: str = "all"):
     import platform as pf
     info = []
@@ -845,7 +939,6 @@ def get_system_info(what: str = "all"):
             add("RAM", "Install psutil for memory info")
     if what in ("disk", "all"):
         try:
-            import shutil
             total, used, free = shutil.disk_usage("/")
             add("Disk", f"{free / (1024**3):.1f} GB free / {total / (1024**3):.1f} GB")
         except:
@@ -863,7 +956,6 @@ def get_system_info(what: str = "all"):
     if what in ("hostname", "all"):
         add("Hostname", pf.node())
     return "\n".join(info) if info else "No information available."
-
 
 def clipboard_copy(text: str):
     if not CLIPBOARD_AVAILABLE:
@@ -883,10 +975,49 @@ def clipboard_read():
     except Exception as e:
         return f"Clipboard read failed: {e}"
 
+def handle_fix_file(path: str, instructions: str, model, tokenizer, device):
+    if not path:
+        return "Path required."
+    path_obj = Path(path).expanduser().resolve()
+    if not path_obj.exists() or not path_obj.is_file():
+        return f"File not found: {path_obj}"
 
+    try:
+        with open(path_obj, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        return f"Read error: {e}"
 
+    print(f"  [→ AI Coder] Modifying {path_obj.name}...")
 
+    sys_prompt = (
+        "You are an expert software engineer. Analyze the provided file content and apply these instructions: " + instructions + "\n\n"
+        "Output ONLY the raw, complete, modified file content. Do NOT include markdown blocks. "
+        "Do NOT add conversational text."
+    )
+    user_msg = f"Current Content of {path_obj.name}:\n\n{content}"
 
+    messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_msg}]
+    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+    new_content = generate_reply(model, tokenizer, prompt, device, raw_output=True, max_new_tokens=4096)
+    new_content = new_content.strip()
+
+    # Robust regex extraction to find the code inside ```...``` blocks,
+    # completely ignoring any conversational text generated before or after.
+    code_block_match = re.search(r'```[a-zA-Z]*\n(.*?)```', new_content, re.DOTALL)
+    if code_block_match:
+        new_content = code_block_match.group(1).strip()
+
+    backup_path = path_obj.with_suffix(path_obj.suffix + ".bak")
+    shutil.copy2(path_obj, backup_path)
+
+    try:
+        with open(path_obj, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        return f"Modified {path_obj.name}. Backup created at {backup_path.name}."
+    except Exception as e:
+        return f"Write error: {e}"
 
 def load_iris_model():
     """
@@ -899,16 +1030,48 @@ def load_iris_model():
     device = get_device()
     return model, tokenizer, device
 
-def iris_chat_reply(model, tokenizer, device, history: list, user_text: str) -> str:
+def iris_chat_reply(model, tokenizer, device, retriever, history: list, user_text: str) -> str:
+    """Standard chat reply incorporating the RAG Knowledge base and live web search."""
     if model is None:
         return "(Iris model not loaded — only PC-control commands work right now.)"
+    
+    # ── Local knowledge base ────────────────────────────────────────────────
+    context = retriever.retrieve(user_text, top_k=3) if retriever else ""
+
+    # ── Live web search for informational queries ───────────────────────────
+    web_results = ""
+    if should_web_search(user_text):
+        print(f"[Web Search] Searching for: {user_text}")
+        web_results = web_search(user_text)
+
+    sys_prompt = (
+        "You are Iris, a helpful AI assistant. Always provide full, complete, and detailed code examples when requested. "
+        "IMPORTANT: If the user says your previous answer was wrong or failed a test, DO NOT repeat yourself. "
+        "Re-read the problem carefully, identify the logic error, and provide a corrected solution."
+    )
+
+    if context:
+        sys_prompt += (
+            " Use the following reference material to answer accurately if relevant:\n\n"
+            f"REFERENCE EXCERPT:\n{context}"
+        )
+
+    if web_results:
+        sys_prompt += (
+            "\n\nWEB SEARCH RESULTS (fetched live — use these to give an "
+            "accurate, up-to-date answer):\n"
+            f"{web_results}"
+        )
+        
     history.append({"role": "user", "content": user_text})
-    ctx = history[-20:]
+    
+    # Prepend the dynamic system prompt to the rolling window of history
+    ctx = [{"role": "system", "content": sys_prompt}] + history[-20:]
     prompt = tokenizer.apply_chat_template(ctx, tokenize=False, add_generation_prompt=True)
     reply = generate_reply(model, tokenizer, prompt, device)
+    
     history.append({"role": "assistant", "content": reply})
     return reply
-
 
 HELP_TEXT = """
 Commands you can use (regex + AI):
@@ -925,6 +1088,8 @@ NEW AI‑powered actions (just say what you want):
   • volume & brightness → "volume up", "set brightness to 70%"
   • clipboard          → "copy this to clipboard", "read clipboard"
   • system info        → "how much RAM?", "what's my IP?"
+  • Knowledge Base     → "What happened in chapter 3 of my book?"
+  • AI Coder           → "Fix the bugs in app.py"
   • Any natural language request → Iris decides the right action!
 
   help                             → show this message
@@ -933,7 +1098,7 @@ NEW AI‑powered actions (just say what you want):
 
 def print_banner():
     print("=" * 60)
-    print("  Iris AI PC Agent")
+    print("  Iris AI PC Agent (RAG Enabled)")
     print("  Type 'help' for commands, 'quit' to exit.")
     print("=" * 60)
 
@@ -941,6 +1106,14 @@ def main():
     print_banner()
     config = load_config()
     model, tokenizer, device = load_iris_model()
+    
+    # Initialize the RAG index when starting the CLI controller
+    retriever = None
+    if IRIS_AVAILABLE:
+        print("[INFO] Initializing RAG Knowledge Base...")
+        retriever = BookRetriever(raw_data_dir="raw_data")
+        retriever.load_and_index()
+        
     history: list = []
 
     while True:
@@ -982,17 +1155,16 @@ def main():
                 elif intent == "email":
                     reply = handle_email(match, config)
                 else:
-                    reply = iris_chat_reply(model, tokenizer, device, history, raw)
+                    reply = iris_chat_reply(model, tokenizer, device, retriever, history, raw)
             except Exception as e:
                 reply = f"[Error] {e}"
         else:
             try:
-                reply = ai_agent_handle(raw, model, tokenizer, device, history)
+                reply = ai_agent_handle(raw, model, tokenizer, device, retriever, history)
             except Exception as e:
                 reply = f"[AI Agent error] {e}"
 
         print(f"Iris: {reply}")
-
 
 if __name__ == "__main__":
     main()

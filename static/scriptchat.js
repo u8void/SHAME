@@ -390,11 +390,22 @@ document.addEventListener("DOMContentLoaded", () => {
         sendBtn.disabled   = disabled;
     }
 
-    sendBtn.addEventListener('click', handleSendMessage);
-    chatInput.addEventListener('keypress', (e) => {
+    const handleInputResize = () => {
+        chatInput.style.height = 'auto';
+        chatInput.style.height = (chatInput.scrollHeight) + 'px';
+    };
+    chatInput.addEventListener('input', handleInputResize);
+
+    sendBtn.addEventListener('click', () => {
+        handleSendMessage();
+        setTimeout(handleInputResize, 10);
+    });
+
+    chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleSendMessage();
+            setTimeout(handleInputResize, 10);
         }
     });
     newChatBtn.addEventListener('click', startNewChat);

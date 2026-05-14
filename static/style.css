@@ -607,7 +607,7 @@ body.chat-active .center-panel {
     border-radius: 28px;
     padding: 8px 12px;
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: 8px;
     border: 1px solid #2a2a2a;
     transition: border-color 0.2s var(--ease-out-quart);
@@ -628,6 +628,7 @@ body.chat-active .center-panel {
     justify-content: center;
     cursor: pointer;
     padding: 8px;
+    margin-bottom: 2px;
     transition: background 0.15s var(--ease-out-quart), box-shadow 0.2s var(--ease-out-quart);
     box-shadow: 0 0 0 0 rgba(163, 133, 255, 0.4);
 }
@@ -709,6 +710,10 @@ body.chat-active .center-panel {
     font-size: 16px;
     padding: 8px;
     outline: none;
+    resize: none;
+    height: 40px;
+    max-height: 200px;
+    line-height: 1.5;
 }
 
 #chatInput::placeholder {

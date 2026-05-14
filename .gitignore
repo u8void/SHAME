@@ -1,7 +1,7 @@
 iris_lora_unified/
 iris_lora_unified_*/
 iris_merged_model/
-___pycache__/
+__pycache__/
 logs/*
 outputs/*
 iris_14b_model/

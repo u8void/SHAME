@@ -1,4 +1,3 @@
-
 import os
 import argparse
 import threading
@@ -6,18 +5,15 @@ import subprocess
 
 from flask import Flask, request, jsonify, render_template
 
-# ── Unified Iris Backend (MLX/CUDA/CPU) ─────────────────────────────────────
-from iris import load_model, get_device, generate_reply, solve_math, USER_TOKEN, BOT_TOKEN
-
+# Added BookRetriever to the import list
+from iris import load_model, get_device, generate_reply, solve_math, BookRetriever, MLX_MODEL_ID, HF_MODEL_ID, BACKEND
 
 parser = argparse.ArgumentParser(description="Run the Iris AI Flask App")
 parser.add_argument("--preview-only", action="store_true",
                     help="Launch UI without loading the AI model")
 args, _ = parser.parse_known_args()
 
-
 PREVIEW_MODE = args.preview_only
-
 
 app = Flask(__name__)
 
@@ -27,17 +23,16 @@ TRAIN_LOG_FILE    = "outputs/train_output.txt"
 os.makedirs(LOGS_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(TRAIN_LOG_FILE), exist_ok=True)
 
-
 model         = None
 tokenizer     = None
 device        = None
+retriever     = None  # Added global retriever
 _model_lock   = threading.Lock()
 training_proc = None
 
-
 def init_model():
     """Load phi-4 + LoRA adapters via MLX (once, thread-safe)."""
-    global model, tokenizer, device
+    global model, tokenizer, device, retriever
 
     if PREVIEW_MODE or model is not None:
         return
@@ -49,14 +44,16 @@ def init_model():
         print("[INFO] Loading Iris model (Unified Backend)...")
         model, tokenizer = load_model()
         device = get_device()
+        
+        print("[INFO] Initializing RAG Knowledge Base...")
+        retriever = BookRetriever(raw_data_dir="raw_data")
+        retriever.load_and_index()
+        
         print(f"[INFO] Model ready. device={device}")
-
 
 @app.before_request
 def _ensure_model():
     init_model()
-
-
 
 @app.route("/")
 def home():
@@ -73,47 +70,40 @@ def chat():
     if not user_message:
         return jsonify({"reply": "Please send a valid message."}), 400
 
-    # ── Math fast-path: solve equations/arithmetic with sympy ───────────────
     math_answer = solve_math(user_message)
     if math_answer is not None:
         log_path = os.path.join(LOGS_DIR, f"{chat_id}.txt")
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"User: {user_message}\nBot: {math_answer}\n\n")
         return jsonify({"reply": math_answer})
-    # ────────────────────────────────────────────────────────────────────────
 
     if PREVIEW_MODE:
         reply = "[Preview Mode] Mock response — AI model disabled."
     else:
-        # Use the Agent Controller to handle the conversation and actions
         import controller
         controller.IS_INTERACTIVE = False
         from controller import ai_agent_handle
         frontend_messages = data.get("messages", [])
-        
-        # Convert frontend messages to the format expected by ai_agent_handle
+
         agent_history = []
-        for msg in frontend_messages[:-1]: # exclude last message as it's the one we're processing
+        for msg in frontend_messages[:-1]:
             role = "assistant" if msg.get("role") == "bot" else "user"
             agent_history.append({"role": role, "content": msg.get("content", "")})
-            
+
         reply = ai_agent_handle(
-            user_message, 
-            model, 
-            tokenizer, 
-            device, 
+            user_message,
+            model,
+            tokenizer,
+            device,
+            retriever, # Pass the retriever to the controller
             agent_history
         )
-        
-        # The ai_agent_handle takes care of generation and tool mapping.
-        # MLX manages its own memory — no manual cache clearing needed.
 
     log_path = os.path.join(LOGS_DIR, f"{chat_id}.txt")
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(f"User: {user_message}\nBot: {reply}\n\n")
 
     return jsonify({"reply": reply})
-
 
 @app.route("/train", methods=["POST"])
 def train():
@@ -126,7 +116,7 @@ def train():
 
     cmd = [
         "python3", "train.py",
-        "--model-name",  str(data.get("model_name",  BASE_MODEL_NAME)),
+        "--model",       str(data.get("model_name",  MLX_MODEL_ID)),
         "--epochs",      str(data.get("epochs",       3)),
         "--lr",          str(data.get("lr",           "2e-4")),
         "--max-pairs",   str(data.get("max_pairs",    5000)),
@@ -137,15 +127,14 @@ def train():
         "--output-dir",  str(data.get("output_dir",   "./iris_lora_adapter")),
     ]
 
-    device_choice = data.get("device") or ("cpu" if FORCE_CPU else None)
+    device_choice = data.get("device") or ("cpu" if BACKEND == "cpu" else None)
     if device_choice:
         cmd.extend(["--device", device_choice])
     if data.get("no_bst"):            cmd.append("--no-bst")
     if data.get("no_dd"):             cmd.append("--no-dd")
     if data.get("no_md"):             cmd.append("--no-md")
     if data.get("use_chat_template"): cmd.append("--use-chat-template")
-    
-    # Reasoning Parameters
+
     if data.get("claude_reasoning"):
         cmd.extend(["--claude-reasoning", str(data.get("claude_reasoning"))])
     if data.get("dolci_think"):
@@ -167,7 +156,6 @@ def train():
     training_proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
     return jsonify({"status": "started"})
 
-
 @app.route("/train_logs", methods=["GET"])
 def get_logs():
     if not os.path.exists(TRAIN_LOG_FILE):
@@ -175,12 +163,10 @@ def get_logs():
     with open(TRAIN_LOG_FILE, "r", encoding="utf-8") as f:
         return jsonify({"logs": f.read()})
 
-
 @app.route("/train_status", methods=["GET"])
 def train_status():
     running = training_proc is not None and training_proc.poll() is None
     return jsonify({"running": running})
-
 
 @app.route("/stop_train", methods=["POST"])
 def stop_train():
@@ -197,7 +183,6 @@ def stop_train():
         training_proc.wait()
 
     return jsonify({"status": "stopped"})
-
 
 import json
 
@@ -217,7 +202,7 @@ def save_settings():
     data = request.json or {}
     config_path = os.path.join("config", "iris.conf")
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
-    
+
     try:
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
@@ -226,12 +211,12 @@ def save_settings():
             config = {}
     except Exception:
         config = {}
-        
+
     config.update(data)
-    
+
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
-        
+
     return jsonify({"status": "success"})
 
 if __name__ == "__main__":

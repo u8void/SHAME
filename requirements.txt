@@ -7,3 +7,5 @@ gguf>=0.10.0
 numpy>=1.24.0
 peft 
 accelerate
+mlx-lm>=0.1.11
+sentence-transformers
