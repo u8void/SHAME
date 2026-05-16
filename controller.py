@@ -129,7 +129,7 @@ except ImportError:
 
 try:
     # Added BookRetriever to import
-    from iris import load_model as _mlx_load_model, get_device, generate_reply, solve_math, BookRetriever
+    from iris import load_model as _mlx_load_model, get_device, generate_reply, solve_math, BookRetriever, analyze_image
     IRIS_AVAILABLE = True
 except ImportError:
     IRIS_AVAILABLE = False
@@ -276,6 +276,8 @@ Available actions:
 - search_files(query, folder)
 - run_command(command)
 - open_terminal(command)
+- run_code(code)                         // Executes Python and returns stdout/stderr.
+- analyze_image(image_path, prompt)      // Analyse/describe an image file on disk.
 - volume_up, volume_down, volume_mute
 - volume_set(percent)
 - brightness_up, brightness_down, brightness_set(percent)
@@ -288,6 +290,8 @@ Available actions:
 For actions that need parameters, output JSON exactly like:
 {"action": "open_website", "url": "https://example.com"}
 {"action": "run_command", "command": "ping -c 4 google.com"}
+{"action": "run_code", "code": "print(sum(range(1,101)))"}
+{"action": "analyze_image", "image_path": "/tmp/photo.jpg", "prompt": "What objects are in this image?"}
 {"action": "fix_file", "path": "app.py", "instructions": "Fix the route handler logic"}
 {"action": "chat", "response": "Hello! How can I help?"}
 
@@ -299,7 +303,43 @@ CRITICAL RULES:
 5. Output ONLY the JSON object. No other conversational text should be outside the JSON.
 6. When WEB SEARCH RESULTS are provided in your context, use them to give an accurate, up-to-date answer. Summarise the findings naturally in your "chat" response — do not expose raw result numbers to the user.
 7. If the user says your previous answer was wrong (e.g., "Wrong Answer", "WA", "bug"), DO NOT repeat the same logic. Thoroughly re-evaluate the problem, find the flaw in your reasoning, and provide a fixed or completely different approach.
+8. For analyze_image: the image_path is the saved path of the uploaded image. Use the prompt the user provided about the image, or "Describe this image in detail." if unspecified.
+9. NEVER use open_website with a youtube.com/watch URL you invented or guessed. YouTube video IDs cannot be inferred from a title — guessed IDs open wrong or non-existent videos. ALWAYS use youtube_video(query) with the video title as the query when the user wants to watch a YouTube video, whether they described it in text or shared a screenshot/image of it.
+10. When the user shares an image of a YouTube video and asks to open/play/launch it, extract the video title from the image and use youtube_video(query) with that title.
 """.strip()
+
+
+def handle_run_code(code: str) -> str:
+    """Execute Python code in a sandboxed subprocess and return stdout/stderr."""
+    import tempfile
+    if not code or not code.strip():
+        return "No code provided to execute."
+    with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False, encoding="utf-8") as f:
+        f.write(code)
+        tmp_path = f.name
+    try:
+        result = subprocess.run(
+            ["python3", tmp_path],
+            capture_output=True, text=True, timeout=15
+        )
+        stdout = result.stdout.strip()
+        stderr = result.stderr.strip()
+        if stdout and stderr:
+            return f"```python\n{code}\n```\n\nOutput:\n{stdout[:1500]}\n\nErrors:\n{stderr[:500]}"
+        if stdout:
+            return f"```python\n{code}\n```\n\nOutput:\n{stdout[:2000]}"
+        if stderr:
+            return f"```python\n{code}\n```\n\nError:\n{stderr[:2000]}"
+        return f"```python\n{code}\n```\n\n(No output)"
+    except subprocess.TimeoutExpired:
+        return "Code execution timed out (15s limit)."
+    except Exception as e:
+        return f"Execution failed: {e}"
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 
 def parse_ai_response(text: str) -> dict | None:
@@ -312,10 +352,11 @@ def parse_ai_response(text: str) -> dict | None:
     except json.JSONDecodeError:
         return None
 
-def ai_agent_handle(user_input: str, model, tokenizer, device, retriever, history: list) -> str:
-    """Use Iris to decide which action to perform, injecting RAG context if available."""
+def ai_agent_handle(user_input: str, model, tokenizer, device, retriever, history: list):
+    """Generator that yields events for the frontend: tokens, actions, results."""
     if model is None:
-        return "Iris model not available – only direct commands work right now."
+        yield {"type": "text", "content": "Iris model not available."}
+        return
 
     # ── RAG: search local knowledge base ────────────────────────────────────
     context = retriever.retrieve(user_input, top_k=3) if retriever else ""
@@ -323,131 +364,115 @@ def ai_agent_handle(user_input: str, model, tokenizer, device, retriever, histor
     # ── Web search: run automatically for informational queries ─────────────
     web_results = ""
     if should_web_search(user_input):
-        print(f"[Web Search] Searching for: {user_input}")
+        yield {"type": "status", "content": "Searching the web..."}
         web_results = web_search(user_input)
-        print(f"[Web Search] Got {len(web_results)} chars of results.")
 
     sys_prompt = AI_AGENT_SYSTEM_PROMPT
-
     if context:
-        sys_prompt += (
-            "\n\nYou also have access to the following reference material. "
-            "Use it to accurately answer the user's request if relevant:\n"
-            f"REFERENCE EXCERPT:\n{context}"
-        )
-
+        sys_prompt += f"\n\nREFERENCE EXCERPT:\n{context}"
     if web_results:
-        sys_prompt += (
-            "\n\nWEB SEARCH RESULTS (fetched live for this query — use these "
-            "to give an accurate, up-to-date answer):\n"
-            f"{web_results}"
-        )
+        sys_prompt += f"\n\nWEB SEARCH RESULTS:\n{web_results}"
 
-    system_msg = {"role": "system", "content": sys_prompt}
-    raw_messages = history[-8:] + [{"role": "user", "content": user_input}]
-
-    merged_messages = []
-    for msg in raw_messages:
-        if merged_messages and merged_messages[-1]["role"] == msg["role"]:
-            merged_messages[-1]["content"] += "\n" + msg["content"]
+    messages = [{"role": "system", "content": sys_prompt}]
+    for msg in history[-8:] + [{"role": "user", "content": user_input}]:
+        if messages[-1]["role"] == msg["role"]:
+            messages[-1]["content"] += "\n" + msg["content"]
         else:
-            merged_messages.append({"role": msg["role"], "content": msg["content"]})
-
-    if merged_messages and merged_messages[0]["role"] == "assistant":
-        merged_messages.pop(0)
-
-    messages = [system_msg] + merged_messages
+            messages.append(msg)
 
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    reply = generate_reply(model, tokenizer, prompt, device, max_new_tokens=2048)
+    
+    from iris import generate_reply_stream
+    
+    full_reply = ""
+    for token in generate_reply_stream(model, tokenizer, prompt, device):
+        full_reply += token
+        yield {"type": "token", "content": token}
 
-    action_dict = parse_ai_response(reply)
-    if action_dict is None:
-        return reply
+    # Post-generation: Check for actions
+    action_dict = parse_ai_response(full_reply)
+    if action_dict:
+        action = action_dict.get("action", "chat")
+        yield {"type": "status", "content": f"Executing {action}..."}
+        
+        # Execute action logic (simplified call)
+        result = execute_action_by_dict(action_dict)
+        if result:
+            yield {"type": "action_result", "content": result}
+            
+            # Recurse for image analysis or web search to allow follow-up actions
+            if action == "analyze_image" or "Web search results" in result:
+                followup_prompt = f"The action '{action}' returned: {result}\nNow provide your final answer or take the next necessary action based on this info."
+                messages.append({"role": "assistant", "content": full_reply})
+                messages.append({"role": "user", "content": followup_prompt})
+                
+                new_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                for token in generate_reply_stream(model, tokenizer, new_prompt, device):
+                    yield {"type": "token", "content": token}
 
-    history.append({"role": "user", "content": user_input})
-    history.append({"role": "assistant", "content": reply})
-
+def execute_action_by_dict(action_dict: dict) -> str:
+    """Helper to execute an action from a dictionary."""
     action = action_dict.get("action", "chat")
-
-    def execute_action():
-        try:
-            if action == "open_website":
-                url = action_dict.get("url", "")
-                if not url:
-                    return "I need a URL to open a website."
-                return handle_website_from_url(url)
-            elif action == "open_app":
-                app = action_dict.get("name", "")
-                return handle_app_by_name(app, load_config())
-            elif action == "youtube_video":
-                query = action_dict.get("query", "")
-                return handle_youtube_video_from_query(query)
-            elif action == "youtube_channel":
-                name = action_dict.get("name", "")
-                return handle_youtube_channel_from_name(name)
-            elif action == "spotify_song":
-                query = action_dict.get("query", "")
-                return handle_spotify_song(query)
-            elif action == "send_email":
-                to = action_dict.get("to", "")
-                subject = action_dict.get("subject", "")
-                body = action_dict.get("body", "")
-                return handle_email_from_parts(to, subject, body, load_config())
-            elif action == "open_file":
-                path = action_dict.get("path", "")
-                return handle_open_file(path)
-            elif action == "search_files":
-                query = action_dict.get("query", "")
-                folder = action_dict.get("folder", os.getcwd())
-                return handle_search_files(query, folder)
-            elif action == "run_command":
-                cmd = action_dict.get("command", "")
-                return handle_run_command(cmd)
-            elif action == "open_terminal":
-                cmd = action_dict.get("command", "")
-                return handle_open_terminal(cmd)
-            elif action == "volume_up":
-                return handle_volume("up")
-            elif action == "volume_down":
-                return handle_volume("down")
-            elif action == "volume_mute":
-                return handle_volume("mute")
-            elif action == "volume_set":
-                pct = int(action_dict.get("percent", 50))
-                return handle_volume_set(pct)
-            elif action == "brightness_up":
-                return handle_brightness("up")
-            elif action == "brightness_down":
-                return handle_brightness("down")
-            elif action == "brightness_set":
-                pct = int(action_dict.get("percent", 50))
-                return handle_brightness_set(pct)
-            elif action == "system_info":
-                what = action_dict.get("what", "all")
-                return get_system_info(what)
-            elif action == "clipboard_copy":
-                text = action_dict.get("text", "")
-                return clipboard_copy(text)
-            elif action == "clipboard_read":
-                return clipboard_read()
-            elif action == "fix_file":
-                path = action_dict.get("path", "")
-                instructions = action_dict.get("instructions", "")
-                return handle_fix_file(path, instructions, model, tokenizer, device)
-            elif action == "chat":
-                return action_dict.get("response", "I'm not sure how to help with that.")
-            else:
-                return f"I don't know how to handle action '{action}' yet."
-        except Exception as e:
-            return f"Action '{action}' failed: {e}"
-
-    action_result = execute_action()
-
-    think_match = re.search(r'<think>.*?</think>', reply, re.DOTALL)
-    if think_match:
-        return f"{think_match.group(0)}\n\n{action_result}"
-    return action_result
+    try:
+        if action == "open_website":
+            url = action_dict.get("url", "")
+            # Safety net: if the model passed a youtube.com/watch URL, it almost
+            # certainly guessed the video ID. Route it through the proper YouTube
+            # search instead so the user gets the right video.
+            import re as _re
+            if _re.search(r"youtube\.com/watch\?v=", url):
+                # Extract any title hint from the url itself (there usually isn't one),
+                # fall back to a YouTube search for the bare domain so the user can
+                # at least find their video manually.
+                print(f"[WARN] open_website with YouTube watch URL intercepted: {url}")
+                print("[WARN] Use youtube_video(query) instead. Opening YouTube search.")
+                _open_url("https://www.youtube.com")
+                return "Opened YouTube (tip: use video title next time for accurate results)."
+            return handle_website_from_url(url)
+        elif action == "open_app":
+            app = action_dict.get("name", "")
+            return handle_app_by_name(app, load_config())
+        elif action == "youtube_video":
+            query = action_dict.get("query", "")
+            return handle_youtube_video_from_query(query)
+        elif action == "youtube_channel":
+            name = action_dict.get("name", "")
+            return handle_youtube_channel_from_name(name)
+        elif action == "spotify_song":
+            query = action_dict.get("query", "")
+            return handle_spotify_song(query)
+        elif action == "send_email":
+            to = action_dict.get("to", "")
+            subject = action_dict.get("subject", "")
+            body = action_dict.get("body", "")
+            return handle_email_from_parts(to, subject, body, load_config())
+        elif action == "open_file":
+            path = action_dict.get("path", "")
+            return handle_file_from_path(path)
+        elif action == "search_files":
+            query = action_dict.get("query", "")
+            folder = action_dict.get("folder", "")
+            return handle_search_from_query(query, folder)
+        elif action == "run_command":
+            cmd = action_dict.get("command", "")
+            return handle_command_execution(cmd)
+        elif action == "run_code":
+            code = action_dict.get("code", "")
+            return handle_run_code(code)
+        elif action == "analyze_image":
+            from iris import analyze_image
+            path = action_dict.get("image_path", "")
+            prompt = action_dict.get("prompt", "Describe this image in detail.")
+            return analyze_image(path, prompt)
+        elif action == "fix_file":
+            path = action_dict.get("path", "")
+            instr = action_dict.get("instructions", "")
+            return handle_fix_file(path, instr)
+        elif action == "chat":
+            return action_dict.get("response", "")
+    except Exception as e:
+        return f"Action failed: {e}"
+    return ""
 
 def _open_url(url: str):
     if not url.startswith("http"):

@@ -14,6 +14,10 @@ import threading
 import random
 from typing import Optional, Tuple, Dict, Any
 import math
+from mlx_vlm import load as vlm_load
+from mlx_vlm.utils import load_config as vlm_load_config
+from mlx_vlm import generate as vlm_generate
+from mlx_vlm.prompt_utils import apply_chat_template
 
 try:
     from sentence_transformers import SentenceTransformer, util
@@ -40,6 +44,12 @@ try:
     DATASETS_AVAILABLE = True
 except ImportError:
     DATASETS_AVAILABLE = False
+
+# ── Vision model availability ─────────────────────────────────────────────────
+_VISION_MODEL_CACHE = {}   # {"model": ..., "processor": ..., "backend": ...}
+_VISION_LOCK = threading.Lock()
+
+MLX_VISION_MODEL_ID = "mlx-community/Qwen2-VL-2B-Instruct-4bit"
 
 try:
     from tqdm import tqdm
@@ -380,12 +390,23 @@ _model_lock = threading.Lock()
 _cached_model = None
 _cached_tok   = None
 
+_gen_config_cache: dict | None = None
+_gen_config_mtime: float | None = None
+
 def load_generation_config() -> dict:
-    defaults = {"max_new_tokens": 512, "temperature": 0.7, "top_p": 0.9, "repetition_penalty": 1.0}
+    """Reads iris.conf once and caches it; only reloads when the file changes on disk."""
+    global _gen_config_cache, _gen_config_mtime
+    defaults = {"max_new_tokens": 256, "temperature": 0.7, "top_p": 0.9, "repetition_penalty": 1.0}
     if os.path.exists(CONFIG_PATH):
         try:
-            with open(CONFIG_PATH) as f: defaults.update(json.load(f))
-        except Exception: pass
+            mtime = os.path.getmtime(CONFIG_PATH)
+            if _gen_config_cache is None or mtime != _gen_config_mtime:
+                with open(CONFIG_PATH) as f:
+                    _gen_config_cache = {**defaults, **json.load(f)}
+                _gen_config_mtime = mtime
+            return _gen_config_cache
+        except Exception:
+            pass
     return defaults
 
 def _generate_mlx(model, tokenizer, prompt: str, max_tokens: int, temp: float, top_p: float, rep_pen: float) -> str:
@@ -440,6 +461,48 @@ def load_model():
 # ==========================================
 # GENERATION FUNCTIONS
 # ==========================================
+def generate_reply_stream(model, tokenizer, prompt_text, device=None, **kwargs):
+    """Generator that yields tokens one by one."""
+    cfg = load_generation_config()
+    max_t = int(kwargs.get("max_new_tokens") or cfg["max_new_tokens"])
+    temp  = float(kwargs.get("temperature") or cfg["temperature"])
+    top_p = float(kwargs.get("top_p") or cfg["top_p"])
+
+    if BACKEND == "mlx":
+        # Verify Metal GPU is active — if not, every call will be CPU-bound (~10x slower)
+        try:
+            import mlx.core as _mx
+            if not _mx.metal.is_available():
+                print("[WARNING] MLX Metal GPU not available — running on CPU. "
+                      "Ensure you are NOT running under Rosetta and that mlx is "
+                      "installed natively for Apple Silicon.")
+        except Exception:
+            pass
+
+        from mlx_lm import stream_generate
+        
+        # Create a sampler for robust compatibility with recent mlx_lm versions
+        try:
+            from mlx_lm.sample_utils import make_sampler
+            sampler = make_sampler(temp=temp, top_p=top_p)
+            stream_kwargs = {"sampler": sampler}
+        except Exception:
+            # Fallback if older mlx_lm version
+            stream_kwargs = {"temp": temp, "top_p": top_p}
+        
+        # Use stream_generate for a much simpler and more robust streaming implementation
+        for response in stream_generate(
+            model=model, 
+            tokenizer=tokenizer, 
+            prompt=prompt_text,
+            max_tokens=max_t,
+            **stream_kwargs
+        ):
+            yield response.text
+    else:
+        # HF fallback
+        yield generate_reply(model, tokenizer, prompt_text, device, **kwargs)
+
 def generate_reply(model, tokenizer, prompt_text, device=None, raw_output=False, **kwargs):
     """Base generation function connecting to MLX or HF."""
     cfg = load_generation_config()
@@ -492,6 +555,58 @@ def generate_rag_reply(model, tokenizer, retriever, user_query, **kwargs):
 
     # 4. Generate the reply
     return generate_reply(model, tokenizer, prompt_text, **kwargs)
+
+def _load_vision_model():
+    """Load and cache the Qwen2-VL vision model for Apple Silicon."""
+    global _VISION_MODEL_CACHE
+    if _VISION_MODEL_CACHE:
+        return _VISION_MODEL_CACHE
+
+    with _VISION_LOCK:
+        if _VISION_MODEL_CACHE:
+            return _VISION_MODEL_CACHE
+
+        try:
+            print(f"[Vision] Loading MLX vision model: {MLX_VISION_MODEL_ID}...")
+            model, processor = vlm_load(MLX_VISION_MODEL_ID)
+            config = vlm_load_config(MLX_VISION_MODEL_ID)
+            _VISION_MODEL_CACHE = {"model": model, "processor": processor, "config": config, "backend": "mlx"}
+            print("[Vision] MLX vision model ready.")
+            return _VISION_MODEL_CACHE
+        except Exception as e:
+            print(f"[Vision] MLX VLM load failed: {e}")
+            return {}
+
+
+def analyze_image(image_path: str, prompt: str = "Describe this image in detail.") -> str:
+    """
+    Analyse an image using Qwen2-VL.
+    """
+    vision = _load_vision_model()
+    if not vision:
+        return "[Vision] Qwen2-VL vision model not available. Ensure mlx-vlm is installed."
+
+    model = vision["model"]
+    proc  = vision["processor"]
+    conf  = vision.get("config")
+
+    try:
+        formatted = apply_chat_template(proc, conf, prompt, num_images=1)
+        result = vlm_generate(
+            model, 
+            proc, 
+            formatted, 
+            image_path,
+            max_tokens=512, 
+            verbose=False
+        )
+        
+        if hasattr(result, "text"):
+            return result.text.strip()
+        return str(result).strip()
+    except Exception as e:
+        return f"[Vision] Analysis failed: {e}"
+
 
 # ==========================================
 # EXECUTION & TESTING

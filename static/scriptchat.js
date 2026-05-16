@@ -3,7 +3,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentChatId = null;
     let chatActive = false;
     let chatSettings = JSON.parse(localStorage.getItem('iris_chat_settings')) || {
-        max_new_tokens: 200,
+        max_new_tokens: 512,
         temperature: 0.6,
         top_p: 0.9,
         top_k: 40,
@@ -32,11 +32,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const searchInput        = document.getElementById("searchInput");
     const searchClearBtn     = document.getElementById("searchClearBtn");
     const searchEmpty        = document.getElementById("searchEmpty");
-    const recentLabel        = document.getElementById("recentLabel");
-    const sidebar            = document.getElementById("sidebar");
-    const mainContent        = document.getElementById("mainContent");
-    const centerPanel        = document.getElementById("centerPanel");
-    const welcomeSection     = document.getElementById("welcomeSection");
+    const imageInput            = document.getElementById("imageInput");
+    const imagePreviewContainer = document.getElementById("imagePreviewContainer");
+    const welcomeSection        = document.getElementById("welcomeSection");
+    const mainContent           = document.getElementById("mainContent");
+    const sidebar               = document.querySelector(".sidebar");
+    const recentLabel           = document.getElementById("recentLabel") || document.querySelector(".recent-label");
+    let selectedImageFile = null;
+
     let searchOpen = false;
     let searchQuery = '';
     function savePersist() {
@@ -178,8 +181,11 @@ document.addEventListener("DOMContentLoaded", () => {
     function formatMessage(text) {
         if (!text) return '';
 
+        // Strip leading special tokens/headers that sometimes leak from certain models
+        let formatted = text.replace(/^(\s|<\|endoftext\|>|<\|im_start\|>assistant<\|im_sep\|>|<\|im_end\|>)+/gi, '');
+
         // Handle Thinking Blocks <think>...</think>
-        let formatted = text.replace(/<think>([\s\S]*?)<\/think>/gi, (match, thought) => {
+        formatted = formatted.replace(/<think>([\s\S]*?)<\/think>/gi, (match, thought) => {
             return `
                 <div class="thought-wrapper">
                     <div class="thought-header" onclick="toggleThought(this)">
@@ -214,10 +220,6 @@ document.addEventListener("DOMContentLoaded", () => {
         // Let's only escape the non-HTML parts. 
         // (Wait, the existing formatter was already doing escapeHtml on the whole string and then replacing placeholders).
         
-        // Revised approach: escape first, then replace placeholders for code and thinking.
-        // But thinking blocks are already escaped inside.
-
-        // Let's just keep the existing flow but integrate thinking like code blocks.
         return _formatRefined(text);
     }
 
@@ -232,24 +234,31 @@ document.addEventListener("DOMContentLoaded", () => {
             return id;
         });
 
-        // 2. Extract Code
+        // 2. Extract JSON Action (Internal)
+        work = work.replace(/\{[\s]*"action"[\s]*:[\s\S]*?\}/gi, (match) => {
+            const id = `__ACTION_${blocks.length}__`;
+            blocks.push({ type: 'action', content: match });
+            return id;
+        });
+
+        // 3. Extract Code
         work = work.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
             const id = `__CODE_${blocks.length}__`;
             blocks.push({ type: 'code', lang: lang || 'Code', content: codeContent.trim() });
             return id;
         });
 
-        // 3. Escape HTML and handle Markdown
+        // 4. Escape HTML and handle Markdown
         work = escapeHtml(work);
         work = work.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
         work = work.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
         work = work.replace(/\n/g, '<br>');
 
-        // 4. Re-inject blocks
+        // 5. Re-inject blocks
         blocks.forEach((block, index) => {
-            const id = block.type === 'thought' ? `__THOUGHT_${index}__` : `__CODE_${index}__`;
-            let html = '';
+            let id, html;
             if (block.type === 'thought') {
+                id = `__THOUGHT_${index}__`;
                 html = `
                     <div class="thought-wrapper">
                         <div class="thought-header" onclick="this.parentElement.classList.toggle('expanded')">
@@ -260,7 +269,11 @@ document.addEventListener("DOMContentLoaded", () => {
                         <div class="thought-content">${escapeHtml(block.content).replace(/\n/g, '<br>')}</div>
                     </div>
                 `;
+            } else if (block.type === 'action') {
+                id = `__ACTION_${index}__`;
+                html = '';
             } else {
+                id = `__CODE_${index}__`;
                 html = `
                     <div class="code-container">
                         <div class="code-header">
@@ -297,17 +310,28 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     };
 
-    function appendMessageDOM(role, text, scroll = true) {
+    function appendMessageDOM(role, text, scroll = true, imageUrl = null) {
         const outer = document.createElement("div");
         outer.classList.add("message", role === "user" ? "user-message" : "ai-message");
 
         const inner = document.createElement("div");
         inner.classList.add("message-content");
         
+        if (imageUrl) {
+            const img = document.createElement("img");
+            img.src = imageUrl;
+            img.classList.add("chat-image");
+            inner.appendChild(img);
+        }
+
         if (role === "bot") {
-            inner.innerHTML = formatMessage(text);
-        } else {
-            inner.textContent = text;
+            const div = document.createElement("div");
+            div.innerHTML = formatMessage(text);
+            inner.appendChild(div);
+        } else if (text) {
+            const div = document.createElement("div");
+            div.textContent = text;
+            inner.appendChild(div);
         }
 
         outer.appendChild(inner);
@@ -317,7 +341,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     async function handleSendMessage() {
         const text = chatInput.value.trim();
-        if (!text) return;
+        const hasImage = !!selectedImageFile;
+        if (!text && !hasImage) return;
 
         if (!currentChatId || !chats.find(c => c.id === currentChatId)) {
             startNewChat();
@@ -326,59 +351,130 @@ document.addEventListener("DOMContentLoaded", () => {
         const chat = normaliseChat(chats.find(c => c.id === currentChatId));
 
         if (chat.messages.length === 0) {
-            chat.title = text.length > 35 ? text.slice(0, 35) + '…' : text;
+            chat.title = text ? (text.length > 35 ? text.slice(0, 35) + '…' : text) : "Image Analysis";
         }
 
-        chat.messages.push({ role: 'user', content: text });
+        let displayImageUrl = null;
+        if (hasImage) {
+            displayImageUrl = URL.createObjectURL(selectedImageFile);
+        }
+
+        chat.messages.push({ role: 'user', content: text, imageUrl: displayImageUrl });
         savePersist();
         renderChatList();
 
         enterChatMode();
-        appendMessageDOM('user', text);
+        appendMessageDOM('user', text, true, displayImageUrl);
 
         chatInput.value = '';
-        if (typeof handleInput === 'function') handleInput();
+        const imageToUpload = selectedImageFile; // keep reference
+        clearImageSelection(); // clear for next message
+        
+        if (typeof handleInputResize === 'function') handleInputResize();
 
         setInputDisabled(true);
         showTypingIndicator();
 
+        let fullReply = "";
+        let actionResult = "";
+        let aiMessageDiv = null;
+        let aiContentDiv = null;
+
         try {
-            const res = await fetch('/chat', {
+            // Unified Path: Always send to /chat (Agent Path)
+            const formData = new FormData();
+            if (hasImage) {
+                formData.append('image', imageToUpload);
+            }
+            formData.append('message', text);
+            formData.append('chat_id', currentChatId);
+            formData.append('messages', JSON.stringify(chat.messages));
+            formData.append('history', chat.historyString);
+            formData.append('settings', JSON.stringify(chatSettings));
+
+            const response = await fetch('/chat', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    chat_id: currentChatId,
-                    message: text,
-                    messages: chat.messages,
-                    history: chat.historyString,
-                    settings: chatSettings
-                })
+                body: formData
             });
 
-            if (!res.ok) {
-                const errText = await res.text().catch(() => res.status);
-                throw new Error(`Server error ${res.status}: ${errText}`);
+            if (!response.ok) {
+                const errText = await response.text().catch(() => response.status);
+                throw new Error(`Server error ${response.status}: ${errText}`);
             }
 
-            const data  = await res.json();
-            const reply = (data.reply || '').trim() || '…';
-
-            chat.messages.push({ role: 'bot', content: reply });
-            chat.historyString += `User: ${text}\nBot: ${reply}\n`;
-
-            const lines = chat.historyString.split('\n').filter(l => l.trim());
-            if (lines.length > 80) {
-                chat.historyString = lines.slice(-80).join('\n') + '\n';
-            }
-
-            savePersist();
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            
             removeTypingIndicator();
-            appendMessageDOM('bot', reply);
+            aiMessageDiv = document.createElement("div");
+            aiMessageDiv.classList.add("message", "ai-message");
+            aiContentDiv = document.createElement("div");
+            aiContentDiv.classList.add("message-content");
+            aiMessageDiv.appendChild(aiContentDiv);
+            chatMessages.appendChild(aiMessageDiv);
+
+            let currentResponseText = "";
+            let renderPending = false;  // rAF debounce flag
+
+            // Flush accumulated tokens to the DOM at display frame rate (≤60fps),
+            // not at token-generation rate (potentially 100s/sec).
+            function scheduleRender() {
+                if (renderPending) return;
+                renderPending = true;
+                requestAnimationFrame(() => {
+                    try {
+                        aiContentDiv.innerHTML = formatMessage(currentResponseText);
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                    } catch (e) {
+                        console.error("Render error:", e);
+                    } finally {
+                        renderPending = false;
+                    }
+                });
+            }
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n\n");
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                    if (!line.startsWith("data: ")) continue;
+                    const jsonStr = line.replace("data: ", "");
+                    try {
+                        const event = JSON.parse(jsonStr);
+                        if (event.type === "token") {
+                            currentResponseText += event.content;
+                            scheduleRender();
+                        } else if (event.type === "status") {
+                            // Show status in a subtle way or in the console
+                            console.log("[Agent Status]", event.content);
+                            // Optionally update a status indicator in the UI
+                        } else if (event.type === "action_result") {
+                            // Render the result as part of the conversation
+                            // If it's a chat response, we can just append it. 
+                            // Or we can create a special 'result' box.
+                            // For now, let's append it to the current message content.
+                            currentResponseText += "\n\n" + event.content;
+                            scheduleRender();
+                        }
+                    } catch (e) { console.error("Event parse error", e); }
+                }
+                // Final scroll after stream ends
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+
+            chat.messages.push({ role: 'bot', content: currentResponseText });
+            savePersist();
 
         } catch (err) {
             console.error('[Iris] fetch error:', err);
             removeTypingIndicator();
-            appendMessageDOM('bot', `⚠️ ${err.message || 'Could not reach the server. Make sure the backend is running.'}`);
+            appendMessageDOM('bot', `⚠️ ${err.message || 'Could not reach the server.'}`);
         } finally {
             setInputDisabled(false);
             chatInput.focus();
@@ -464,6 +560,31 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     window.appendMessage = appendMessageDOM;
+
+    // ── Image Handling ──────────────────────────────────────────────────
+    imageInput?.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        selectedImageFile = file;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            imagePreviewContainer.innerHTML = `
+                <img src="${e.target.result}" alt="Preview">
+                <button class="remove-image-btn" id="removeImageBtn" title="Remove image">✕</button>
+            `;
+            imagePreviewContainer.classList.add('visible');
+            document.getElementById('removeImageBtn')?.addEventListener('click', clearImageSelection);
+        };
+        reader.readAsDataURL(file);
+    });
+
+    function clearImageSelection() {
+        selectedImageFile = null;
+        if (imageInput) imageInput.value = '';
+        imagePreviewContainer.innerHTML = '';
+        imagePreviewContainer.classList.remove('visible');
+    }
 
     chats = chats.map(normaliseChat);
 

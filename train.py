@@ -25,7 +25,10 @@ from iris import (
     load_hf_maliki_dataset,
     load_claude_reasoning_dataset,
     load_dolci_think_dataset,
-    load_deepthink_dataset
+    load_deepthink_dataset,
+    load_openhermes_reasoning,
+    load_math_qa,
+    load_code_feedback,
 )
 
 def parse_args():
@@ -51,6 +54,13 @@ def parse_args():
     parser.add_argument("--deepthink", type=int, default=600)
     parser.add_argument("--strip-reasoning", action="store_true")
 
+    parser.add_argument("--openhermes", type=int, default=0,
+                        help="Number of OpenHermes-2.5 instruction pairs (0 = skip)")
+    parser.add_argument("--math-qa", type=int, default=0,
+                        help="Number of MATH competition problems (0 = skip)")
+    parser.add_argument("--code-feedback", type=int, default=0,
+                        help="Number of CodeFeedback coding pairs (0 = skip)")
+
     parser.add_argument("--fuse", action="store_true", help="Fuse model after training (MLX only)")
     parser.add_argument("--cleanup", action="store_true", help="Clean adapters after fusion (MLX only)")
     parser.add_argument("--num-layers", type=int, default=16, help="Layers to tune (MLX only)")
@@ -74,6 +84,15 @@ def load_all_data(args) -> List[Tuple[str, str]]:
         pairs += load_dolci_think_dataset(subset_size=args.dolci_think)
     if args.deepthink:
         pairs += load_deepthink_dataset(subset_size=args.deepthink, keep_reasoning=not args.strip_reasoning)
+    if getattr(args, 'openhermes', 0):
+        print(f"[DATA] Loading OpenHermes-2.5 ({args.openhermes} pairs)...")
+        pairs += load_openhermes_reasoning(subset_size=args.openhermes)
+    if getattr(args, 'math_qa', 0):
+        print(f"[DATA] Loading MATH competition dataset ({args.math_qa} pairs)...")
+        pairs += load_math_qa(subset_size=args.math_qa)
+    if getattr(args, 'code_feedback', 0):
+        print(f"[DATA] Loading CodeFeedback dataset ({args.code_feedback} pairs)...")
+        pairs += load_code_feedback(subset_size=args.code_feedback)
 
     random.shuffle(pairs)
     if len(pairs) > args.max_pairs:
