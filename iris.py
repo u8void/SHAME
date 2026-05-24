@@ -20,7 +20,8 @@ import math
 try:
     from sentence_transformers import SentenceTransformer, util
     RAG_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError) as e:
+    print(f"[WARNING] RAG disabled due to library error: {e}")
     RAG_AVAILABLE = False
 
 try:
