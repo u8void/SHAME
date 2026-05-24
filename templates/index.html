@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Iris AI Dashboard</title>
     <meta name="description" content="Iris AI: Your intelligent fine-tuned assistant, trained on your data.">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=3">
 </head>
 <body>
     <aside class="sidebar" id="sidebar">
@@ -54,6 +54,16 @@
     </aside>
 
     <main class="main-content" id="mainContent">
+        <div class="mobile-header" id="mobileHeader">
+            <button class="icon-btn" id="mobileToggleBtn" aria-label="Toggle sidebar">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+            </button>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <img src="{{ url_for('static', filename='iris_logo.png') }}" alt="Iris AI" class="iris-logo" onerror="this.style.display='none'">
+                <span class="iris-name" style="font-size: 18px;">Iris AI</span>
+            </div>
+            <div style="width: 24px;"></div> <!-- Spacer to balance flex layout -->
+        </div>
 
         <div class="chat-messages" id="chatMessages"></div>
 
@@ -302,7 +312,7 @@
     </aside>
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>
-    <script src="{{ url_for('static', filename='scriptchat.js') }}"></script>
+    <script src="{{ url_for('static', filename='scriptchat.js') }}?v=2"></script>
     <script src="{{ url_for('static', filename='settings.js') }}"></script>
 </body>
 </html>

@@ -1,6 +1,0 @@
-User: Hi
-Bot: Hi! how are you doing today?
-
-User: What is your name
-Bot: 11 year old girl who loves reading and animals. what's yours?
-

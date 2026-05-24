@@ -2,6 +2,8 @@ document.addEventListener("DOMContentLoaded", () => {
     let chats = JSON.parse(localStorage.getItem('iris_chats')) || [];
     let currentChatId = null;
     let chatActive = false;
+    let currentAbortController = null;
+    let isGenerating = false;
     let chatSettings = JSON.parse(localStorage.getItem('iris_chat_settings')) || {
         max_new_tokens: 512,
         temperature: 0.6,
@@ -165,7 +167,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     <span class="thinking-dot"></span>
                     <span class="thinking-dot"></span>
                 </div>
-                <span>Thinking and finding the best answer...</span>
+                <span class="status-text-content">Thinking and finding the best answer...</span>
             </div>
         `;
         div.appendChild(content);
@@ -213,13 +215,6 @@ document.addEventListener("DOMContentLoaded", () => {
             return placeholder;
         });
 
-        // We escape the rest of the text, but we need to be careful not to escape our thought-wrapper HTML
-        // So we split and re-join or use a safer approach.
-        // Actually, for simplicity in this specific regex-based formatter:
-        // formatted already contains HTML from thinking blocks. 
-        // Let's only escape the non-HTML parts. 
-        // (Wait, the existing formatter was already doing escapeHtml on the whole string and then replacing placeholders).
-        
         return _formatRefined(text);
     }
 
@@ -227,28 +222,31 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!text) return '';
         const blocks = [];
 
-        // 1. Extract Thinking
-        let work = text.replace(/<think>([\s\S]*?)<\/think>/gi, (match, thought) => {
+        // 1. Extract Think Block (Internal)
+        let work = text.replace(/<think>([\s\S]*?)(?:<\/think>|$)/gi, (match, p1) => {
             const id = `__THOUGHT_${blocks.length}__`;
-            blocks.push({ type: 'thought', content: thought.trim() });
+            blocks.push({ type: 'thought', content: p1.trim() });
             return id;
         });
 
-        // 2. Extract JSON Action (Internal)
         work = work.replace(/\{[\s]*"action"[\s]*:[\s\S]*?\}/gi, (match) => {
             const id = `__ACTION_${blocks.length}__`;
             blocks.push({ type: 'action', content: match });
             return id;
         });
 
-        // 3. Extract Code
+        work = work.replace(/<action_result>([\s\S]*?)(?:<\/action_result>|$)/gi, (match, p1) => {
+            const id = `__RESULT_${blocks.length}__`;
+            blocks.push({ type: 'result', content: p1.trim() });
+            return id;
+        });
+
         work = work.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
             const id = `__CODE_${blocks.length}__`;
             blocks.push({ type: 'code', lang: lang || 'Code', content: codeContent.trim() });
             return id;
         });
 
-        // 4. Escape HTML and handle Markdown
         work = escapeHtml(work);
         work = work.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
         work = work.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
@@ -271,7 +269,19 @@ document.addEventListener("DOMContentLoaded", () => {
                 `;
             } else if (block.type === 'action') {
                 id = `__ACTION_${index}__`;
-                html = '';
+                try {
+                    const obj = JSON.parse(block.content);
+                    if (obj.action === "chat" && obj.response) {
+                        html = escapeHtml(obj.response).replace(/\n/g, '<br>');
+                    } else {
+                        html = `<div class="action-result-stream" style="font-size:12px; color:#a385ff; opacity:0.8;">⚙️ Action: ${escapeHtml(obj.action)}</div>`;
+                    }
+                } catch (e) {
+                    html = escapeHtml(block.content).replace(/\n/g, '<br>');
+                }
+            } else if (block.type === 'result') {
+                id = `__RESULT_${index}__`;
+                html = `<div class='action-result-stream' style='font-size:13.5px; margin-top: 12px; padding: 12px; background: rgba(163, 133, 255, 0.05); border: 1px solid rgba(163, 133, 255, 0.2); border-radius: 8px;'><strong>Result:</strong><br>${escapeHtml(block.content).replace(/\n/g, '<br>')}</div>`;
             } else {
                 id = `__CODE_${index}__`;
                 html = `
@@ -372,7 +382,7 @@ document.addEventListener("DOMContentLoaded", () => {
         
         if (typeof handleInputResize === 'function') handleInputResize();
 
-        setInputDisabled(true);
+        setGeneratingState(true);
         showTypingIndicator();
 
         let fullReply = "";
@@ -392,9 +402,11 @@ document.addEventListener("DOMContentLoaded", () => {
             formData.append('history', chat.historyString);
             formData.append('settings', JSON.stringify(chatSettings));
 
+            currentAbortController = new AbortController();
             const response = await fetch('/chat', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: currentAbortController.signal
             });
 
             if (!response.ok) {
@@ -406,9 +418,10 @@ document.addEventListener("DOMContentLoaded", () => {
             const decoder = new TextDecoder();
             let buffer = "";
             
-            removeTypingIndicator();
+            // Create the container but keep it hidden until the first text/token arrives
             aiMessageDiv = document.createElement("div");
             aiMessageDiv.classList.add("message", "ai-message");
+            aiMessageDiv.style.display = "none";
             aiContentDiv = document.createElement("div");
             aiContentDiv.classList.add("message-content");
             aiMessageDiv.appendChild(aiContentDiv);
@@ -416,6 +429,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             let currentResponseText = "";
             let renderPending = false;  // rAF debounce flag
+            let firstTokenReceived = false;
 
             // Flush accumulated tokens to the DOM at display frame rate (≤60fps),
             // not at token-generation rate (potentially 100s/sec).
@@ -424,6 +438,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 renderPending = true;
                 requestAnimationFrame(() => {
                     try {
+                        if (!firstTokenReceived) {
+                            removeTypingIndicator();
+                            aiMessageDiv.style.display = "";
+                            firstTokenReceived = true;
+                        }
                         aiContentDiv.innerHTML = formatMessage(currentResponseText);
                         chatMessages.scrollTop = chatMessages.scrollHeight;
                     } catch (e) {
@@ -447,43 +466,81 @@ document.addEventListener("DOMContentLoaded", () => {
                     const jsonStr = line.replace("data: ", "");
                     try {
                         const event = JSON.parse(jsonStr);
-                        if (event.type === "token") {
+                        if (event.type === "token" || event.type === "text") {
                             currentResponseText += event.content;
                             scheduleRender();
                         } else if (event.type === "status") {
-                            // Show status in a subtle way or in the console
+                            
                             console.log("[Agent Status]", event.content);
-                            // Optionally update a status indicator in the UI
+                            if (!firstTokenReceived) {
+                                const ind = document.getElementById("typingIndicator");
+                                if (ind) {
+                                    const span = ind.querySelector(".status-text-content");
+                                    if (span) span.textContent = event.content;
+                                }
+                            }
                         } else if (event.type === "action_result") {
-                            // Render the result as part of the conversation
-                            // If it's a chat response, we can just append it. 
-                            // Or we can create a special 'result' box.
-                            // For now, let's append it to the current message content.
-                            currentResponseText += "\n\n" + event.content;
+                            
+                            currentResponseText += "\n\n<action_result>" + event.content + "</action_result>";
                             scheduleRender();
                         }
                     } catch (e) { console.error("Event parse error", e); }
                 }
-                // Final scroll after stream ends
+                
                 chatMessages.scrollTop = chatMessages.scrollHeight;
             }
 
-            chat.messages.push({ role: 'bot', content: currentResponseText });
+            setGeneratingState(false);
+            if (!firstTokenReceived) {
+                removeTypingIndicator();
+                aiMessageDiv.style.display = "";
+            }
+            
+            // Clean up currentResponseText before saving to prevent corrupting the LLM context
+            let cleanResponse = currentResponseText;
+            try {
+                // If the response contains a JSON action block, we extract the action result 
+                // and store ONLY the clean text in history, avoiding massive JSON duplication
+                const match = currentResponseText.match(/\{[\s\S]*?"action"[\s\S]*?\}/i);
+                if (match) {
+                    const actionObj = JSON.parse(match[0]);
+                    if (actionObj.action === "chat" && actionObj.response) {
+                        cleanResponse = actionObj.response;
+                    }
+                }
+            } catch (e) {}
+            
+            chat.messages.push({ role: 'bot', content: cleanResponse });
             savePersist();
 
         } catch (err) {
             console.error('[Iris] fetch error:', err);
             removeTypingIndicator();
-            appendMessageDOM('bot', `⚠️ ${err.message || 'Could not reach the server.'}`);
+            if (err.name === 'AbortError') {
+                appendMessageDOM('bot', `⚠️ Generation stopped by user.`);
+            } else {
+                appendMessageDOM('bot', `⚠️ ${err.message || 'Could not reach the server.'}`);
+            }
         } finally {
-            setInputDisabled(false);
+            setGeneratingState(false);
             chatInput.focus();
         }
     }
 
-    function setInputDisabled(disabled) {
-        chatInput.disabled = disabled;
-        sendBtn.disabled   = disabled;
+    function setGeneratingState(generating) {
+        isGenerating = generating;
+        chatInput.disabled = generating;
+        
+        if (generating) {
+            sendBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>`;
+            sendBtn.setAttribute("aria-label", "Stop generation");
+            sendBtn.classList.add("stop-btn");
+        } else {
+            sendBtn.innerHTML = `<h3>&nbsp;➤&nbsp;</h3>`;
+            sendBtn.setAttribute("aria-label", "Send message");
+            sendBtn.classList.remove("stop-btn");
+            currentAbortController = null;
+        }
     }
 
     const handleInputResize = () => {
@@ -493,15 +550,21 @@ document.addEventListener("DOMContentLoaded", () => {
     chatInput.addEventListener('input', handleInputResize);
 
     sendBtn.addEventListener('click', () => {
-        handleSendMessage();
-        setTimeout(handleInputResize, 10);
+        if (isGenerating) {
+            if (currentAbortController) currentAbortController.abort();
+        } else {
+            handleSendMessage();
+            setTimeout(handleInputResize, 10);
+        }
     });
 
     chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            handleSendMessage();
-            setTimeout(handleInputResize, 10);
+            if (!isGenerating) {
+                handleSendMessage();
+                setTimeout(handleInputResize, 10);
+            }
         }
     });
     newChatBtn.addEventListener('click', startNewChat);
@@ -561,7 +624,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     window.appendMessage = appendMessageDOM;
 
-    // ── Image Handling ──────────────────────────────────────────────────
     imageInput?.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;

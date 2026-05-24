@@ -152,8 +152,7 @@
             no_dd                  : trFields.noDdInput?.checked             ?? false,
             no_md                  : trFields.noMdInput?.checked             ?? false,
             chat_after_train       : false,
-            
-            // Reasoning Datasets
+
             claude_reasoning       : parseInt(document.getElementById('claudeReasoningInput')?.value) || 0,
             dolci_think            : parseInt(document.getElementById('dolciThinkInput')?.value) || 0,
             deepthink              : parseInt(document.getElementById('deepthinkInput')?.value) || 0,

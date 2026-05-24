@@ -8,3 +8,5 @@ iris_14b_model/
 iris_vision_model/
 browser_profile/*
 uploads/*
+node_modules/
+*.zip

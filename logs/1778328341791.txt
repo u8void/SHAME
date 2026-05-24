@@ -1,6 +1,0 @@
-User: What is your name
-Bot: I'm not sure what to say.
-
-User: Hello?
-Bot: 2023 Mercedes-Benz S-Class Hello!
-

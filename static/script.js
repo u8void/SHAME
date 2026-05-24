@@ -1,14 +1,12 @@
-const toggleBtn   = document.getElementById('toggleBtn');
-const sidebar     = document.getElementById('sidebar');
-const mainContent = document.getElementById('mainContent');
+const toggleBtn       = document.getElementById('toggleBtn');
+const mobileToggleBtn = document.getElementById('mobileToggleBtn');
+const sidebar         = document.getElementById('sidebar');
+const mainContent     = document.getElementById('mainContent');
 
-if (toggleBtn && sidebar && mainContent) {
-    toggleBtn.addEventListener('click', () => {
-        sidebar.classList.toggle('expanded');
-        mainContent.style.marginLeft = sidebar.classList.contains('expanded')
-            ? 'var(--sidebar-expanded)'
-            : 'var(--sidebar-collapsed)';
-    });
+if (sidebar) {
+    const toggleSidebar = () => sidebar.classList.toggle('expanded');
+    if (toggleBtn) toggleBtn.addEventListener('click', toggleSidebar);
+    if (mobileToggleBtn) mobileToggleBtn.addEventListener('click', toggleSidebar);
 }
 
 function handleInput() {
@@ -35,7 +33,21 @@ if (attachBtn) {
         if (menu) menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
     });
 }
-document.addEventListener('click', () => {
+document.addEventListener('click', (e) => {
+    // Close attach menu if clicking outside
     const menu = document.getElementById('attachMenu');
-    if (menu) menu.style.display = 'none';
+    if (menu && menu.style.display === 'block') {
+        if (!menu.contains(e.target) && !attachBtn.contains(e.target)) {
+            menu.style.display = 'none';
+        }
+    }
+    
+    // Close sidebar on mobile if clicking outside
+    if (window.innerWidth <= 768 && sidebar && sidebar.classList.contains('expanded')) {
+        if (!sidebar.contains(e.target) && 
+            (!mobileToggleBtn || !mobileToggleBtn.contains(e.target)) && 
+            (!toggleBtn || !toggleBtn.contains(e.target))) {
+            sidebar.classList.remove('expanded');
+        }
+    }
 });
