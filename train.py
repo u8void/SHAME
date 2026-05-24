@@ -80,6 +80,10 @@ def load_all_data(args) -> List[Tuple[str, str]]:
     if not args.no_md:
         pairs += load_markdown_files(md_dir=args.md_dir)
 
+    print("[DATA] Loading MBZUAI Egyptian Mixture & Maliki datasets...")
+    pairs += load_mbzuai_egyptian_mixture(subset_size=args.max_pairs)
+    pairs += load_hf_maliki_dataset(subset_size=args.max_pairs)
+
     if args.claude_reasoning:
         pairs += load_claude_reasoning_dataset(subset_size=args.claude_reasoning, keep_reasoning=not args.strip_reasoning)
     if args.dolci_think:
@@ -244,10 +248,15 @@ def run_torch_path(args, device_type: str):
     eval_dataset = ChatDataset(eval_pairs, tokenizer, args.max_seq_length)
 
     if device_type == "cuda":
-        bnb_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True, 
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.float16
+        )
         model = AutoModelForCausalLM.from_pretrained(args.model, quantization_config=bnb_config, device_map="auto")
-        model = prepare_model_for_kbit_training(model)
-        lora_r = 32
+        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+        lora_r = 16
     else:
         model = AutoModelForCausalLM.from_pretrained(args.model).to(device)
         lora_r = 8
@@ -265,6 +274,10 @@ def run_torch_path(args, device_type: str):
         gradient_accumulation_steps=args.accum_steps,
         num_train_epochs=args.epochs,
         learning_rate=args.lr,
+        optim="paged_adamw_8bit",
+        fp16=True,
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={'use_reentrant': False},
         lr_scheduler_type="cosine",
         warmup_ratio=0.05,
         logging_steps=10,
@@ -303,8 +316,10 @@ def main():
         target = "cpu"
 
     if target == "mps":
+        args.model = "mlx-community/phi-4-4bit"
         run_mlx_path(args)
     else:
+        args.model = "microsoft/phi-4"
         run_torch_path(args, target)
 
 if __name__ == "__main__":
