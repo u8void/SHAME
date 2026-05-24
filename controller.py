@@ -1,5 +1,5 @@
 """
-iris_controller.py — Iris AI PC Agent
+controller.py — Iris AI PC Agent
 ======================================
 Natural-language control of your computer, powered by Iris.
 """
@@ -9,6 +9,7 @@ import re
 import sys
 import json
 import time
+from typing import Optional
 import shutil
 import smtplib
 import platform
@@ -24,9 +25,40 @@ from pathlib import Path
 
 IS_INTERACTIVE = True
 
-# ──────────────────────────────────────────────────────────────────────────────
-#  WEB SEARCH  (DuckDuckGo HTML — no API key required)
-# ──────────────────────────────────────────────────────────────────────────────
+ROUTER_KEYWORDS: dict = {
+    "medical": [
+        "symptom", "symptoms", "diagnosis", "diagnose", "treatment", "medicine",
+        "medication", "doctor", "health", "disease", "pain", "hospital", "surgery",
+        "patient", "clinical", "therapy", "drug", "prescription", "fever", "injury",
+        "chronic", "infection", "vaccine", "anatomy", "blood", "heart", "lung",
+    ],
+    "coding": [
+        "python", "javascript", "typescript", "function", "code", "debug", "error",
+        "import", "class", "algorithm", "variable", "loop", "array", "api", "sql",
+        "database", "framework", "library", "bug", "syntax", "compile", "runtime",
+        "async", "thread", "git", "docker", "linux", "bash", "script", "regex",
+        "html", "css", "react", "node", "flask", "django", "mlx", "pytorch",
+    ],
+    "finance": [
+        "tax", "taxes", "budget", "expense", "expenses", "investment", "invest",
+        "stock", "stocks", "money", "salary", "income", "profit", "loss", "revenue",
+        "accounting", "bank", "loan", "mortgage", "interest", "rate", "crypto",
+        "bitcoin", "portfolio", "dividend", "inflation", "economy", "financial",
+    ],
+}
+
+def route_category(text: str) -> Optional[str]:
+    lower = text.lower()
+    scores: dict = {}
+    for cat, keywords in ROUTER_KEYWORDS.items():
+        score = sum(1 for kw in keywords if re.search(r'\b' + re.escape(kw) + r'\b', lower))
+        if score:
+            scores[cat] = score
+    if not scores:
+        return None
+    best = max(scores, key=scores.__getitem__)
+    print(f"[Router] Category='{best}' (scores={scores})")
+    return best
 
 import html as _html
 
@@ -56,13 +88,18 @@ _WEB_SEARCH_SKIP = re.compile(
     re.IGNORECASE,
 )
 
-
 def should_web_search(text: str) -> bool:
-    """Return True when the query looks like a factual / informational question."""
+    """Return True when the query looks like a factual / informational question.
+
+    Added guard: skip web search for very short inputs (< 5 words) since
+    those are almost always greetings or simple commands, not factual queries.
+    A DuckDuckGo fetch adds 1-3 seconds of latency — never worth it for "hi".
+    """
+    if len(text.split()) < 5:
+        return False
     if _WEB_SEARCH_SKIP.search(text):
         return False
     return bool(_WEB_SEARCH_TRIGGERS.search(text))
-
 
 def web_search(query: str, max_results: int = 5) -> str:
     """
@@ -90,12 +127,11 @@ def web_search(query: str, max_results: int = 5) -> str:
         with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
             body = resp.read().decode("utf-8", errors="ignore")
 
-        # ── parse titles ──────────────────────────────────────────────────────
         titles   = re.findall(
             r'class=["\']result__a["\'][^>]*>(.*?)</a>',
             body, re.DOTALL,
         )
-        # ── parse snippets ────────────────────────────────────────────────────
+
         snippets = re.findall(
             r'class=["\']result__snippet["\'][^>]*>(.*?)</(?:a|span)>',
             body, re.DOTALL,
@@ -119,7 +155,6 @@ def web_search(query: str, max_results: int = 5) -> str:
     except Exception as exc:
         return f"(Web search unavailable: {exc})"
 
-
 try:
     import pyperclip
     CLIPBOARD_AVAILABLE = True
@@ -128,7 +163,7 @@ except ImportError:
     print("[INFO] Install 'pyperclip' for clipboard support: pip install pyperclip")
 
 try:
-    # Added BookRetriever to import
+
     from iris import load_model as _mlx_load_model, get_device, generate_reply, solve_math, BookRetriever, analyze_image
     IRIS_AVAILABLE = True
 except ImportError:
@@ -259,55 +294,49 @@ def detect_intent(text: str):
             return intent_name, m
     return "ai_agent", None
 
-AI_AGENT_SYSTEM_PROMPT = """
-You are an AI PC assistant. The user will ask you to perform tasks.
-Before providing the final JSON action, you MUST think about the request inside <think>...</think> tags.
-In your thinking, analyze the intent, identify the correct tool, and verify any parameters.
-Finally, respond with a single JSON object that describes the action to take.
+import os
+_prompt_path = os.path.join(os.path.dirname(__file__), "training", "control.md")
+try:
+    with open(_prompt_path, "r", encoding="utf-8") as f:
+        _content = f.read().strip()
+        if _content.startswith("SYSTEM:"):
+            AI_AGENT_SYSTEM_PROMPT = _content[7:].strip()
+        else:
+            AI_AGENT_SYSTEM_PROMPT = _content
+except Exception as e:
+    print(f"[WARNING] Failed to load training/control.md: {e}")
+    AI_AGENT_SYSTEM_PROMPT = "You are an AI PC assistant. Please respond with JSON actions."
 
-Available actions:
-- open_website(url)
-- open_app(name)
-- youtube_video(query)
-- youtube_channel(name)
-- spotify_song(query)
-- send_email(to, subject, body)
-- open_file(path)
-- search_files(query, folder)
-- run_command(command)
-- open_terminal(command)
-- run_code(code)                         // Executes Python and returns stdout/stderr.
-- analyze_image(image_path, prompt)      // Analyse/describe an image file on disk.
-- volume_up, volume_down, volume_mute
-- volume_set(percent)
-- brightness_up, brightness_down, brightness_set(percent)
-- system_info(what)
-- clipboard_copy(text)
-- clipboard_read
-- fix_file(path, instructions)           // Reads a file, applies your instructions, and overwrites it.
-- chat(response)
+MAX_SYS_PROMPT_CHARS = 4096
 
-For actions that need parameters, output JSON exactly like:
-{"action": "open_website", "url": "https://example.com"}
-{"action": "run_command", "command": "ping -c 4 google.com"}
-{"action": "run_code", "code": "print(sum(range(1,101)))"}
-{"action": "analyze_image", "image_path": "/tmp/photo.jpg", "prompt": "What objects are in this image?"}
-{"action": "fix_file", "path": "app.py", "instructions": "Fix the route handler logic"}
-{"action": "chat", "response": "Hello! How can I help?"}
+_agent_prompt_cache = {"text": None, "mtime": 0}
 
-CRITICAL RULES:
-1. If the user asks to "send" or "show" code/information TO THEM in this chat, use the "chat" action.
-2. ONLY use "send_email" if the user explicitly specifies an email recipient or says "email this".
-3. NEVER refuse a request for code. Provide full, complete implementations when asked.
-4. For layouts (like product grids), avoid using `Container maxWidth="sm"` as it forces items to stack vertically. Use `maxWidth="lg"` or `"xl"` for horizontal arrangements.
-5. Output ONLY the JSON object. No other conversational text should be outside the JSON.
-6. When WEB SEARCH RESULTS are provided in your context, use them to give an accurate, up-to-date answer. Summarise the findings naturally in your "chat" response — do not expose raw result numbers to the user.
-7. If the user says your previous answer was wrong (e.g., "Wrong Answer", "WA", "bug"), DO NOT repeat the same logic. Thoroughly re-evaluate the problem, find the flaw in your reasoning, and provide a fixed or completely different approach.
-8. For analyze_image: the image_path is the saved path of the uploaded image. Use the prompt the user provided about the image, or "Describe this image in detail." if unspecified.
-9. NEVER use open_website with a youtube.com/watch URL you invented or guessed. YouTube video IDs cannot be inferred from a title — guessed IDs open wrong or non-existent videos. ALWAYS use youtube_video(query) with the video title as the query when the user wants to watch a YouTube video, whether they described it in text or shared a screenshot/image of it.
-10. When the user shares an image of a YouTube video and asks to open/play/launch it, extract the video title from the image and use youtube_video(query) with that title.
-""".strip()
+def _get_agent_system_prompt() -> str:
+    """
+    Read training/control.md exactly once; only reloads when the file changes
+    on disk (same mtime-guard pattern used by load_generation_config).
 
+    The prompt is capped at MAX_SYS_PROMPT_CHARS characters to keep prefill
+    fast (< 5 s on M2).  Put the most important instructions at the TOP of
+    control.md — they will always be included.
+    """
+    global _agent_prompt_cache
+    path = os.path.join(os.path.dirname(__file__), "training", "control.md")
+    try:
+        mtime = os.path.getmtime(path)
+        if _agent_prompt_cache["text"] is None or mtime != _agent_prompt_cache["mtime"]:
+            with open(path, "r", encoding="utf-8") as f:
+
+                lines = f.readlines()
+                content = "".join(lines[:140]).strip()
+            text = content[7:].strip() if content.startswith("SYSTEM:") else content
+            _agent_prompt_cache = {"text": text, "mtime": mtime}
+        return _agent_prompt_cache["text"]
+    except Exception as e:
+        print(f"[ERROR] Failed to load or truncate system prompt: {e}")
+        return AI_AGENT_SYSTEM_PROMPT
+
+_reply_prefix_cache: dict = {"key": None, "prompt": None}
 
 def handle_run_code(code: str) -> str:
     """Execute Python code in a sandboxed subprocess and return stdout/stderr."""
@@ -341,7 +370,6 @@ def handle_run_code(code: str) -> str:
         except Exception:
             pass
 
-
 def parse_ai_response(text: str) -> dict | None:
     """Try to extract a JSON object from Iris's output."""
     match = re.search(r'\{.*\}', text, re.DOTALL)
@@ -358,72 +386,76 @@ def ai_agent_handle(user_input: str, model, tokenizer, device, retriever, histor
         yield {"type": "text", "content": "Iris model not available."}
         return
 
-    # ── RAG: search local knowledge base ────────────────────────────────────
-    context = retriever.retrieve(user_input, top_k=3) if retriever else ""
+    rag_category = route_category(user_input)
 
-    # ── Web search: run automatically for informational queries ─────────────
+    context = ""
+    if retriever and len(user_input.split()) >= 6:
+        context = retriever.retrieve(user_input, top_k=1, category=rag_category)
+
     web_results = ""
     if should_web_search(user_input):
         yield {"type": "status", "content": "Searching the web..."}
         web_results = web_search(user_input)
 
-    sys_prompt = AI_AGENT_SYSTEM_PROMPT
+    try:
+        sys_prompt = _get_agent_system_prompt()
+    except Exception:
+        sys_prompt = AI_AGENT_SYSTEM_PROMPT
     if context:
         sys_prompt += f"\n\nREFERENCE EXCERPT:\n{context}"
     if web_results:
         sys_prompt += f"\n\nWEB SEARCH RESULTS:\n{web_results}"
 
     messages = [{"role": "system", "content": sys_prompt}]
-    for msg in history[-8:] + [{"role": "user", "content": user_input}]:
+    for msg in history[-4:] + [{"role": "user", "content": user_input}]:
         if messages[-1]["role"] == msg["role"]:
             messages[-1]["content"] += "\n" + msg["content"]
         else:
             messages.append(msg)
 
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    
-    from iris import generate_reply_stream
-    
-    full_reply = ""
-    for token in generate_reply_stream(model, tokenizer, prompt, device):
-        full_reply += token
-        yield {"type": "token", "content": token}
 
-    # Post-generation: Check for actions
-    action_dict = parse_ai_response(full_reply)
-    if action_dict:
+    from iris import generate_reply_stream
+
+    max_turns = 3
+    for turn in range(max_turns):
+        full_reply = ""
+        for token in generate_reply_stream(model, tokenizer, prompt, device):
+            full_reply += token
+            yield {"type": "token", "content": token}
+
+        action_dict = parse_ai_response(full_reply)
+        if not action_dict:
+            break
+
         action = action_dict.get("action", "chat")
+        if action == "chat":
+            break
+
         yield {"type": "status", "content": f"Executing {action}..."}
-        
-        # Execute action logic (simplified call)
+
         result = execute_action_by_dict(action_dict)
         if result:
             yield {"type": "action_result", "content": result}
-            
-            # Recurse for image analysis or web search to allow follow-up actions
-            if action == "analyze_image" or "Web search results" in result:
-                followup_prompt = f"The action '{action}' returned: {result}\nNow provide your final answer or take the next necessary action based on this info."
+
+            if turn < max_turns - 1:
+                followup_prompt = f"The action '{action}' returned:\n{result}\n\nNow provide your final answer or take the next necessary action based on this info."
                 messages.append({"role": "assistant", "content": full_reply})
                 messages.append({"role": "user", "content": followup_prompt})
-                
-                new_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-                for token in generate_reply_stream(model, tokenizer, new_prompt, device):
-                    yield {"type": "token", "content": token}
+
+                prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            else:
+                break
+        else:
+            break
 
 def execute_action_by_dict(action_dict: dict) -> str:
-    """Helper to execute an action from a dictionary."""
     action = action_dict.get("action", "chat")
     try:
         if action == "open_website":
             url = action_dict.get("url", "")
-            # Safety net: if the model passed a youtube.com/watch URL, it almost
-            # certainly guessed the video ID. Route it through the proper YouTube
-            # search instead so the user gets the right video.
             import re as _re
             if _re.search(r"youtube\.com/watch\?v=", url):
-                # Extract any title hint from the url itself (there usually isn't one),
-                # fall back to a YouTube search for the bare domain so the user can
-                # at least find their video manually.
                 print(f"[WARN] open_website with YouTube watch URL intercepted: {url}")
                 print("[WARN] Use youtube_video(query) instead. Opening YouTube search.")
                 _open_url("https://www.youtube.com")
@@ -464,21 +496,180 @@ def execute_action_by_dict(action_dict: dict) -> str:
             path = action_dict.get("image_path", "")
             prompt = action_dict.get("prompt", "Describe this image in detail.")
             return analyze_image(path, prompt)
+        elif action == "web_search":
+            query = action_dict.get("query", "")
+            import urllib.parse
+            q = urllib.parse.quote(query)
+            if "amazon" in query.lower() and "egypt" in query.lower():
+                url = f"https://www.amazon.eg/s?k={q}"
+            elif "amazon" in query.lower():
+                url = f"https://www.amazon.com/s?k={q}"
+            else:
+                url = f"https://www.google.com/search?q={q}"
+            _open_url(url)
+            return f"Opened browser and searched for '{query}'."
+        elif action == "search_image_web":
+            path = action_dict.get("image_path", "")
+            return handle_search_image_web(path)
         elif action == "fix_file":
             path = action_dict.get("path", "")
             instr = action_dict.get("instructions", "")
             return handle_fix_file(path, instr)
+        elif action == "browser_login":
+            from browser_agent import browser_login
+            url      = action_dict.get("url", "")
+            username = action_dict.get("username", "")
+            password = action_dict.get("password", "")
+            if not url:
+                return "browser_login requires a 'url' field."
+            if not username or not password:
+                return "Please tell me the username/email and password to use for login."
+            import iris as _iris
+            _m, _tok = _iris.load_model() if _iris._cached_model else (None, None)
+            _dev = _iris.get_device() if _iris._cached_model else None
+            return browser_login(url, username, password, model=_m, tokenizer=_tok, device=_dev)
+        elif action == "browser_task":
+            from browser_agent import browser_task as _browser_task
+            url  = action_dict.get("url", "")
+            task = action_dict.get("task", "")
+            if not url:
+                return "browser_task requires a 'url' field."
+
+            import iris as _iris
+            _m, _tok = _iris.load_model() if _iris._cached_model else (None, None)
+            _dev = _iris.get_device() if _iris._cached_model else None
+            return _browser_task(url, task, model=_m, tokenizer=_tok, device=_dev)
+        elif action == "create_file":
+            path    = action_dict.get("path", "")
+            content = action_dict.get("content", "")
+            return handle_create_file(path, content)
+        elif action == "read_file":
+            path = action_dict.get("path", "")
+            return handle_read_file(path)
+        elif action == "append_file":
+            path    = action_dict.get("path", "")
+            content = action_dict.get("content", "")
+            return handle_append_file(path, content)
+        elif action == "replace_in_file":
+            path    = action_dict.get("path", "")
+            find    = action_dict.get("find", "")
+            replace = action_dict.get("replace", "")
+            return handle_replace_in_file(path, find, replace)
+        elif action == "move_file":
+            src = action_dict.get("src", "")
+            dst = action_dict.get("dst", "")
+            return handle_move_file(src, dst)
+        elif action == "copy_file":
+            src = action_dict.get("src", "")
+            dst = action_dict.get("dst", "")
+            return handle_copy_file(src, dst)
+        elif action == "delete_file":
+            path = action_dict.get("path", "")
+            return handle_delete_file(path)
+        elif action == "create_folder":
+            path = action_dict.get("path", "")
+            return handle_create_folder(path)
+        elif action == "rename_file":
+            path     = action_dict.get("path", "")
+            new_name = action_dict.get("new_name", "")
+            return handle_rename_file(path, new_name)
+        elif action == "compress_files":
+            paths  = action_dict.get("paths", [])
+            output = action_dict.get("output", "")
+            return handle_compress_files(paths, output)
+        elif action == "extract_file":
+            path = action_dict.get("path", "")
+            dest = action_dict.get("dest", "")
+            return handle_extract_file(path, dest)
+        elif action == "download_file":
+            url  = action_dict.get("url", "")
+            path = action_dict.get("path", "")
+            return handle_download_file(url, path)
         elif action == "chat":
-            return action_dict.get("response", "")
+            return ""
     except Exception as e:
         return f"Action failed: {e}"
-    return ""
+    return f"Action '{action}' is defined in your training data but not yet implemented in controller.py!"
 
 def _open_url(url: str):
     if not url.startswith("http"):
         url = "https://" + url
     print(f"  [→ Browser] {url}")
     webbrowser.open(url)
+
+def handle_search_image_web(image_path: str) -> str:
+    import os
+    import subprocess
+    import urllib.parse
+
+    if not os.path.exists(image_path):
+        return f"Image not found at {image_path}"
+
+    print(f"  [→ Web] Uploading image for reverse search...")
+    img_url = None
+
+    cmd1 = ["curl", "-s", "-F", "reqtype=fileupload", "-F", "time=1h", "-F", f"fileToUpload=@{image_path}", "https://litterbox.catbox.moe/api.php"]
+    try:
+        res = subprocess.run(cmd1, capture_output=True, text=True, timeout=8)
+        out = res.stdout.strip()
+        if out.startswith("http"):
+            img_url = out
+    except Exception:
+        pass
+
+    if not img_url:
+        import json
+        cmd2 = ["curl", "-s", "-F", f"file=@{image_path}", "https://tmpfiles.org/api/v1/upload"]
+        try:
+            res = subprocess.run(cmd2, capture_output=True, text=True, timeout=15)
+            data = json.loads(res.stdout)
+            if data.get("status") == "success":
+                url = data["data"]["url"]
+                img_url = url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+        except Exception as e:
+            pass
+
+    if not img_url:
+        return "Upload failed: All temporary image hosts timed out."
+
+    bing_url = f"https://www.bing.com/images/search?view=detailv2&iss=sbi&FORM=SBIHMP&q=imgurl:{urllib.parse.quote(img_url)}"
+
+    import urllib.request
+    import ssl
+    import re
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+    }
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    try:
+        req = urllib.request.Request(bing_url, headers=headers)
+        with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+
+        title = ""
+        title_match = re.search(r"<title>(.*?)</title>", html, re.IGNORECASE)
+        if title_match:
+            title = title_match.group(1).replace("- Bing Images", "").strip()
+
+        clean_text = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.IGNORECASE|re.DOTALL)
+        clean_text = re.sub(r'<script[^>]*>.*?</script>', '', clean_text, flags=re.IGNORECASE|re.DOTALL)
+
+        clean_text = re.sub(r'<[^>]+>', ' ', clean_text)
+
+        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+
+        return f"Silently performed reverse image search via Bing.\n\nPage Title: {title}\n\nVisible Page Text Snippet:\n{clean_text[:1000]}"
+    except Exception as e:
+        print(f"[Bing Scrape Error] {e}")
+        pass
+
+    return "Silently searched Bing Visual Search, but could not reliably extract the visual match."
 
 def handle_website(match: re.Match):
     url = match.group(1).strip()
@@ -1028,8 +1219,6 @@ def handle_fix_file(path: str, instructions: str, model, tokenizer, device):
     new_content = generate_reply(model, tokenizer, prompt, device, raw_output=True, max_new_tokens=4096)
     new_content = new_content.strip()
 
-    # Robust regex extraction to find the code inside ```...``` blocks,
-    # completely ignoring any conversational text generated before or after.
     code_block_match = re.search(r'```[a-zA-Z]*\n(.*?)```', new_content, re.DOTALL)
     if code_block_match:
         new_content = code_block_match.group(1).strip()
@@ -1059,21 +1248,16 @@ def iris_chat_reply(model, tokenizer, device, retriever, history: list, user_tex
     """Standard chat reply incorporating the RAG Knowledge base and live web search."""
     if model is None:
         return "(Iris model not loaded — only PC-control commands work right now.)"
-    
-    # ── Local knowledge base ────────────────────────────────────────────────
-    context = retriever.retrieve(user_text, top_k=3) if retriever else ""
 
-    # ── Live web search for informational queries ───────────────────────────
+    rag_category = route_category(user_text)
+    context = retriever.retrieve(user_text, top_k=3, category=rag_category) if retriever else ""
+
     web_results = ""
     if should_web_search(user_text):
         print(f"[Web Search] Searching for: {user_text}")
         web_results = web_search(user_text)
 
-    sys_prompt = (
-        "You are Iris, a helpful AI assistant. Always provide full, complete, and detailed code examples when requested. "
-        "IMPORTANT: If the user says your previous answer was wrong or failed a test, DO NOT repeat yourself. "
-        "Re-read the problem carefully, identify the logic error, and provide a corrected solution."
-    )
+    sys_prompt = _get_agent_system_prompt()
 
     if context:
         sys_prompt += (
@@ -1087,14 +1271,31 @@ def iris_chat_reply(model, tokenizer, device, retriever, history: list, user_tex
             "accurate, up-to-date answer):\n"
             f"{web_results}"
         )
-        
+
     history.append({"role": "user", "content": user_text})
-    
-    # Prepend the dynamic system prompt to the rolling window of history
-    ctx = [{"role": "system", "content": sys_prompt}] + history[-20:]
-    prompt = tokenizer.apply_chat_template(ctx, tokenize=False, add_generation_prompt=True)
+
+    prefix_msgs = [{"role": "system", "content": sys_prompt}] + history[-20:-1]
+    prefix_key  = hash(json.dumps(prefix_msgs, ensure_ascii=False, sort_keys=True))
+
+    if _reply_prefix_cache["key"] == prefix_key and _reply_prefix_cache["prompt"] is not None:
+
+        last_turn   = tokenizer.apply_chat_template(
+            history[-1:], tokenize=False, add_generation_prompt=False
+        )
+        prompt = _reply_prefix_cache["prompt"] + last_turn
+    else:
+
+        ctx    = [{"role": "system", "content": sys_prompt}] + history[-20:]
+        prompt = tokenizer.apply_chat_template(ctx, tokenize=False, add_generation_prompt=True)
+
+        prefix_prompt = tokenizer.apply_chat_template(
+            prefix_msgs, tokenize=False, add_generation_prompt=False
+        )
+        _reply_prefix_cache["key"]    = prefix_key
+        _reply_prefix_cache["prompt"] = prefix_prompt
+
     reply = generate_reply(model, tokenizer, prompt, device)
-    
+
     history.append({"role": "assistant", "content": reply})
     return reply
 
@@ -1131,14 +1332,13 @@ def main():
     print_banner()
     config = load_config()
     model, tokenizer, device = load_iris_model()
-    
-    # Initialize the RAG index when starting the CLI controller
+
     retriever = None
     if IRIS_AVAILABLE:
         print("[INFO] Initializing RAG Knowledge Base...")
         retriever = BookRetriever(raw_data_dir="raw_data")
         retriever.load_and_index()
-        
+
     history: list = []
 
     while True:
@@ -1161,7 +1361,7 @@ def main():
             print(HELP_TEXT)
             continue
 
-        intent, match = detect_intent(raw)
+        intent, match = "ai_agent", None
 
         if intent != "ai_agent":
             try:
@@ -1185,11 +1385,184 @@ def main():
                 reply = f"[Error] {e}"
         else:
             try:
-                reply = ai_agent_handle(raw, model, tokenizer, device, retriever, history)
+
+                print("Iris: ", end="", flush=True)
+                reply_parts = []
+                for event in ai_agent_handle(raw, model, tokenizer, device, retriever, history):
+                    if event.get("type") == "token":
+                        chunk = event["content"]
+                        print(chunk, end="", flush=True)
+                        reply_parts.append(chunk)
+                    elif event.get("type") == "action_result":
+                        chunk = "\n" + event["content"]
+                        print(chunk, end="", flush=True)
+                        reply_parts.append(chunk)
+                    elif event.get("type") == "status":
+                        print(f"\n  [{event['content']}]", end="", flush=True)
+                print()
+                reply = "".join(reply_parts)
             except Exception as e:
                 reply = f"[AI Agent error] {e}"
+                print(f"Iris: {reply}")
+            continue
 
         print(f"Iris: {reply}")
+
+def _resolve(path: str):
+    """Expand ~ and environment variables, return a Path object."""
+    from pathlib import Path
+    return Path(os.path.expandvars(os.path.expanduser(path)))
+
+def handle_create_file(path: str, content: str = "") -> str:
+    p = _resolve(path)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return f"✅ File created: {p}"
+    except Exception as e:
+        return f"❌ Could not create file: {e}"
+
+def handle_read_file(path: str) -> str:
+    p = _resolve(path)
+    try:
+        if not p.exists():
+            return f"❌ File not found: {p}"
+        text = p.read_text(encoding="utf-8", errors="replace")
+        if len(text) > 4000:
+            text = text[:4000] + "\n… [truncated]"
+        return f"Contents of {p}:\n\n{text}"
+    except Exception as e:
+        return f"❌ Could not read file: {e}"
+
+def handle_append_file(path: str, content: str) -> str:
+    p = _resolve(path)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as f:
+            f.write(content)
+        return f"✅ Appended to: {p}"
+    except Exception as e:
+        return f"❌ Could not append to file: {e}"
+
+def handle_replace_in_file(path: str, find: str, replace: str) -> str:
+    p = _resolve(path)
+    try:
+        if not p.exists():
+            return f"❌ File not found: {p}"
+        text = p.read_text(encoding="utf-8")
+        if find not in text:
+            return f"❌ Text '{find}' not found in {p}"
+        new_text = text.replace(find, replace)
+        p.write_text(new_text, encoding="utf-8")
+        return f"✅ Replaced '{find}' with '{replace}' in {p}"
+    except Exception as e:
+        return f"❌ Could not replace in file: {e}"
+
+def handle_move_file(src: str, dst: str) -> str:
+    import shutil
+    s, d = _resolve(src), _resolve(dst)
+    try:
+        d.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(s), str(d))
+        return f"✅ Moved {s} → {d}"
+    except Exception as e:
+        return f"❌ Could not move: {e}"
+
+def handle_copy_file(src: str, dst: str) -> str:
+    import shutil
+    s, d = _resolve(src), _resolve(dst)
+    try:
+        d.parent.mkdir(parents=True, exist_ok=True)
+        if s.is_dir():
+            shutil.copytree(str(s), str(d))
+        else:
+            shutil.copy2(str(s), str(d))
+        return f"✅ Copied {s} → {d}"
+    except Exception as e:
+        return f"❌ Could not copy: {e}"
+
+def handle_delete_file(path: str) -> str:
+    import subprocess
+    p = _resolve(path)
+    try:
+        if not p.exists():
+            return f"❌ File not found: {p}"
+
+        subprocess.run(["osascript", "-e",
+            f'tell app "Finder" to delete POSIX file "{p}"'],
+            check=True, capture_output=True)
+        return f"🗑️ Moved to Trash: {p}"
+    except Exception as e:
+        return f"❌ Could not delete: {e}"
+
+def handle_create_folder(path: str) -> str:
+    p = _resolve(path)
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+        return f"✅ Folder created: {p}"
+    except Exception as e:
+        return f"❌ Could not create folder: {e}"
+
+def handle_rename_file(path: str, new_name: str) -> str:
+    p = _resolve(path)
+    try:
+        if not p.exists():
+            return f"❌ Path not found: {p}"
+        new_path = p.parent / new_name
+        p.rename(new_path)
+        return f"✅ Renamed to: {new_path}"
+    except Exception as e:
+        return f"❌ Could not rename: {e}"
+
+def handle_compress_files(paths: list, output: str) -> str:
+    import zipfile
+    out = _resolve(output)
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(str(out), "w", zipfile.ZIP_DEFLATED) as zf:
+            for p_str in paths:
+                p = _resolve(p_str)
+                if p.is_dir():
+                    for f in p.rglob("*"):
+                        if f.is_file():
+                            zf.write(f, f.relative_to(p.parent))
+                elif p.exists():
+                    zf.write(p, p.name)
+        return f"✅ Archive created: {out}"
+    except Exception as e:
+        return f"❌ Could not compress: {e}"
+
+def handle_extract_file(path: str, dest: str) -> str:
+    import zipfile, tarfile
+    p = _resolve(path)
+    d = _resolve(dest)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        name = p.name.lower()
+        if name.endswith(".zip"):
+            with zipfile.ZipFile(str(p)) as zf:
+                zf.extractall(str(d))
+        elif any(name.endswith(s) for s in (".tar.gz", ".tgz", ".tar.bz2", ".tar")):
+            with tarfile.open(str(p)) as tf:
+                tf.extractall(str(d))
+        else:
+            return f"❌ Unsupported archive format: {p.suffix}"
+        return f"✅ Extracted to: {d}"
+    except Exception as e:
+        return f"❌ Could not extract: {e}"
+
+def handle_download_file(url: str, path: str) -> str:
+    import urllib.request, ssl
+    p = _resolve(path)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        urllib.request.urlretrieve(url, str(p))
+        return f"✅ Downloaded to: {p}"
+    except Exception as e:
+        return f"❌ Could not download: {e}"
 
 if __name__ == "__main__":
     main()

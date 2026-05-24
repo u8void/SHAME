@@ -31,6 +31,8 @@ from iris import (
     load_code_feedback,
 )
 
+SYSTEM_PROMPT = "You are Iris, an intelligent and helpful AI assistant trained to assist the user with their tasks."
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Unified Training for Iris AI")
 
@@ -113,6 +115,7 @@ def export_to_jsonl(pairs: List[Tuple[str, str]], out_dir: str):
             for prompt, response in data:
                 entry = {
                     "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": prompt},
                         {"role": "assistant", "content": response}
                     ]
@@ -184,7 +187,7 @@ def run_torch_path(args, device_type: str):
     print(f"  Iris AI — Torch Training Path ({device_type.upper()})")
     print("="*60)
 
-    from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+    from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, Trainer, TrainingArguments, DataCollatorForSeq2Seq
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
 
     device = torch.device(device_type)
@@ -198,16 +201,47 @@ def run_torch_path(args, device_type: str):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    texts = []
-    for u, b in pairs:
-        msgs = [{"role": "user", "content": u}, {"role": "assistant", "content": b}]
-        texts.append(tokenizer.apply_chat_template(msgs, tokenize=False))
+    class ChatDataset(torch.utils.data.Dataset):
+        def __init__(self, data_pairs, tokenizer, max_length):
+            self.examples = []
+            for u, b in data_pairs:
+                sys_msg = {"role": "system", "content": SYSTEM_PROMPT}
+                user_msg = {"role": "user", "content": u}
+                ast_msg = {"role": "assistant", "content": b}
+                
+                prompt_text = tokenizer.apply_chat_template([sys_msg, user_msg], tokenize=False, add_generation_prompt=True)
+                prompt_ids = tokenizer(prompt_text, truncation=True, max_length=max_length)["input_ids"]
+                prompt_len = len(prompt_ids)
+                
+                full_text = tokenizer.apply_chat_template([sys_msg, user_msg, ast_msg], tokenize=False)
+                encodings = tokenizer(full_text, truncation=True, max_length=max_length)
+                input_ids = encodings["input_ids"]
+                
+                labels = list(input_ids)
+                mask_len = min(prompt_len, len(labels))
+                labels[:mask_len] = [-100] * mask_len
+                
+                self.examples.append({
+                    "input_ids": input_ids,
+                    "attention_mask": encodings["attention_mask"],
+                    "labels": labels
+                })
 
-    encodings = tokenizer(texts, truncation=True, max_length=args.max_seq_length, padding="max_length", return_tensors="pt")
-    input_ids = encodings["input_ids"]
-    labels = input_ids.clone()
-    labels[encodings["attention_mask"] == 0] = -100
-    dataset = torch.utils.data.TensorDataset(input_ids, encodings["attention_mask"], labels)
+        def __len__(self):
+            return len(self.examples)
+
+        def __getitem__(self, i):
+            return self.examples[i]
+
+    # Split dataset into 95% train and 5% eval
+    random.shuffle(pairs)
+    split_idx = int(len(pairs) * 0.95)
+    train_pairs = pairs[:split_idx]
+    eval_pairs = pairs[split_idx:]
+
+    print("[INFO] Processing datasets (masking user prompts)...")
+    train_dataset = ChatDataset(train_pairs, tokenizer, args.max_seq_length)
+    eval_dataset = ChatDataset(eval_pairs, tokenizer, args.max_seq_length)
 
     if device_type == "cuda":
         bnb_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16)
@@ -221,23 +255,40 @@ def run_torch_path(args, device_type: str):
     config = LoraConfig(r=lora_r, lora_alpha=lora_r*2, target_modules="all-linear", task_type=TaskType.CAUSAL_LM)
     model = get_peft_model(model, config)
 
-    loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    # Dynamic padding collator
+    data_collator = DataCollatorForSeq2Seq(tokenizer, model=model, padding=True)
 
-    model.train()
-    for epoch in range(args.epochs):
-        print(f"Epoch {epoch+1}/{args.epochs}")
-        for step, batch in enumerate(loader):
-            ids, mask, lbls = [b.to(device) for b in batch]
-            loss = model(input_ids=ids, attention_mask=mask, labels=lbls).loss
-            loss.backward()
-            if (step+1) % args.accum_steps == 0:
-                optimizer.step()
-                optimizer.zero_grad()
-                print(f"  Step {step+1} | Loss: {loss.item():.4f}")
+    training_args = TrainingArguments(
+        output_dir=args.output_dir,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
+        gradient_accumulation_steps=args.accum_steps,
+        num_train_epochs=args.epochs,
+        learning_rate=args.lr,
+        lr_scheduler_type="cosine",
+        warmup_ratio=0.05,
+        logging_steps=10,
+        eval_strategy="steps" if len(eval_dataset) > 0 else "no",
+        eval_steps=100,
+        save_strategy="steps",
+        save_steps=100,
+        save_total_limit=3,
+        report_to="auto",
+        remove_unused_columns=False
+    )
 
-    model.save_pretrained(args.output_dir)
-    print(f"[OK] Training complete. Adapters saved to {args.output_dir}")
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset if len(eval_dataset) > 0 else None,
+        data_collator=data_collator,
+    )
+
+    print("\n[INFO] Starting HF Trainer...")
+    trainer.train()
+    trainer.save_model(args.output_dir)
+    print(f"\n[OK] Training complete. Adapters saved to {args.output_dir}")
 
 def main():
     args = parse_args()

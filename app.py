@@ -7,7 +7,6 @@ import subprocess
 from flask import Flask, request, jsonify, render_template
 from werkzeug.utils import secure_filename
 
-# Added BookRetriever to the import list
 from iris import load_model, get_device, generate_reply, solve_math, BookRetriever, analyze_image, MLX_MODEL_ID, HF_MODEL_ID, BACKEND
 
 parser = argparse.ArgumentParser(description="Run the Iris AI Flask App")
@@ -28,7 +27,7 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(TRAIN_LOG_FILE), exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB max upload
+app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
 def _allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -38,12 +37,46 @@ tokenizer     = None
 device        = None
 retriever     = None
 _model_lock   = threading.Lock()
-_model_ready  = threading.Event()   # set once model + RAG are fully loaded
+_model_ready  = threading.Event()
+_retriever_lock   = threading.Lock()
+_retriever_ready  = False
 training_proc = None
 
+def get_retriever():
+    """Lazy-load the RAG index on first chat request.
+
+    Kept out of init_model so it does not compete with model weights for
+    unified memory during the critical startup window.
+    """
+    global retriever, _retriever_ready
+    if _retriever_ready:
+        return retriever
+    with _retriever_lock:
+        if _retriever_ready:
+            return retriever
+        print("[INFO] Lazy-loading RAG Knowledge Base...")
+        try:
+            retriever = BookRetriever(raw_data_dir="raw_data")
+            retriever.load_and_index()
+        except Exception as e:
+            print(f"[WARNING] RAG load failed: {e}")
+            retriever = None
+        _retriever_ready = True
+        return retriever
+
 def init_model():
-    """Load phi-4 + LoRA adapters and RAG index in a background thread at startup."""
-    global model, tokenizer, device, retriever
+    """Load phi-4 + LoRA adapters in a background thread.
+
+    Key changes vs the original:
+    - Metal cache capped at 1 GB immediately after model load.
+    - Warmup runs with non-streaming ``generate`` (avoids the stream_generate
+      deadlock) so Metal JIT kernels compile BEFORE the first user message.
+    - _model_ready is set AFTER warmup, guaranteeing the first real request
+      is fast (~3-8 s) instead of triggering JIT compilation mid-response.
+    - RAG is no longer loaded here; it lazy-loads on the first chat request
+      so it does not compete with model weights for unified memory.
+    """
+    global model, tokenizer, device
 
     if PREVIEW_MODE:
         _model_ready.set()
@@ -58,48 +91,32 @@ def init_model():
             model, tokenizer = load_model()
             device = get_device()
 
-            print("[INFO] Initializing RAG Knowledge Base...")
-            retriever = BookRetriever(raw_data_dir="raw_data")
-            retriever.load_and_index()
-
-            print(f"[INFO] Model ready. device={device}")
-
-            # ── MLX JIT warmup ───────────────────────────────────────────────
-            # IMPORTANT: The warmup prompt must be representative of real prompts.
-            # MLX compiles separate kernels per prompt-length bucket, so a short
-            # "hi" warmup (5 tokens) does NOT cover the real system-prompt shape
-            # (~200 tokens). We use the actual AI_AGENT_SYSTEM_PROMPT so the
-            # compiled kernel is reused on the first real user message.
-            # We also must NOT break early — that abandons compilation mid-way.
             if BACKEND == "mlx":
-                print("[INFO] Warming up MLX JIT compiler (one-time, ~25 s)...")
                 try:
-                    import mlx.core as _mx
-                    from iris import generate_reply_stream as _grs
-                    from controller import AI_AGENT_SYSTEM_PROMPT as _SYS
-                    _warmup_msgs = [
-                        {"role": "system", "content": _SYS},
-                        {"role": "user",   "content": "Hello, how are you?"},
-                    ]
-                    _wp = tokenizer.apply_chat_template(
-                        _warmup_msgs, tokenize=False, add_generation_prompt=True
-                    )
-                    # Consume all tokens (max 20) — no break — so MLX fully
-                    # executes and caches the compiled kernel for this shape.
-                    for _ in _grs(model, tokenizer, _wp, device, max_new_tokens=20):
-                        pass
-                    _mx.eval()   # flush any pending lazy MLX ops
-                    print("[INFO] MLX warmup done — responses will now be fast.")
-                except Exception as _we:
-                    print(f"[WARNING] MLX warmup skipped: {_we}")
+                    import mlx.core as mx
+                    mx.metal.set_cache_limit(1 * 1024 * 1024 * 1024)
+                    print("[INFO] MLX Metal cache capped at 1 GB.")
+                except Exception:
+                    pass
+
+            print("[INFO] Warming up Metal kernels (first compile ~20-40 s on M2)...")
+            try:
+                if BACKEND == "mlx":
+                    from mlx_lm import generate as _warmup_gen
+                    _warmup_gen(model, tokenizer, prompt="hi", max_tokens=2, verbose=False)
+                    print("[INFO] Metal warmup complete — model ready.")
+                else:
+                    print("[INFO] Non-MLX backend — skipping warmup.")
+            except Exception as e:
+                print(f"[INFO] Warmup failed ({e}) — first response may be slower.")
+
+            print(f"[INFO] Iris ready. backend={BACKEND} device={device}")
 
         except Exception as e:
             print(f"[ERROR] Model loading failed: {e}")
         finally:
-            _model_ready.set()   # always unblock waiters, even on error
+            _model_ready.set()
 
-# Kick off loading immediately so the model is ready before the first user message,
-# instead of blocking the first HTTP request for 30+ seconds.
 if not PREVIEW_MODE:
     threading.Thread(target=init_model, name="model-loader", daemon=True).start()
 else:
@@ -111,14 +128,12 @@ def home():
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    # If the model is still loading, tell the user instead of hanging silently.
     if not PREVIEW_MODE and not _model_ready.is_set():
         def _warming():
             yield 'data: {"type": "token", "content": "Iris is warming up - model loading takes 20-40s on first start. Please try again shortly."}\n\n'
         from flask import Response
         return Response(_warming(), mimetype="text/event-stream")
 
-    # Handle both JSON (text only) and Multipart (text + image)
     if request.is_json:
         data = request.json
         image_file = None
@@ -130,13 +145,12 @@ def chat():
     user_message = data.get("message", "").strip()
     history      = data.get("history", "")
     settings     = data.get("settings", {})
-    
-    # Check for image upload in the main chat route
+
     if image_file and _allowed_file(image_file.filename):
         filename = secure_filename(image_file.filename)
         save_path = os.path.join(UPLOAD_DIR, filename)
         image_file.save(save_path)
-        # Inject the image path into the user message so the Phi-4 agent knows it can "see" it
+
         user_message = f"[IMAGE_UPLOADED: {save_path}] {user_message}"
 
     if not user_message and not image_file:
@@ -147,8 +161,15 @@ def chat():
         return jsonify({"reply": math_answer})
 
     if PREVIEW_MODE:
-        return jsonify({"reply": "[Preview Mode] Mock response."})
-    
+        def preview_generate():
+            mock_event = {"type": "action_result", "content": "[Preview Mode] Mock response."}
+            yield f"data: {json.dumps(mock_event)}\n\n"
+        resp = Response(preview_generate(), mimetype='text/event-stream')
+        resp.headers['X-Accel-Buffering'] = 'no'
+        resp.headers['Cache-Control']     = 'no-cache'
+        resp.headers['Connection']        = 'keep-alive'
+        return resp
+
     import controller
     controller.IS_INTERACTIVE = False
     from controller import ai_agent_handle
@@ -161,11 +182,10 @@ def chat():
             pass
 
     agent_history = []
-    for msg in frontend_messages[:-1]:
+    for msg in frontend_messages[:-1][-6:]:
         role = "assistant" if msg.get("role") == "bot" else "user"
         agent_history.append({"role": role, "content": msg.get("content", "")})
 
-    # Return as an SSE stream
     from flask import Response
     def generate():
         for event in ai_agent_handle(
@@ -173,7 +193,7 @@ def chat():
             model,
             tokenizer,
             device,
-            retriever,
+            get_retriever(),
             agent_history
         ):
             yield f"data: {json.dumps(event)}\n\n"
@@ -203,11 +223,9 @@ def analyze_image_route():
     if not _allowed_file(file.filename):
         return jsonify({"error": f"Unsupported file type. Allowed: {ALLOWED_EXTENSIONS}"}), 415
 
-    prompt  = request.form.get("prompt", "Describe this image in detail.").strip() or \
-              "Describe this image in detail."
+    prompt  = request.form.get("prompt", "Describe this image in detail.").strip() or              "Describe this image in detail."
     chat_id = request.form.get("chat_id", "unknown_chat")
 
-    # Save the upload to a temp path
     filename  = secure_filename(file.filename)
     save_path = os.path.join(UPLOAD_DIR, filename)
     file.save(save_path)
@@ -220,13 +238,12 @@ def analyze_image_route():
     except Exception as e:
         reply = f"Image analysis failed: {e}"
     finally:
-        # Clean up the temp file after analysis
+
         try:
             os.unlink(save_path)
         except Exception:
             pass
 
-    # Log the interaction
     log_path = os.path.join(LOGS_DIR, f"{chat_id}.txt")
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(f"User [image]: {filename} | Prompt: {prompt}\nBot: {reply}\n\n")

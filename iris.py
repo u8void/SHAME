@@ -1,5 +1,5 @@
 """
-iris.py — Unified Intelligence Engine for Iris AI
+iris.py — AI Intelligence Engine for Iris AI
 ==================================================
 Consolidated backend supporting MLX, CUDA, and CPU.
 Includes data loaders, training utilities, and a math solver.
@@ -9,15 +9,13 @@ import os
 import re
 import json
 import glob
+import pickle
+import hashlib
 import platform
 import threading
 import random
 from typing import Optional, Tuple, Dict, Any
 import math
-from mlx_vlm import load as vlm_load
-from mlx_vlm.utils import load_config as vlm_load_config
-from mlx_vlm import generate as vlm_generate
-from mlx_vlm.prompt_utils import apply_chat_template
 
 try:
     from sentence_transformers import SentenceTransformer, util
@@ -46,10 +44,15 @@ except ImportError:
     DATASETS_AVAILABLE = False
 
 # ── Vision model availability ─────────────────────────────────────────────────
-_VISION_MODEL_CACHE = {}   # {"model": ..., "processor": ..., "backend": ...}
+_VISION_MODEL_CACHE: dict = {}   # {"model": ..., "processor": ..., "backend": ...}
 _VISION_LOCK = threading.Lock()
 
-MLX_VISION_MODEL_ID = "mlx-community/Qwen2-VL-2B-Instruct-4bit"
+_IRIS_DIR = os.path.dirname(os.path.abspath(__file__))
+MLX_VISION_MODEL_ID = os.path.join(_IRIS_DIR, "iris_vision_model")
+
+# ── Prompt-prefix KV cache (avoids JIT recompilation on similar prompts) ─────
+_kv_cache: Dict[int, Any] = {}  # hash(prompt[-2048:]) -> prompt_cache object
+_KV_CACHE_MAX = 4               # max distinct cached prefixes
 
 try:
     from tqdm import tqdm
@@ -63,82 +66,224 @@ PEFT_ADAPTER  = os.path.join(_HERE, "adapters_peft")
 FUSED_MODEL_PATH = os.path.join(_HERE, "iris_14b_model")
 CONFIG_PATH   = os.path.join(_HERE, "config", "iris.conf")
 
-MLX_MODEL_ID  = "mlx-community/phi-4-4bit"
-HF_MODEL_ID   = "microsoft/phi-4"
+MLX_MODEL_ID  = "mlx-community/Qwen3.6-27B-4bit"
+HF_MODEL_ID   = "Qwen/Qwen3.6-27B"
 
 # ==========================================
 # RAG: Retrieval-Augmented Generation Module
 # ==========================================
 class BookRetriever:
+    """
+    RAG retriever with task-aware category support.
+
+    Chunk storage format (self.chunks is a list of dicts):
+        {
+            "text":        str,   # the chunk content
+            "source_file": str,   # absolute path of the source file
+            "category":    str,   # subfolder name, or "general" for top-level files
+        }
+
+    Directory convention:
+        raw_data/                 → category "general"
+        raw_data/medical/         → category "medical"
+        raw_data/coding/          → category "coding"
+        raw_data/finance/         → category "finance"
+        raw_data/<any>/           → category "<any>"
+    """
+
     def __init__(self, raw_data_dir="raw_data"):
         self.raw_data_dir = raw_data_dir
-        self.chunks = []
-        self.embeddings = None
-        self.embedder = None
+        self.chunks: list  = []           # list of {text, source_file, category}
+        self.embeddings    = None         # tensor of all chunk embeddings
+        self.embedder      = None
+        self._cat_index: Dict[str, list] = {}  # category → list of chunk indices
+
+    # ------------------------------------------------------------------ #
+    #  Indexing                                                            #
+    # ------------------------------------------------------------------ #
+    def _cache_key(self, file_entries: list) -> str:
+        """Stable hash of (path, mtime) pairs — changes when any file is added/edited."""
+        parts = sorted(
+            f"{path}:{os.path.getmtime(path):.3f}" for path, _ in file_entries
+        )
+        return hashlib.md5("\n".join(parts).encode()).hexdigest()
+
+    def _cache_path(self) -> str:
+        return os.path.join(self.raw_data_dir, ".rag_index_cache.pkl")
 
     def load_and_index(self):
-        """Loads markdown/txt files and builds the searchable vector index."""
+        """Scan raw_data/ (including subdirectories) and build the vector index.
+
+        Embeddings are persisted to .rag_index_cache.pkl so subsequent startups
+        skip the expensive encode() call entirely (saves 30-120 s on large corpora).
+        """
         if not RAG_AVAILABLE:
             print("[RAG] sentence-transformers not installed. RAG disabled.")
             return
 
         if not os.path.exists(self.raw_data_dir):
             os.makedirs(self.raw_data_dir, exist_ok=True)
-            print(f"[RAG] Created {self.raw_data_dir}/. Drop your markdown books here.")
+            print(f"[RAG] Created {self.raw_data_dir}/. Drop markdown/txt files here.")
             return
 
         print("[RAG] Loading embedding model (all-MiniLM-L6-v2)...")
-        self.embedder = SentenceTransformer('all-MiniLM-L6-v2')
+        self.embedder = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
 
-        print(f"[RAG] Reading raw data from {self.raw_data_dir}/...")
-        raw_text = ""
+        # ── Collect (path, category) pairs ───────────────────────────────
+        file_entries: list = []   # list of (path, category)
+        abs_root = os.path.abspath(self.raw_data_dir)
+
         for ext in ["*.md", "*.txt"]:
-            for path in glob.glob(os.path.join(self.raw_data_dir, ext)):
-                with open(path, "r", encoding="utf-8") as f:
-                    raw_text += f.read() + "\n\n"
+            # Top-level files → category "general"
+            for path in glob.glob(os.path.join(abs_root, ext)):
+                file_entries.append((path, "general"))
+            # Subdirectory files → category = subfolder name
+            for path in glob.glob(os.path.join(abs_root, "**", ext), recursive=True):
+                rel = os.path.relpath(path, abs_root)
+                parts = rel.split(os.sep)
+                category = parts[0] if len(parts) > 1 else "general"
+                file_entries.append((path, category))
 
-        if not raw_text.strip():
+        # Deduplicate (recursive glob re-finds top-level files)
+        seen: set = set()
+        unique_entries = []
+        for path, cat in file_entries:
+            if path not in seen:
+                seen.add(path)
+                unique_entries.append((path, cat))
+        file_entries = unique_entries
+
+        if not file_entries:
             print("[RAG] No text found in raw_data/. Skipping index creation.")
             return
 
-        # --- IMPROVED CHUNKING STRATEGY ---
-        # Split by double newlines to preserve natural paragraph structure
-        paragraphs = re.split(r'\n\s*\n', raw_text)
-        self.chunks = []
-        current_chunk = ""
-        
-        for para in paragraphs:
-            para = para.strip()
-            if not para: continue
-            
-            # Group short paragraphs together into chunks of ~1500 characters
-            if len(current_chunk) + len(para) > 1500 and current_chunk:
-                self.chunks.append(current_chunk.strip())
-                current_chunk = para + "\n\n"
-            else:
-                current_chunk += para + "\n\n"
-                
-        # Append the final chunk
-        if current_chunk.strip():
-            self.chunks.append(current_chunk.strip())
+        categories_found = sorted({c for _, c in file_entries})
+        print(f"[RAG] Found {len(file_entries)} files across categories: {categories_found}")
 
-        print(f"[RAG] Created {len(self.chunks)} logical text chunks. Indexing...")
-        self.embeddings = self.embedder.encode(self.chunks, convert_to_tensor=True)
+        # ── Try loading from disk cache first ────────────────────────────
+        cache_key = self._cache_key(file_entries)
+        cache_file = self._cache_path()
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, "rb") as f:
+                    cached = pickle.load(f)
+                if cached.get("key") == cache_key:
+                    self.chunks      = cached["chunks"]
+                    self.embeddings  = cached["embeddings"]
+                    self._cat_index  = cached["cat_index"]
+                    print(f"[RAG] Loaded {len(self.chunks)} chunks from disk cache (skipped re-encode).")
+                    return
+                else:
+                    print("[RAG] Cache stale (files changed) — rebuilding index.")
+            except Exception as e:
+                print(f"[RAG] Cache load failed ({e}) — rebuilding index.")
+
+        # ── Chunk all files and record metadata ──────────────────────────
+        self.chunks = []
+        self._cat_index = {}
+
+        for path, category in file_entries:
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    raw_text = f.read()
+            except Exception as e:
+                print(f"[RAG] Could not read {path}: {e}")
+                continue
+
+            paragraphs = re.split(r'\n\s*\n', raw_text)
+            current_chunk = ""
+            for para in paragraphs:
+                para = para.strip()
+                if not para:
+                    continue
+                if len(current_chunk) + len(para) > 1500 and current_chunk:
+                    self._add_chunk(current_chunk.strip(), path, category)
+                    current_chunk = para + "\n\n"
+                else:
+                    current_chunk += para + "\n\n"
+            if current_chunk.strip():
+                self._add_chunk(current_chunk.strip(), path, category)
+
+        if not self.chunks:
+            print("[RAG] No chunks created. Check that files contain text.")
+            return
+
+        # ── Build category index ─────────────────────────────────────────
+        for idx, chunk in enumerate(self.chunks):
+            cat = chunk["category"]
+            self._cat_index.setdefault(cat, []).append(idx)
+
+        cat_summary = {c: len(v) for c, v in self._cat_index.items()}
+        print(f"[RAG] {len(self.chunks)} chunks indexed. Distribution: {cat_summary}")
+
+        chunk_texts = [c["text"] for c in self.chunks]
+        self.embeddings = self.embedder.encode(chunk_texts, convert_to_tensor=True)
         print("[RAG] Indexing complete!")
 
-    def retrieve(self, query: str, top_k=3) -> str:
-        """Finds the most relevant chunks for a user's query."""
+        # ── Persist to disk so next startup skips encode() ───────────────
+        try:
+            with open(cache_file, "wb") as f:
+                pickle.dump({
+                    "key":        cache_key,
+                    "chunks":     self.chunks,
+                    "embeddings": self.embeddings,
+                    "cat_index":  self._cat_index,
+                }, f)
+            print(f"[RAG] Index cached to {cache_file} — future startups will be instant.")
+        except Exception as e:
+            print(f"[RAG] Could not save cache ({e}) — index will rebuild next time.")
+
+    def _add_chunk(self, text: str, source_file: str, category: str) -> None:
+        self.chunks.append({"text": text, "source_file": source_file, "category": category})
+
+    # ------------------------------------------------------------------ #
+    #  Retrieval                                                           #
+    # ------------------------------------------------------------------ #
+    def retrieve(self, query: str, top_k: int = 3, category: Optional[str] = None) -> str:
+        """
+        Retrieve the top-k most relevant chunks.
+
+        Args:
+            query:    The user's query string.
+            top_k:    Maximum number of chunks to return.
+            category: If provided, restrict search to chunks in that category.
+                      Falls back to "general" chunks, then all chunks, if the
+                      requested category has too few results.
+        """
         if self.embeddings is None or self.embedder is None or not self.chunks:
             return ""
 
         query_embedding = self.embedder.encode(query, convert_to_tensor=True)
-        hits = util.semantic_search(query_embedding, self.embeddings, top_k=top_k)[0]
-        
-        retrieved_texts = []
-        for hit in hits:
-            chunk_text = self.chunks[hit['corpus_id']]
-            retrieved_texts.append(chunk_text)
-            
+
+        # ── Determine the candidate index pool ───────────────────────────
+        candidate_indices: Optional[list] = None
+
+        if category is not None:
+            pool = self._cat_index.get(category, [])
+            if len(pool) < max(1, top_k):
+                # Too few chunks in requested category → try "general" fallback
+                fallback = self._cat_index.get("general", [])
+                pool = pool + [i for i in fallback if i not in set(pool)]
+            if len(pool) < max(1, top_k):
+                # Still not enough → use all chunks
+                pool = list(range(len(self.chunks)))
+                print(f"[RAG] Category '{category}' sparse; using full index.")
+            candidate_indices = pool
+
+        # ── Semantic search over the selected pool ────────────────────────
+        if candidate_indices is not None:
+            import torch
+            subset_embeddings = self.embeddings[candidate_indices]
+            hits_raw = util.semantic_search(query_embedding, subset_embeddings, top_k=top_k)[0]
+            # Map subset positions back to global chunk indices
+            hits_global = [
+                {"corpus_id": candidate_indices[h["corpus_id"]], "score": h["score"]}
+                for h in hits_raw
+            ]
+        else:
+            hits_global = util.semantic_search(query_embedding, self.embeddings, top_k=top_k)[0]
+
+        retrieved_texts = [self.chunks[h["corpus_id"]]["text"] for h in hits_global]
         return "\n\n---\n\n".join(retrieved_texts)
 
 
@@ -353,6 +498,42 @@ def load_deepthink_dataset(subset_size=None, keep_reasoning=True):
     except Exception: return []
 
 
+def load_openhermes_reasoning(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        ds = load_dataset("teknium/OpenHermes-2.5", split="train")
+        pairs = [(m[0]["content"].strip(), m[1]["content"].strip()) 
+                 for row in ds if (m := row.get("messages")) and len(m) >= 2]
+        if subset_size and len(pairs) > subset_size: 
+            random.shuffle(pairs); return pairs[:subset_size]
+        return pairs
+    except Exception: return []
+
+def load_math_qa(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        ds = load_dataset("EleutherAI/hendrycks_math", name="algebra", split="train")
+        pairs = [(row.get("problem", "").strip(), row.get("solution", "").strip()) for row in ds]
+        if subset_size and len(pairs) > subset_size: 
+            random.shuffle(pairs); return pairs[:subset_size]
+        return pairs
+    except Exception: return []
+
+def load_code_feedback(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        ds = load_dataset("m-a-p/CodeFeedback-Filtered-Instruction", split="train")
+        pairs = []
+        for row in ds:
+            m = row.get("messages")
+            if m and len(m) >= 2:
+                pairs.append((m[0]["content"].strip(), m[1]["content"].strip()))
+        if subset_size and len(pairs) > subset_size: 
+            random.shuffle(pairs); return pairs[:subset_size]
+        return pairs
+    except Exception: return []
+
+
 if TORCH_AVAILABLE:
     class SFTDataset(Dataset):
         def __init__(self, conversations, tokenizer, max_length=128):
@@ -396,7 +577,13 @@ _gen_config_mtime: float | None = None
 def load_generation_config() -> dict:
     """Reads iris.conf once and caches it; only reloads when the file changes on disk."""
     global _gen_config_cache, _gen_config_mtime
-    defaults = {"max_new_tokens": 256, "temperature": 0.7, "top_p": 0.9, "repetition_penalty": 1.0}
+    defaults = {
+        "max_new_tokens": 256,
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "repetition_penalty": 1.0,
+        "disable_rag": False,   # set true in iris.conf for speed tests
+    }
     if os.path.exists(CONFIG_PATH):
         try:
             mtime = os.path.getmtime(CONFIG_PATH)
@@ -445,6 +632,15 @@ def load_model():
                 tag = f" + adapters from {adapter}" if adapter else ""
                 print(f"[iris] Loading {MLX_MODEL_ID}{tag}...")
                 _cached_model, _cached_tok = load(MLX_MODEL_ID, adapter_path=adapter)
+            # ── MLX memory management: cap Metal JIT kernel cache at 1 GB ──
+            # Without this, MLX can hoard multiple GB of compiled kernels,
+            # pushing everything else into swap and causing 60s+ responses.
+            try:
+                import mlx.core as mx
+                mx.metal.set_cache_limit(1 * 1024 * 1024 * 1024)  # 1 GB cap
+                print("[iris] MLX Metal cache capped at 1 GB.")
+            except Exception:
+                pass
         else:
             device = torch.device("cuda" if BACKEND == "cuda" else "cpu")
             _cached_tok = AutoTokenizer.from_pretrained(HF_MODEL_ID)
@@ -462,46 +658,68 @@ def load_model():
 # GENERATION FUNCTIONS
 # ==========================================
 def generate_reply_stream(model, tokenizer, prompt_text, device=None, **kwargs):
-    """Generator that yields tokens one by one."""
-    cfg = load_generation_config()
+    """
+    Generator that yields text chunks one by one.
+
+    Uses ``mlx_lm.stream_generate`` which is the correct API in mlx_lm 0.31.x.
+    Sampler and repetition_penalty are applied via guarded kwargs and degrade
+    gracefully on older/newer versions.
+    """
+    cfg   = load_generation_config()
     max_t = int(kwargs.get("max_new_tokens") or cfg["max_new_tokens"])
-    temp  = float(kwargs.get("temperature") or cfg["temperature"])
-    top_p = float(kwargs.get("top_p") or cfg["top_p"])
+    temp  = float(kwargs.get("temperature")  or cfg["temperature"])
+    top_p = float(kwargs.get("top_p")        or cfg["top_p"])
+    rep_p = float(kwargs.get("repetition_penalty") or cfg.get("repetition_penalty", 1.0))
 
     if BACKEND == "mlx":
-        # Verify Metal GPU is active — if not, every call will be CPU-bound (~10x slower)
+        import mlx.core as mx
+
+        # Metal availability check
         try:
-            import mlx.core as _mx
-            if not _mx.metal.is_available():
+            if not mx.metal.is_available():
                 print("[WARNING] MLX Metal GPU not available — running on CPU. "
-                      "Ensure you are NOT running under Rosetta and that mlx is "
-                      "installed natively for Apple Silicon.")
+                      "Ensure you are NOT under Rosetta and mlx is Apple-Silicon native.")
         except Exception:
             pass
 
         from mlx_lm import stream_generate
-        
-        # Create a sampler for robust compatibility with recent mlx_lm versions
+
+        # ── Build sampler / generation kwargs ────────────────────────────
+        stream_kwargs: Dict[str, Any] = {}
         try:
             from mlx_lm.sample_utils import make_sampler
-            sampler = make_sampler(temp=temp, top_p=top_p)
-            stream_kwargs = {"sampler": sampler}
+            stream_kwargs["sampler"] = make_sampler(temp=temp, top_p=top_p)
         except Exception:
-            # Fallback if older mlx_lm version
-            stream_kwargs = {"temp": temp, "top_p": top_p}
-        
-        # Use stream_generate for a much simpler and more robust streaming implementation
-        for response in stream_generate(
-            model=model, 
-            tokenizer=tokenizer, 
-            prompt=prompt_text,
-            max_tokens=max_t,
-            **stream_kwargs
-        ):
-            yield response.text
+            stream_kwargs["temp"]  = temp
+            stream_kwargs["top_p"] = top_p
+        if rep_p != 1.0:
+            stream_kwargs["repetition_penalty"] = rep_p
+
+        # ── Stream tokens ─────────────────────────────────────────────────
+        # GenerationResponse.text is the incremental decoded text per step.
+        try:
+            for response in stream_generate(
+                model=model,
+                tokenizer=tokenizer,
+                prompt=prompt_text,
+                max_tokens=max_t,
+                **stream_kwargs,
+            ):
+                chunk = response.text
+                if chunk:
+                    yield chunk
+        finally:
+            # Free accumulated Metal kernel cache between requests so it does
+            # not pile up and push model weights into swap.
+            try:
+                mx.metal.clear_cache()
+            except Exception:
+                pass
+
     else:
-        # HF fallback
+        # HF path — non-streaming fallback
         yield generate_reply(model, tokenizer, prompt_text, device, **kwargs)
+
 
 def generate_reply(model, tokenizer, prompt_text, device=None, raw_output=False, **kwargs):
     """Base generation function connecting to MLX or HF."""
@@ -528,12 +746,46 @@ def generate_reply(model, tokenizer, prompt_text, device=None, raw_output=False,
         return " ".join(clean).strip() or "I'm not sure what to say."
     except Exception as e: return f"Error: {e}"
 
-def generate_rag_reply(model, tokenizer, retriever, user_query, **kwargs):
-    """Combines RAG context with the user query before sending to the LLM."""
-    
-    # 1. Search the raw_data books for relevant paragraphs
-    context = retriever.retrieve(user_query, top_k=3)
-    
+def generate_rag_reply(
+    model,
+    tokenizer,
+    retriever,
+    user_query: str,
+    category: Optional[str] = None,
+    **kwargs,
+):
+    """Combines RAG context with the user query before sending to the LLM.
+
+    Args:
+        category: Optional task category ("medical", "coding", "finance", …)
+                  determined by the router in controller.py.  When provided,
+                  retrieval is limited to chunks in that category (with graceful
+                  fallback to "general" / all chunks when the category is sparse).
+
+    Lazy-RAG behaviours controlled by iris.conf:
+        rag_mode = "task_aware"  → use category filter (default)
+        rag_mode = "all"         → ignore category, search all chunks
+        rag_mode = "disabled"    → skip RAG entirely
+    Also skips retrieval for queries shorter than 8 words.
+    """
+    cfg      = load_generation_config()
+    rag_mode = str(cfg.get("rag_mode", "task_aware")).lower()
+
+    short_query = len(user_query.split()) < 8
+
+    # 1. Conditionally retrieve relevant paragraphs
+    context = ""
+    if rag_mode == "disabled":
+        print("[RAG] Skipped — rag_mode=disabled in iris.conf.")
+    elif short_query:
+        print(f"[RAG] Skipped — query too short ({len(user_query.split())} words < 8).")
+    else:
+        # Choose retrieval strategy
+        effective_category = category if rag_mode == "task_aware" else None
+        context = retriever.retrieve(user_query, top_k=3, category=effective_category)
+        if effective_category:
+            print(f"[RAG] Retrieved from category='{effective_category}'.")
+
     # 2. Build the messages array using native roles
     if context:
         system_content = (
@@ -547,7 +799,7 @@ def generate_rag_reply(model, tokenizer, retriever, user_query, **kwargs):
 
     messages = [
         {"role": "system", "content": system_content},
-        {"role": "user", "content": user_query}
+        {"role": "user", "content": user_query},
     ]
 
     # 3. Apply the native chat template
@@ -557,7 +809,11 @@ def generate_rag_reply(model, tokenizer, retriever, user_query, **kwargs):
     return generate_reply(model, tokenizer, prompt_text, **kwargs)
 
 def _load_vision_model():
-    """Load and cache the Qwen2-VL vision model for Apple Silicon."""
+    """
+    Lazily load and cache the vision model.
+    mlx_vlm imports are deferred here so the ~9 GB model only occupies
+    unified memory when an image is actually being analysed.
+    """
     global _VISION_MODEL_CACHE
     if _VISION_MODEL_CACHE:
         return _VISION_MODEL_CACHE
@@ -567,10 +823,17 @@ def _load_vision_model():
             return _VISION_MODEL_CACHE
 
         try:
+            from mlx_vlm import load as vlm_load                    # lazy
+            from mlx_vlm.utils import load_config as vlm_load_config  # lazy
             print(f"[Vision] Loading MLX vision model: {MLX_VISION_MODEL_ID}...")
             model, processor = vlm_load(MLX_VISION_MODEL_ID)
             config = vlm_load_config(MLX_VISION_MODEL_ID)
-            _VISION_MODEL_CACHE = {"model": model, "processor": processor, "config": config, "backend": "mlx"}
+            _VISION_MODEL_CACHE = {
+                "model": model,
+                "processor": processor,
+                "config": config,
+                "backend": "mlx",
+            }
             print("[Vision] MLX vision model ready.")
             return _VISION_MODEL_CACHE
         except Exception as e:
@@ -578,54 +841,83 @@ def _load_vision_model():
             return {}
 
 
-def analyze_image(image_path: str, prompt: str = "Describe this image in detail.") -> str:
+def unload_vision_model() -> None:
     """
-    Analyse an image using Qwen2-VL.
+    Release the vision model from unified memory.
+    Call this after image analysis to free the ~9 GB footprint so the
+    main Phi-4 model has full access to the memory bus.
+    """
+    global _VISION_MODEL_CACHE
+    with _VISION_LOCK:
+        if not _VISION_MODEL_CACHE:
+            return
+        _VISION_MODEL_CACHE.clear()
+        _VISION_MODEL_CACHE = {}
+        try:
+            import mlx.core as mx
+            mx.metal.clear_cache()
+        except Exception:
+            pass
+        print("[Vision] Vision model unloaded — unified memory reclaimed.")
+
+
+def analyze_image(
+    image_path: str,
+    prompt: str = "Describe this image in detail.",
+    unload_after: bool = True,
+) -> str:
+    """
+    Analyse an image using the local vision model.
+
+    Args:
+        image_path:    Path to the image file.
+        prompt:        Instruction passed to the vision model.
+        unload_after:  If True (default), unload the vision model from
+                       unified memory after the analysis so that Phi-4
+                       reclaims the full 16 GB for inference.
     """
     vision = _load_vision_model()
     if not vision:
-        return "[Vision] Qwen2-VL vision model not available. Ensure mlx-vlm is installed."
+        return "[Vision] Vision model not available. Ensure mlx-vlm is installed."
 
     model = vision["model"]
     proc  = vision["processor"]
     conf  = vision.get("config")
 
     try:
+        from mlx_vlm import generate as vlm_generate            # lazy
+        from mlx_vlm.prompt_utils import apply_chat_template    # lazy
         formatted = apply_chat_template(proc, conf, prompt, num_images=1)
         result = vlm_generate(
-            model, 
-            proc, 
-            formatted, 
+            model,
+            proc,
+            formatted,
             image_path,
-            max_tokens=512, 
-            verbose=False
+            max_tokens=512,
+            verbose=False,
         )
-        
         if hasattr(result, "text"):
             return result.text.strip()
         return str(result).strip()
     except Exception as e:
         return f"[Vision] Analysis failed: {e}"
+    finally:
+        if unload_after:
+            unload_vision_model()
 
 
-# ==========================================
-# EXECUTION & TESTING
-# ==========================================
 if __name__ == "__main__":
     print("\n" + "="*50)
     print(" Initializing Iris AI (Hybrid SFT + RAG Engine)")
     print("="*50)
     
-    # 1. Start the RAG engine and load books
     retriever = BookRetriever(raw_data_dir="raw_data")
     retriever.load_and_index()
     
-    # 2. Load the LLM Model
     m, t = load_model()
     print(f"\n[SYSTEM] Backend: {BACKEND.upper()} | Model ready.")
     print("="*50)
     
-    # 3. Test it out!
     test_queries = [
         "Hello! How are you?",
         "What is the main topic of chapter 1?"
