@@ -739,6 +739,36 @@ body.chat-active .center-panel {
     transition: stroke 0.2s var(--ease-out-quart);
 }
 
+.mode-dropdown {
+    background: transparent;
+    color: #e8e8e8;
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.2s var(--ease-out-quart);
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 28px;
+    margin-bottom: 2px;
+}
+
+.mode-dropdown:hover, .mode-dropdown:focus {
+    border-color: var(--iris-purple);
+    background-color: rgba(163, 133, 255, 0.05);
+}
+
+.mode-dropdown option {
+    background: #1e1e22;
+    color: #e8e8e8;
+}
+
 .right-btns {
     display: flex;
     flex-direction: row;
@@ -1561,4 +1591,58 @@ body.chat-active .footere {
     .input-wrapper {
         border-radius: 20px;
     }
+}
+
+/* Markdown Table Styling */
+.message-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    overflow: hidden;
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.message-content th,
+.message-content td {
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.message-content th:last-child,
+.message-content td:last-child {
+    border-right: none;
+}
+
+.message-content th {
+    background-color: rgba(255, 255, 255, 0.05);
+    font-weight: 600;
+    color: var(--iris-purple);
+}
+
+.message-content tr:last-child td {
+    border-bottom: none;
+}
+
+.message-content tr:nth-child(even) {
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* Ensure inline code in tables looks good */
+.message-content table .inline-code {
+    white-space: nowrap;
+}
+
+/* Markdown Horizontal Rules styling */
+.message-content hr {
+    border: none;
+    height: 1px;
+    background-color: rgba(255, 255, 255, 0.1);
+    margin: 20px 0;
 }

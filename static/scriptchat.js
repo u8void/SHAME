@@ -186,36 +186,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // Strip leading special tokens/headers that sometimes leak from certain models
         let formatted = text.replace(/^(\s|<\|endoftext\|>|<\|im_start\|>assistant<\|im_sep\|>|<\|im_end\|>)+/gi, '');
 
-        // Handle Thinking Blocks <think>...</think>
-        formatted = formatted.replace(/<think>([\s\S]*?)<\/think>/gi, (match, thought) => {
-            return `
-                <div class="thought-wrapper">
-                    <div class="thought-header" onclick="toggleThought(this)">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                        <span>Thought Process</span>
-                        <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                    </div>
-                    <div class="thought-content">
-                        ${escapeHtml(thought.trim()).replace(/\n/g, '<br>')}
-                    </div>
-                </div>
-            `;
-        });
-
-        const codeBlocks = [];
-        formatted = formatted.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
-            const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
-            codeBlocks.push({ lang: lang || 'Code', content: codeContent.trim() });
-            return placeholder;
-        });
-
-        formatted = formatted.replace(/<code>([\s\S]*?)<\/code>/gi, (match, codeContent) => {
-            const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
-            codeBlocks.push({ lang: 'Code', content: codeContent.trim() });
-            return placeholder;
-        });
-
-        return _formatRefined(text);
+        return _formatRefined(formatted);
     }
 
     function _formatRefined(text) {
@@ -224,39 +195,46 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // 1. Extract Think Block (Internal)
         let work = text.replace(/<think>([\s\S]*?)(?:<\/think>|$)/gi, (match, p1) => {
-            const id = `__THOUGHT_${blocks.length}__`;
+            const id = `@@@THOUGHT_${blocks.length}@@@`;
             blocks.push({ type: 'thought', content: p1.trim() });
             return id;
         });
 
         work = work.replace(/\{[\s]*"action"[\s]*:[\s\S]*?\}/gi, (match) => {
-            const id = `__ACTION_${blocks.length}__`;
+            const id = `@@@ACTION_${blocks.length}@@@`;
             blocks.push({ type: 'action', content: match });
             return id;
         });
 
         work = work.replace(/<action_result>([\s\S]*?)(?:<\/action_result>|$)/gi, (match, p1) => {
-            const id = `__RESULT_${blocks.length}__`;
+            const id = `@@@RESULT_${blocks.length}@@@`;
             blocks.push({ type: 'result', content: p1.trim() });
             return id;
         });
 
         work = work.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
-            const id = `__CODE_${blocks.length}__`;
+            const id = `@@@CODE_${blocks.length}@@@`;
             blocks.push({ type: 'code', lang: lang || 'Code', content: codeContent.trim() });
             return id;
         });
 
-        work = escapeHtml(work);
-        work = work.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        work = work.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
-        work = work.replace(/\n/g, '<br>');
+        if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+            work = marked.parse(work, { breaks: true, gfm: true });
+            work = DOMPurify.sanitize(work);
+            // marked wraps block-level text in <p>, which would break our injected <div>s. Let's unwrap placeholders.
+            work = work.replace(/<p>(@@@[A-Z_0-9]+@@@)<\/p>/g, '$1');
+        } else {
+            work = escapeHtml(work);
+            work = work.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            work = work.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
+            work = work.replace(/\n/g, '<br>');
+        }
 
         // 5. Re-inject blocks
         blocks.forEach((block, index) => {
             let id, html;
             if (block.type === 'thought') {
-                id = `__THOUGHT_${index}__`;
+                id = `@@@THOUGHT_${index}@@@`;
                 html = `
                     <div class="thought-wrapper">
                         <div class="thought-header" onclick="this.parentElement.classList.toggle('expanded')">
@@ -268,7 +246,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     </div>
                 `;
             } else if (block.type === 'action') {
-                id = `__ACTION_${index}__`;
+                id = `@@@ACTION_${index}@@@`;
                 try {
                     const obj = JSON.parse(block.content);
                     if (obj.action === "chat" && obj.response) {
@@ -280,18 +258,24 @@ document.addEventListener("DOMContentLoaded", () => {
                     html = escapeHtml(block.content).replace(/\n/g, '<br>');
                 }
             } else if (block.type === 'result') {
-                id = `__RESULT_${index}__`;
+                id = `@@@RESULT_${index}@@@`;
                 html = `<div class='action-result-stream' style='font-size:13.5px; margin-top: 12px; padding: 12px; background: rgba(163, 133, 255, 0.05); border: 1px solid rgba(163, 133, 255, 0.2); border-radius: 8px;'><strong>Result:</strong><br>${escapeHtml(block.content).replace(/\n/g, '<br>')}</div>`;
             } else {
-                id = `__CODE_${index}__`;
+                id = `@@@CODE_${index}@@@`;
                 html = `
                     <div class="code-container">
                         <div class="code-header">
                             <span class="code-lang">${escapeHtml(block.lang)}</span>
-                            <button class="copy-btn" onclick="copyToClipboard(this)">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                                Copy
-                            </button>
+                            <div style="display: flex; gap: 8px;">
+                                <button class="copy-btn" onclick="downloadCode(this, '${escapeHtml(block.lang)}')">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                    Download
+                                </button>
+                                <button class="copy-btn" onclick="copyToClipboard(this)">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                                    Copy
+                                </button>
+                            </div>
                         </div>
                         <pre><code>${escapeHtml(block.content)}</code></pre>
                     </div>
@@ -302,6 +286,27 @@ document.addEventListener("DOMContentLoaded", () => {
 
         return work;
     }
+    window.downloadCode = (btn, ext) => {
+        const container = btn.closest('.code-container');
+        const codeElement = container.querySelector('pre code');
+        const text = codeElement.textContent;
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        let fileExt = (ext || 'txt').toLowerCase();
+        if (fileExt === 'python') fileExt = 'py';
+        if (fileExt === 'javascript') fileExt = 'js';
+        if (fileExt === 'typescript') fileExt = 'ts';
+        if (fileExt === 'markdown') fileExt = 'md';
+        if (fileExt === 'bash' || fileExt === 'sh') fileExt = 'sh';
+        a.download = 'generated_code.' + fileExt;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
     window.copyToClipboard = (btn) => {
         const container = btn.closest('.code-container');
         const codeElement = container.querySelector('pre code');
@@ -401,6 +406,10 @@ document.addEventListener("DOMContentLoaded", () => {
             formData.append('messages', JSON.stringify(chat.messages));
             formData.append('history', chat.historyString);
             formData.append('settings', JSON.stringify(chatSettings));
+            const modeSelector = document.getElementById("proModeSelector");
+            if (modeSelector) {
+                formData.append('mode', modeSelector.value);
+            }
 
             currentAbortController = new AbortController();
             const response = await fetch('/chat', {

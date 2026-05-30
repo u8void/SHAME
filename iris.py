@@ -583,7 +583,7 @@ def load_generation_config() -> dict:
         "temperature": 0.7,
         "top_p": 0.9,
         "repetition_penalty": 1.0,
-        "disable_rag": False,   # set true in iris.conf for speed tests
+        "disable_rag": False,
     }
     if os.path.exists(CONFIG_PATH):
         try:

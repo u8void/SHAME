@@ -12,9 +12,12 @@ from iris import load_model, get_device, generate_reply, solve_math, BookRetriev
 parser = argparse.ArgumentParser(description="Run the Iris AI Flask App")
 parser.add_argument("--preview-only", action="store_true",
                     help="Launch UI without loading the AI model")
+parser.add_argument("--pro", action="store_true",
+                    help="Use Iris Pro multi-agent API pipeline")
 args, _ = parser.parse_known_args()
 
 PREVIEW_MODE = args.preview_only
+PRO_MODE = args.pro
 
 app = Flask(__name__)
 
@@ -78,7 +81,7 @@ def init_model():
     """
     global model, tokenizer, device
 
-    if PREVIEW_MODE:
+    if PREVIEW_MODE or PRO_MODE:
         _model_ready.set()
         return
 
@@ -117,18 +120,18 @@ def init_model():
         finally:
             _model_ready.set()
 
-if not PREVIEW_MODE:
+if not PREVIEW_MODE and not PRO_MODE:
     threading.Thread(target=init_model, name="model-loader", daemon=True).start()
 else:
     _model_ready.set()
 
 @app.route("/")
 def home():
-    return render_template("index.html")
+    return render_template("index.html", pro_mode=PRO_MODE)
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    if not PREVIEW_MODE and not _model_ready.is_set():
+    if not PREVIEW_MODE and not PRO_MODE and not _model_ready.is_set():
         def _warming():
             yield 'data: {"type": "token", "content": "Iris is warming up - model loading takes 20-40s on first start. Please try again shortly."}\n\n'
         from flask import Response
@@ -170,10 +173,6 @@ def chat():
         resp.headers['Connection']        = 'keep-alive'
         return resp
 
-    import controller
-    controller.IS_INTERACTIVE = False
-    from controller import ai_agent_handle
-
     frontend_messages = []
     if "messages" in data:
         try:
@@ -185,6 +184,43 @@ def chat():
     for msg in frontend_messages[:-1][-6:]:
         role = "assistant" if msg.get("role") == "bot" else "user"
         agent_history.append({"role": role, "content": msg.get("content", "")})
+
+    if PRO_MODE:
+        import asyncio
+        import time
+        import iris_pro
+        def pro_generate():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                mode = data.get("mode", "smart")
+                
+                agen = iris_pro.ask_stream(user_message, agent_history, mode=mode)
+                try:
+                    while True:
+                        event = loop.run_until_complete(agen.__anext__())
+                        yield f"data: {json.dumps(event)}\n\n"
+                except StopAsyncIteration:
+                    pass
+                finally:
+                    loop.run_until_complete(agen.aclose())
+                    loop.close()
+            except Exception as e:
+                err_msg = str(e)
+                if not err_msg or "Timeout" in e.__class__.__name__:
+                    err_msg = f"{e.__class__.__name__}: The API request took too long or dropped connection."
+                yield f"data: {json.dumps({'type': 'text', 'content': f'Iris Pro Error: {err_msg}'})}\n\n"
+        
+        from flask import Response
+        resp = Response(pro_generate(), mimetype='text/event-stream')
+        resp.headers['X-Accel-Buffering'] = 'no'
+        resp.headers['Cache-Control']     = 'no-cache'
+        resp.headers['Connection']        = 'keep-alive'
+        return resp
+
+    import controller
+    controller.IS_INTERACTIVE = False
+    from controller import ai_agent_handle
 
     from flask import Response
     def generate():
@@ -363,7 +399,10 @@ def save_settings():
     return jsonify({"status": "success"})
 
 if __name__ == "__main__":
-    mode_label = "PREVIEW MODE" if PREVIEW_MODE else "MLX (phi-4-4bit + LoRA adapters)"
+    if PRO_MODE:
+        mode_label = "IRIS PRO (OpenRouter Multi-Agent API)"
+    else:
+        mode_label = "PREVIEW MODE" if PREVIEW_MODE else "MLX (phi-4-4bit + LoRA adapters)"
     print(f"[INFO] Starting Iris AI — {mode_label}")
 
     port = int(os.environ.get("PORT", "5050"))

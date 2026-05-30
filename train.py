@@ -8,6 +8,7 @@ Automatically detects hardware and selects the best training path:
 """
 
 import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import sys
 import json
 import torch
@@ -37,13 +38,13 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Unified Training for Iris AI")
 
     parser.add_argument("--model", default="mlx-community/phi-4-4bit",
-                        help="Base model ID (e.g. mlx-community/phi-4-4bit or google/gemma-2-2b-it)")
+                        help="Base model ID (e.g. mlx-community/phi-4-4bit")
     parser.add_argument("--iters", type=int, default=3000, help="Iterations (MLX) or max pairs (Torch)")
     parser.add_argument("--epochs", type=int, default=3, help="Epochs (Torch path only)")
     parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate")
     parser.add_argument("--batch-size", type=int, default=1, help="Batch size")
     parser.add_argument("--accum-steps", type=int, default=8, help="Gradient accumulation steps")
-    parser.add_argument("--max-seq-length", type=int, default=1024, help="Maximum sequence length")
+    parser.add_argument("--max-seq-length", type=int, default=512, help="Maximum sequence length")
     parser.add_argument("--device", choices=["cuda", "mps", "cpu"], default=None)
 
     parser.add_argument("--max-pairs", type=int, default=5000)
@@ -69,7 +70,19 @@ def parse_args():
 
     parser.add_argument("--output-dir", default="./iris_lora_unified")
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    
+    model_aliases = {
+        "tiny": "google/gemma-4-E2B-it",
+        "small": "shb777/Llama-3.3-8B-Instruct-128K",
+        "medium": "microsoft/phi-4",
+        "large": "Qwen/Qwen3.6-27B"
+    }
+    
+    if args.model.lower() in model_aliases:
+        args.model = model_aliases[args.model.lower()]
+        
+    return args
 
 def load_all_data(args) -> List[Tuple[str, str]]:
     pairs = []
@@ -286,7 +299,7 @@ def run_torch_path(args, device_type: str):
         save_strategy="steps",
         save_steps=100,
         save_total_limit=3,
-        report_to="auto",
+        report_to="none",
         remove_unused_columns=False
     )
 

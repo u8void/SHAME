@@ -13,6 +13,7 @@ Iris AI is a fine-tuned conversational assistant built on top of `google/gemma-2
 ```
 iris/
 ├── iris.py            # Unified Backend: MLX, CUDA, and CPU support + data loaders
+├── iris_pro.py        # Advanced multi-agent Orchestrator & Reasoning routing logic
 ├── train.py           # Legacy Torch training entry point
 ├── app.py             # Flask web server (unified backend)
 ├── controller.py      # PC Agent controller (unified backend)
@@ -47,6 +48,18 @@ The core engine. Automatically routes requests to the correct hardware backend.
 - `generate_reply(model, tokenizer, prompt, ...)`: Unified generation with support for both MLX and Transformers.
 - `solve_math(text)`: Sympy-based math interceptor.
 - `load_*_dataset()`: Collection of data loaders for training.
+
+### `iris_pro.py`
+
+Advanced multi-agent routing pipeline (`OpenRouterClient`) for high-complexity tasks.
+
+#### Architecture Features
+
+- **Triage Stage**: A lightweight router that classifies whether a user query requires deep reasoning or can be answered conversationally.
+- **Reasoning Stage**: Uses deep-thinking models (e.g. `mimo-v2.5-pro` or `qwen3-32b`) to build a chain-of-thought analysis before generating a draft.
+- **Orchestrator Stage**: A secondary model (e.g. `llama-3.3-70b-versatile`) synthesizes the reasoning draft into a clean, formatted final answer.
+- **Rate Limit Resilience**: Gracefully handles API provider (Groq/Ocenza) `429 Rate Limited` and `413 Payload Too Large` (Tokens-Per-Minute limit) errors using exponential back-off retries and context-safe auto-continuation loops.
+- **Strict Anti-Comment Policy**: System prompts strictly forbid code generation models from typing code comments, keeping output incredibly dense and logic-focused.
 
 ### `train_mlx.py`
 
@@ -152,7 +165,7 @@ Unified training entry point. Detects the hardware backend and applies the appro
 
 | Argument | Default | Description |
 |---|---|---|
-| `--model-name` | `google/gemma-2-2b-it` | HuggingFace model ID or local path |
+| `--model` | `mlx-community/phi-4-4bit` | HuggingFace model ID or alias (`tiny`, `small`, `medium`, `large`) |
 | `--epochs` | 5 | Number of training epochs |
 | `--lr` | 2e-4 | AdamW learning rate |
 | `--max-pairs` | 5000 | Maximum training pairs (global cap) |
@@ -169,6 +182,14 @@ Unified training entry point. Detects the hardware backend and applies the appro
 | `--force-cpu` | false | Force CPU even if GPU is available |
 | `--output-dir` | `./iris_lora_unified` | Directory for LoRA adapter checkpoints |
 | `--chat-after-train` | false | Launch terminal chat after training completes |
+
+#### Model Aliases
+
+You can pass standard aliases to the `--model` argument to automatically resolve specific HuggingFace repositories:
+- `tiny`: `google/gemma-4-E2B-it`
+- `small`: `shb777/Llama-3.3-8B-Instruct-128K`
+- `medium`: `microsoft/phi-4`
+- `large`: `Qwen/Qwen3.6-27B`
 
 #### Training Pipeline
 
