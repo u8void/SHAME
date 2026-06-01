@@ -1,3 +1,32 @@
+window.fileCardCache = window.fileCardCache || {};
+
+// ─── Shared download helper ───────────────────────────────────────────────
+function normaliseExt(raw) {
+    const m = {
+        python: 'py', javascript: 'js', typescript: 'ts',
+        markdown: 'md', bash: 'sh', shell: 'sh', sh: 'sh',
+        jsx: 'jsx', tsx: 'tsx', html: 'html', css: 'css',
+        json: 'json', yaml: 'yaml', yml: 'yml', toml: 'toml',
+        rust: 'rs', go: 'go', cpp: 'cpp', c: 'c', java: 'java',
+        kotlin: 'kt', swift: 'swift', rb: 'rb', ruby: 'rb',
+        php: 'php', sql: 'sql', r: 'r',
+    };
+    const key = (raw || 'txt').toLowerCase();
+    return m[key] || key;
+}
+
+function triggerDownload(filename, content) {
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
 document.addEventListener("DOMContentLoaded", () => {
     let chats = JSON.parse(localStorage.getItem('iris_chats')) || [];
     let currentChatId = null;
@@ -40,7 +69,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const mainContent           = document.getElementById("mainContent");
     const sidebar               = document.querySelector(".sidebar");
     const recentLabel           = document.getElementById("recentLabel") || document.querySelector(".recent-label");
-    let selectedImageFile = null;
+    let selectedFile = null;
+
+    function readFileAsText(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsText(file);
+        });
+    }
 
     let searchOpen = false;
     let searchQuery = '';
@@ -130,7 +168,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         chatMessages.innerHTML = '';
         chat.messages.forEach(msg => {
-            appendMessageDOM(msg.role, msg.content, false);
+            appendMessageDOM(msg.role, msg.displayText || msg.content, false, msg.imageUrl, msg.attachmentName);
         });
 
         if (chat.messages.length > 0) {
@@ -212,11 +250,95 @@ document.addEventListener("DOMContentLoaded", () => {
             return id;
         });
 
+        function isCommandOrShortBlock(lang, content) {
+            const lowerLang = (lang || '').toLowerCase();
+            if (['bash', 'sh', 'shell', 'cmd', 'powershell', 'terminal', 'run', 'install'].includes(lowerLang)) {
+                return true;
+            }
+            const lines = content.split('\n');
+            if (lines.length < 5 && content.length < 200) {
+                return true;
+            }
+            if (lines.length <= 2 && (content.includes('python ') || content.includes('pip ') || content.includes('npm ') || content.includes('node '))) {
+                return true;
+            }
+            return false;
+        }
+
         work = work.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
             const id = `@@@CODE_${blocks.length}@@@`;
-            blocks.push({ type: 'code', lang: lang || 'Code', content: codeContent.trim() });
+            const detectedLang = lang.trim() || 'code';
+            const contentTrimmed = codeContent.trim();
+            const isCmdOrShort = isCommandOrShortBlock(detectedLang, contentTrimmed);
+            blocks.push({
+                type: 'code',
+                lang: detectedLang,
+                content: contentTrimmed,
+                hidden: !isCmdOrShort,
+                autoCard: !isCmdOrShort,
+                claimed: false
+            });
             return id;
         });
+
+        // Extract explicit file_card tags emitted by the AI — they override the auto-generated card
+        work = work.replace(/<file_card\s+([^>]*?)(?:\/>|>\s*<\/file_card>)/gi,
+            (match, attrsStr, offset) => {
+                const filenameMatch = attrsStr.match(/filename=["']([^"']+)["']/i);
+                const langMatch     = attrsStr.match(/lang=["']([^"']+)["']/i);
+                const filename      = filenameMatch ? filenameMatch[1] : 'file.txt';
+                const lang          = langMatch ? langMatch[1] : 'text';
+
+                // Find the closest unclaimed code block physically preceding this tag in the string
+                const beforeSub = work.substring(0, offset);
+                const placeholderRegex = /@@@CODE_(\d+)@@@/g;
+                let matchPlaceholder;
+                const blockIndices = [];
+                while ((matchPlaceholder = placeholderRegex.exec(beforeSub)) !== null) {
+                    blockIndices.push(parseInt(matchPlaceholder[1], 10));
+                }
+
+                let codeIndex = -1;
+                // 1. Try to find a non-command/non-short block first
+                for (let j = blockIndices.length - 1; j >= 0; j--) {
+                    const idx = blockIndices[j];
+                    const block = blocks[idx];
+                    if (block && block.type === 'code' && !block.claimed) {
+                        const isCmdOrShort = isCommandOrShortBlock(block.lang, block.content);
+                        if (!isCmdOrShort) {
+                            codeIndex = idx;
+                            break;
+                        }
+                    }
+                }
+
+                // 2. Fallback to the closest unclaimed code block if no non-command block is found
+                if (codeIndex === -1) {
+                    for (let j = blockIndices.length - 1; j >= 0; j--) {
+                        const idx = blockIndices[j];
+                        const block = blocks[idx];
+                        if (block && block.type === 'code' && !block.claimed) {
+                            codeIndex = idx;
+                            break;
+                        }
+                    }
+                }
+
+                let fileCardId = '';
+                if (codeIndex !== -1) {
+                    blocks[codeIndex].claimed  = true;
+                    blocks[codeIndex].hidden   = true;
+                    blocks[codeIndex].autoCard = false; // explicit tag takes over
+                    fileCardId = 'fc_' + Math.random().toString(36).substr(2, 9);
+                    window.fileCardCache = window.fileCardCache || {};
+                    window.fileCardCache[fileCardId] = blocks[codeIndex].content;
+                }
+
+                const id = `@@@FILECARD_${blocks.length}@@@`;
+                blocks.push({ type: 'filecard', filename, lang: lang.trim(), fileCardId });
+                return id;
+            }
+        );
 
         if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
             work = marked.parse(work, { breaks: true, gfm: true });
@@ -260,52 +382,136 @@ document.addEventListener("DOMContentLoaded", () => {
             } else if (block.type === 'result') {
                 id = `@@@RESULT_${index}@@@`;
                 html = `<div class='action-result-stream' style='font-size:13.5px; margin-top: 12px; padding: 12px; background: rgba(163, 133, 255, 0.05); border: 1px solid rgba(163, 133, 255, 0.2); border-radius: 8px;'><strong>Result:</strong><br>${escapeHtml(block.content).replace(/\n/g, '<br>')}</div>`;
-            } else {
-                id = `@@@CODE_${index}@@@`;
+            } else if (block.type === 'filecard') {
+                id = `@@@FILECARD_${index}@@@`;
+                const safeFilename = escapeHtml(block.filename);
+                const safeLang     = escapeHtml(block.lang);
+                const safeId       = escapeHtml(block.fileCardId || '');
                 html = `
-                    <div class="code-container">
-                        <div class="code-header">
-                            <span class="code-lang">${escapeHtml(block.lang)}</span>
-                            <div style="display: flex; gap: 8px;">
-                                <button class="copy-btn" onclick="downloadCode(this, '${escapeHtml(block.lang)}')">
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                                    Download
-                                </button>
-                                <button class="copy-btn" onclick="copyToClipboard(this)">
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                                    Copy
-                                </button>
-                            </div>
+                    <div class="file-card"
+                         onclick="window.openCodeViewer(this)"
+                         data-filename="${safeFilename}"
+                         data-lang="${safeLang}"
+                         data-filecard-id="${safeId}">
+                        <div class="file-card-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                                 stroke="currentColor" stroke-width="1.7"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12
+                                         a2 2 0 0 0 2-2V8z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                                <line x1="16" y1="13" x2="8" y2="13"></line>
+                                <line x1="16" y1="17" x2="8" y2="17"></line>
+                                <polyline points="10 9 9 9 8 9"></polyline>
+                            </svg>
                         </div>
-                        <pre><code>${escapeHtml(block.content)}</code></pre>
+                        <div class="file-card-meta">
+                            <div class="file-card-name">${safeFilename}</div>
+                            <div class="file-card-sub">${safeLang} file</div>
+                        </div>
+                        <button class="file-card-download"
+                                onclick="event.stopPropagation(); window.downloadFileCard(this)"
+                                data-filename="${safeFilename}"
+                                data-filecard-id="${safeId}">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                                 stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            Download
+                        </button>
                     </div>
                 `;
+            } else if (block.type === 'code') {
+                id = `@@@CODE_${index}@@@`;
+                if (block.hidden) {
+                    // Auto-generate a file card for hidden blocks that weren't claimed by an explicit <file_card> tag
+                    if (block.autoCard && block.content) {
+                        const autoLang = block.lang || 'code';
+                        const ext      = normaliseExt(autoLang);
+                        const autoFilename = `generated_code.${ext}`;
+                        const fcId     = 'fc_' + Math.random().toString(36).substr(2, 9);
+                        window.fileCardCache = window.fileCardCache || {};
+                        window.fileCardCache[fcId] = block.content;
+                        const safeFilename = escapeHtml(autoFilename);
+                        const safeLang     = escapeHtml(autoLang);
+                        html = `
+                            <div class="file-card"
+                                 onclick="window.openCodeViewer(this)"
+                                 data-filename="${safeFilename}"
+                                 data-lang="${safeLang}"
+                                 data-filecard-id="${fcId}">
+                                <div class="file-card-icon">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                                         stroke="currentColor" stroke-width="1.7"
+                                         stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12
+                                                 a2 2 0 0 0 2-2V8z"></path>
+                                        <polyline points="14 2 14 8 20 8"></polyline>
+                                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                                        <polyline points="10 9 9 9 8 9"></polyline>
+                                    </svg>
+                                </div>
+                                <div class="file-card-meta">
+                                    <div class="file-card-name">${safeFilename}</div>
+                                    <div class="file-card-sub">${safeLang} file</div>
+                                </div>
+                                <button class="file-card-download"
+                                        onclick="event.stopPropagation(); window.downloadFileCard(this)"
+                                        data-filename="${safeFilename}"
+                                        data-filecard-id="${fcId}">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                                         stroke="currentColor" stroke-width="2"
+                                         stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <polyline points="7 10 12 15 17 10"></polyline>
+                                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                                    </svg>
+                                    Download
+                                </button>
+                            </div>
+                        `;
+                    } else {
+                        html = '';
+                    }
+                } else {
+                    html = `
+                        <div class="code-container">
+                            <div class="code-header">
+                                <span class="code-lang">${escapeHtml(block.lang)}</span>
+                                <div style="display: flex; gap: 8px;">
+                                    <button class="copy-btn" onclick="downloadCode(this, '${escapeHtml(block.lang)}')">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                        Download
+                                    </button>
+                                    <button class="copy-btn" onclick="copyToClipboard(this)">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                                        Copy
+                                    </button>
+                                </div>
+                            </div>
+                            <pre><code>${escapeHtml(block.content)}</code></pre>
+                        </div>
+                    `;
+                }
+            } else {
+                id = `@@@${block.type.toUpperCase()}_${index}@@@`;
+                html = '';
             }
             work = work.replace(id, html);
         });
 
         return work;
     }
-    window.downloadCode = (btn, ext) => {
-        const container = btn.closest('.code-container');
-        const codeElement = container.querySelector('pre code');
-        const text = codeElement.textContent;
-        const blob = new Blob([text], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        let fileExt = (ext || 'txt').toLowerCase();
-        if (fileExt === 'python') fileExt = 'py';
-        if (fileExt === 'javascript') fileExt = 'js';
-        if (fileExt === 'typescript') fileExt = 'ts';
-        if (fileExt === 'markdown') fileExt = 'md';
-        if (fileExt === 'bash' || fileExt === 'sh') fileExt = 'sh';
-        a.download = 'generated_code.' + fileExt;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    };
+window.downloadCode = (btn, ext) => {
+    const container   = btn.closest('.code-container');
+    const codeElement = container.querySelector('pre code');
+    const text        = codeElement.textContent;
+    triggerDownload('generated_code.' + normaliseExt(ext), text);
+};
 
     window.copyToClipboard = (btn) => {
         const container = btn.closest('.code-container');
@@ -325,7 +531,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     };
 
-    function appendMessageDOM(role, text, scroll = true, imageUrl = null) {
+    function appendMessageDOM(role, text, scroll = true, imageUrl = null, attachmentName = null) {
         const outer = document.createElement("div");
         outer.classList.add("message", role === "user" ? "user-message" : "ai-message");
 
@@ -337,6 +543,17 @@ document.addEventListener("DOMContentLoaded", () => {
             img.src = imageUrl;
             img.classList.add("chat-image");
             inner.appendChild(img);
+        } else if (attachmentName) {
+            const fileBox = document.createElement("div");
+            fileBox.className = "chat-file-attachment";
+            fileBox.innerHTML = `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                </svg>
+                <span>${escapeHtml(attachmentName)}</span>
+            `;
+            inner.appendChild(fileBox);
         }
 
         if (role === "bot") {
@@ -356,8 +573,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     async function handleSendMessage() {
         const text = chatInput.value.trim();
-        const hasImage = !!selectedImageFile;
-        if (!text && !hasImage) return;
+        const hasFile = !!selectedFile;
+        const isImage = hasFile && selectedFile.type.startsWith('image/');
+        if (!text && !hasFile) return;
 
         if (!currentChatId || !chats.find(c => c.id === currentChatId)) {
             startNewChat();
@@ -366,24 +584,60 @@ document.addEventListener("DOMContentLoaded", () => {
         const chat = normaliseChat(chats.find(c => c.id === currentChatId));
 
         if (chat.messages.length === 0) {
-            chat.title = text ? (text.length > 35 ? text.slice(0, 35) + '…' : text) : "Image Analysis";
+            chat.title = text ? (text.length > 35 ? text.slice(0, 35) + '…' : text) : (hasFile ? selectedFile.name : "New Conversation");
         }
 
         let displayImageUrl = null;
-        if (hasImage) {
-            displayImageUrl = URL.createObjectURL(selectedImageFile);
+        let attachmentName = null;
+        let finalContent = text;
+
+        if (hasFile) {
+            if (isImage) {
+                displayImageUrl = URL.createObjectURL(selectedFile);
+            } else {
+                attachmentName = selectedFile.name;
+                
+                // Show a warning if file size > 1MB
+                if (selectedFile.size > 1024 * 1024) {
+                    alert("File is too large. Please select a file under 1MB.");
+                    return;
+                }
+
+                try {
+                    const fileContent = await readFileAsText(selectedFile);
+                    const ext = attachmentName.split('.').pop().toLowerCase();
+                    
+                    finalContent = `I have attached a file named \`${attachmentName}\`. Here is the content of the file:\n\n` +
+                                   `\`\`\`${ext}\n` +
+                                   `${fileContent}\n` +
+                                   `\`\`\`\n\n` +
+                                   `User Prompt:\n${text}`;
+                } catch (e) {
+                    console.error("Failed to read file:", e);
+                    alert("Could not read file content.");
+                    return;
+                }
+            }
         }
 
-        chat.messages.push({ role: 'user', content: text, imageUrl: displayImageUrl });
+        const messageObj = {
+            role: 'user',
+            content: finalContent,
+            displayText: text || `[Attached: ${attachmentName}]`,
+            imageUrl: displayImageUrl,
+            attachmentName: attachmentName
+        };
+
+        chat.messages.push(messageObj);
         savePersist();
         renderChatList();
 
         enterChatMode();
-        appendMessageDOM('user', text, true, displayImageUrl);
+        appendMessageDOM('user', messageObj.displayText, true, displayImageUrl, attachmentName);
 
         chatInput.value = '';
-        const imageToUpload = selectedImageFile; // keep reference
-        clearImageSelection(); // clear for next message
+        const fileToUpload = selectedFile; // keep reference
+        clearFileSelection(); // clear for next message
         
         if (typeof handleInputResize === 'function') handleInputResize();
 
@@ -398,10 +652,10 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             // Unified Path: Always send to /chat (Agent Path)
             const formData = new FormData();
-            if (hasImage) {
-                formData.append('image', imageToUpload);
+            if (hasFile && isImage) {
+                formData.append('image', fileToUpload);
             }
-            formData.append('message', text);
+            formData.append('message', finalContent);
             formData.append('chat_id', currentChatId);
             formData.append('messages', JSON.stringify(chat.messages));
             formData.append('history', chat.historyString);
@@ -438,6 +692,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             let currentResponseText = "";
             let renderPending = false;  // rAF debounce flag
+            let renderFrameId = null;
             let firstTokenReceived = false;
 
             // Flush accumulated tokens to the DOM at display frame rate (≤60fps),
@@ -445,7 +700,7 @@ document.addEventListener("DOMContentLoaded", () => {
             function scheduleRender() {
                 if (renderPending) return;
                 renderPending = true;
-                requestAnimationFrame(() => {
+                renderFrameId = requestAnimationFrame(() => {
                     try {
                         if (!firstTokenReceived) {
                             removeTypingIndicator();
@@ -458,6 +713,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         console.error("Render error:", e);
                     } finally {
                         renderPending = false;
+                        renderFrameId = null;
                     }
                 });
             }
@@ -492,6 +748,17 @@ document.addEventListener("DOMContentLoaded", () => {
                             
                             currentResponseText += "\n\n<action_result>" + event.content + "</action_result>";
                             scheduleRender();
+                        } else if (event.type === "clear") {
+                            if (renderFrameId !== null) {
+                                cancelAnimationFrame(renderFrameId);
+                                renderFrameId = null;
+                            }
+                            renderPending = false;
+                            currentResponseText = "";
+                            firstTokenReceived = false;
+                            aiContentDiv.innerHTML = "";
+                            aiMessageDiv.style.display = "none";
+                            showTypingIndicator();
                         }
                     } catch (e) { console.error("Event parse error", e); }
                 }
@@ -637,21 +904,38 @@ document.addEventListener("DOMContentLoaded", () => {
         const file = e.target.files[0];
         if (!file) return;
 
-        selectedImageFile = file;
-        const reader = new FileReader();
-        reader.onload = (e) => {
+        selectedFile = file;
+        const isImage = file.type.startsWith('image/');
+
+        if (isImage) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                imagePreviewContainer.innerHTML = `
+                    <img src="${e.target.result}" alt="Preview">
+                    <button class="remove-image-btn" id="removeImageBtn" title="Remove image">✕</button>
+                `;
+                imagePreviewContainer.classList.add('visible');
+                document.getElementById('removeImageBtn')?.addEventListener('click', clearFileSelection);
+            };
+            reader.readAsDataURL(file);
+        } else {
             imagePreviewContainer.innerHTML = `
-                <img src="${e.target.result}" alt="Preview">
-                <button class="remove-image-btn" id="removeImageBtn" title="Remove image">✕</button>
+                <div class="file-preview-box">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                    </svg>
+                    <span class="file-preview-name">${escapeHtml(file.name)}</span>
+                </div>
+                <button class="remove-image-btn" id="removeImageBtn" title="Remove file">✕</button>
             `;
             imagePreviewContainer.classList.add('visible');
-            document.getElementById('removeImageBtn')?.addEventListener('click', clearImageSelection);
-        };
-        reader.readAsDataURL(file);
+            document.getElementById('removeImageBtn')?.addEventListener('click', clearFileSelection);
+        }
     });
 
-    function clearImageSelection() {
-        selectedImageFile = null;
+    function clearFileSelection() {
+        selectedFile = null;
         if (imageInput) imageInput.value = '';
         imagePreviewContainer.innerHTML = '';
         imagePreviewContainer.classList.remove('visible');
@@ -665,3 +949,139 @@ document.addEventListener("DOMContentLoaded", () => {
         startNewChat();
     }
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  CODE VIEWER PANEL  –  global functions
+// ═══════════════════════════════════════════════════════════════
+(function () {
+    // Build the overlay + panel DOM once
+    const overlay = document.createElement('div');
+    overlay.className = 'code-viewer-overlay';
+    overlay.addEventListener('click', closeViewer);
+
+    const panel = document.createElement('div');
+    panel.className = 'code-viewer-panel';
+    panel.innerHTML = `
+        <div class="code-viewer-header">
+            <div class="code-viewer-filename" id="cvFilename">file.txt</div>
+            <span class="code-viewer-lang-badge" id="cvLang">text</span>
+            <div class="code-viewer-actions">
+                <button class="code-viewer-btn primary" id="cvDownloadBtn">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    Download
+                </button>
+                <button class="code-viewer-btn" id="cvCopyBtn">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                    Copy
+                </button>
+            </div>
+            <button class="code-viewer-close" id="cvCloseBtn" title="Close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+        <div class="code-viewer-line-numbers">
+            <div class="code-viewer-gutters" id="cvGutters"></div>
+            <div class="code-viewer-body" id="cvBody">
+                <pre><code id="cvCode"></code></pre>
+            </div>
+        </div>
+        <div class="code-viewer-footer">
+            <div class="code-viewer-footer-stat">Lines: <span id="cvLineCount">0</span></div>
+            <div class="code-viewer-footer-stat">Chars: <span id="cvCharCount">0</span></div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    document.body.appendChild(panel);
+
+    document.getElementById('cvCloseBtn').addEventListener('click', closeViewer);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeViewer(); });
+
+    document.getElementById('cvCopyBtn').addEventListener('click', () => {
+        const text = document.getElementById('cvCode').textContent;
+        navigator.clipboard.writeText(text).then(() => {
+            const btn = document.getElementById('cvCopyBtn');
+            const orig = btn.innerHTML;
+            btn.innerHTML = '✓ Copied!';
+            btn.style.color = '#a385ff';
+            setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; }, 1800);
+        });
+    });
+
+    document.getElementById('cvDownloadBtn').addEventListener('click', () => {
+        const filename = document.getElementById('cvFilename').textContent;
+        const content  = document.getElementById('cvCode').textContent;
+        triggerDownload(filename, content);
+    });
+
+    let currentCardEl = null;
+
+    function openViewer(filename, lang, code) {
+        document.getElementById('cvFilename').textContent = filename;
+        document.getElementById('cvLang').textContent     = lang;
+
+        const escaped = code
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        document.getElementById('cvCode').innerHTML = escaped;
+
+        // Build line-number gutter
+        const lines   = code.split('\n');
+        const gutters = document.getElementById('cvGutters');
+        gutters.innerHTML = lines
+            .map((_, i) => `<div class="code-viewer-gutter-line">${i + 1}</div>`)
+            .join('');
+
+        document.getElementById('cvLineCount').textContent = lines.length;
+        document.getElementById('cvCharCount').textContent = code.length.toLocaleString();
+
+        // Sync scroll between gutter and body
+        const body = document.getElementById('cvBody');
+        body.addEventListener('scroll', () => { gutters.scrollTop = body.scrollTop; });
+
+        overlay.classList.add('visible');
+        requestAnimationFrame(() => panel.classList.add('open'));
+    }
+
+    function closeViewer() {
+        panel.classList.remove('open');
+        overlay.classList.remove('visible');
+        currentCardEl = null;
+    }
+
+    // Called when user clicks anywhere on the file card
+    window.openCodeViewer = function (cardEl) {
+        currentCardEl = cardEl;
+        const filename = cardEl.dataset.filename;
+        const lang     = cardEl.dataset.lang;
+        const fcId     = cardEl.dataset.filecardId;
+        const codeText = window.fileCardCache[fcId] || '';
+        openViewer(filename, lang, codeText);
+    };
+
+    // Called from the Download button inside the file card
+    window.downloadFileCard = function (btn) {
+        const card     = btn.closest('.file-card');
+        const filename = card.dataset.filename;
+        const fcId     = card.dataset.filecardId;
+        const codeText = window.fileCardCache[fcId] || '';
+        triggerDownload(filename, codeText);
+    };
+})();

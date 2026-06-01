@@ -97,7 +97,7 @@ def init_model():
             if BACKEND == "mlx":
                 try:
                     import mlx.core as mx
-                    mx.metal.set_cache_limit(1 * 1024 * 1024 * 1024)
+                    mx.set_cache_limit(1 * 1024 * 1024 * 1024)
                     print("[INFO] MLX Metal cache capped at 1 GB.")
                 except Exception:
                     pass
@@ -204,6 +204,16 @@ def chat():
                     pass
                 finally:
                     loop.run_until_complete(agen.aclose())
+                    
+                    # Cancel any orphaned background tasks (e.g., from stream_chat)
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    
+                    # Allow the event loop one final tick to process the cancellations
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                        
                     loop.close()
             except Exception as e:
                 err_msg = str(e)

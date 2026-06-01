@@ -16,6 +16,8 @@ import threading
 import random
 from typing import Optional, Tuple, Dict, Any
 import math
+import warnings
+warnings.filterwarnings("ignore")
 
 try:
     from sentence_transformers import SentenceTransformer, util
@@ -638,7 +640,7 @@ def load_model():
             # pushing everything else into swap and causing 60s+ responses.
             try:
                 import mlx.core as mx
-                mx.metal.set_cache_limit(1 * 1024 * 1024 * 1024)  # 1 GB cap
+                mx.set_cache_limit(1 * 1024 * 1024 * 1024)  # 1 GB cap
                 print("[iris] MLX Metal cache capped at 1 GB.")
             except Exception:
                 pass
@@ -713,7 +715,7 @@ def generate_reply_stream(model, tokenizer, prompt_text, device=None, **kwargs):
             # Free accumulated Metal kernel cache between requests so it does
             # not pile up and push model weights into swap.
             try:
-                mx.metal.clear_cache()
+                mx.clear_cache()
             except Exception:
                 pass
 
@@ -856,7 +858,7 @@ def unload_vision_model() -> None:
         _VISION_MODEL_CACHE = {}
         try:
             import mlx.core as mx
-            mx.metal.clear_cache()
+            mx.clear_cache()
         except Exception:
             pass
         print("[Vision] Vision model unloaded — unified memory reclaimed.")
