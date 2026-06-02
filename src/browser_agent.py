@@ -315,7 +315,7 @@ def browser_task(url: str, task: str, model=None, tokenizer=None, device=None, e
 
         # ── Generate Selenium code via Iris ──────────────────────────────────
         if model is not None and tokenizer is not None:
-            from iris import generate_reply
+            from .iris import generate_reply
 
             code_prompt = f"""You are a Selenium automation expert writing Python code.
 

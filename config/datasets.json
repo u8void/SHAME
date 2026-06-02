@@ -1,0 +1,45 @@
+{
+  "triage": {
+    "huggingface": [
+      {"path": "blended_skill_talk", "max_samples": 5000},
+      {"path": "daily_dialog", "max_samples": 5000}
+    ],
+    "local_dirs": ["training/general", "training/shared"]
+  },
+  "router": {
+    "huggingface": [],
+    "local_dirs": ["training/control", "training/shared"]
+  },
+  "math": {
+    "huggingface": [
+      {"path": "EleutherAI/hendrycks_math", "max_samples": 5000},
+      {"path": "deepmind/math_dataset", "max_samples": 5000}
+    ],
+    "local_dirs": ["training/math", "training/shared"]
+  },
+  "code": {
+    "huggingface": [
+      {"path": "m-a-p/CodeFeedback-Filtered-Instruction", "max_samples": 5000}
+    ],
+    "local_dirs": ["training/coding", "training/shared"]
+  },
+  "reasoning": {
+    "huggingface": [
+      {"path": "angrygiraffe/claude-opus-4.6-4.7-reasoning-8.7k", "max_samples": 8000},
+      {"path": "allenai/Dolci-Think-SFT-7B", "max_samples": 8000},
+      {"path": "prithivMLmods/Deepthink-Reasoning", "max_samples": 8000},
+      {"path": "trjxter/DeepSeek-V4-Pro-Reasoning-8000x", "max_samples": 8000},
+      {"path": "Jackrong/GLM-5.1-Reasoning-1M-Cleaned", "max_samples": 8000},
+      {"path": "teknium/OpenHermes-2.5", "max_samples": 8000}
+    ],
+    "local_dirs": ["training/reasoning", "training/shared"]
+  },
+  "general": {
+    "huggingface": [
+      {"path": "blended_skill_talk", "max_samples": 5000},
+      {"path": "daily_dialog", "max_samples": 5000},
+      {"path": "teknium/OpenHermes-2.5", "max_samples": 5000}
+    ],
+    "local_dirs": ["training/general", "training/shared"]
+  }
+}

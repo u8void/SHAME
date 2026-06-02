@@ -7,7 +7,7 @@ import subprocess
 from flask import Flask, request, jsonify, render_template
 from werkzeug.utils import secure_filename
 
-from iris import load_model, get_device, generate_reply, solve_math, BookRetriever, analyze_image, MLX_MODEL_ID, HF_MODEL_ID, BACKEND
+from src.iris import ask_stream, solve_math, BookRetriever, analyze_image
 
 parser = argparse.ArgumentParser(description="Run the Iris AI Flask App")
 parser.add_argument("--preview-only", action="store_true",
@@ -35,22 +35,12 @@ app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 def _allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
-model         = None
-tokenizer     = None
-device        = None
 retriever     = None
-_model_lock   = threading.Lock()
-_model_ready  = threading.Event()
 _retriever_lock   = threading.Lock()
 _retriever_ready  = False
 training_proc = None
 
 def get_retriever():
-    """Lazy-load the RAG index on first chat request.
-
-    Kept out of init_model so it does not compete with model weights for
-    unified memory during the critical startup window.
-    """
     global retriever, _retriever_ready
     if _retriever_ready:
         return retriever
@@ -67,76 +57,12 @@ def get_retriever():
         _retriever_ready = True
         return retriever
 
-def init_model():
-    """Load phi-4 + LoRA adapters in a background thread.
-
-    Key changes vs the original:
-    - Metal cache capped at 1 GB immediately after model load.
-    - Warmup runs with non-streaming ``generate`` (avoids the stream_generate
-      deadlock) so Metal JIT kernels compile BEFORE the first user message.
-    - _model_ready is set AFTER warmup, guaranteeing the first real request
-      is fast (~3-8 s) instead of triggering JIT compilation mid-response.
-    - RAG is no longer loaded here; it lazy-loads on the first chat request
-      so it does not compete with model weights for unified memory.
-    """
-    global model, tokenizer, device
-
-    if PREVIEW_MODE or PRO_MODE:
-        _model_ready.set()
-        return
-
-    with _model_lock:
-        if model is not None:
-            _model_ready.set()
-            return
-        try:
-            print("[INFO] Loading Iris model (Unified Backend)...")
-            model, tokenizer = load_model()
-            device = get_device()
-
-            if BACKEND == "mlx":
-                try:
-                    import mlx.core as mx
-                    mx.set_cache_limit(1 * 1024 * 1024 * 1024)
-                    print("[INFO] MLX Metal cache capped at 1 GB.")
-                except Exception:
-                    pass
-
-            print("[INFO] Warming up Metal kernels (first compile ~20-40 s on M2)...")
-            try:
-                if BACKEND == "mlx":
-                    from mlx_lm import generate as _warmup_gen
-                    _warmup_gen(model, tokenizer, prompt="hi", max_tokens=2, verbose=False)
-                    print("[INFO] Metal warmup complete — model ready.")
-                else:
-                    print("[INFO] Non-MLX backend — skipping warmup.")
-            except Exception as e:
-                print(f"[INFO] Warmup failed ({e}) — first response may be slower.")
-
-            print(f"[INFO] Iris ready. backend={BACKEND} device={device}")
-
-        except Exception as e:
-            print(f"[ERROR] Model loading failed: {e}")
-        finally:
-            _model_ready.set()
-
-if not PREVIEW_MODE and not PRO_MODE:
-    threading.Thread(target=init_model, name="model-loader", daemon=True).start()
-else:
-    _model_ready.set()
-
 @app.route("/")
 def home():
     return render_template("index.html", pro_mode=PRO_MODE)
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    if not PREVIEW_MODE and not PRO_MODE and not _model_ready.is_set():
-        def _warming():
-            yield 'data: {"type": "token", "content": "Iris is warming up - model loading takes 20-40s on first start. Please try again shortly."}\n\n'
-        from flask import Response
-        return Response(_warming(), mimetype="text/event-stream")
-
     if request.is_json:
         data = request.json
         image_file = None
@@ -188,7 +114,7 @@ def chat():
     if PRO_MODE:
         import asyncio
         import time
-        import iris_pro
+        import src.iris_pro as iris_pro
         def pro_generate():
             try:
                 loop = asyncio.new_event_loop()
@@ -205,12 +131,10 @@ def chat():
                 finally:
                     loop.run_until_complete(agen.aclose())
                     
-                    # Cancel any orphaned background tasks (e.g., from stream_chat)
                     pending = asyncio.all_tasks(loop)
                     for task in pending:
                         task.cancel()
                     
-                    # Allow the event loop one final tick to process the cancellations
                     if pending:
                         loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                         
@@ -236,9 +160,6 @@ def chat():
     def generate():
         for event in ai_agent_handle(
             user_message,
-            model,
-            tokenizer,
-            device,
             get_retriever(),
             agent_history
         ):
@@ -317,6 +238,13 @@ def train():
         "--accum-steps", str(data.get("accum_steps",  8)),
         "--output-dir",  str(data.get("output_dir",   "./iris_lora_adapter")),
     ]
+
+    train_roles = data.get("train_role")
+    if train_roles:
+        if isinstance(train_roles, list):
+            cmd.extend(["--train-role"] + [str(r) for r in train_roles])
+        else:
+            cmd.extend(["--train-role", str(train_roles)])
 
     device_choice = data.get("device") or ("cpu" if BACKEND == "cpu" else None)
     if device_choice:
@@ -408,11 +336,63 @@ def save_settings():
 
     return jsonify({"status": "success"})
 
+@app.route("/model_status", methods=["GET"])
+def model_status():
+    from src.iris import _active_model, ModelRole, load_generation_config
+    
+    active_role = None
+    active_file = None
+    if _active_model and "role" in _active_model:
+        active_role = _active_model["role"].value
+        
+        cfg = load_generation_config()
+        models_dict = cfg.get("models", {})
+        active_file = models_dict.get(active_role)
+        if not active_file:
+            defaults = {
+                "triage":    "iris-triage.gguf",
+                "router":    "iris-router.gguf",
+                "math":      "iris-math.gguf",
+                "code":      "iris-code.gguf",
+                "reasoning": "iris-reasoning.gguf",
+                "general":   "iris-general.gguf",
+                "vision":    "iris-vision.gguf",
+                "clip":      "iris-clip.bin"
+            }
+            active_file = defaults.get(active_role)
+            
+    available = {}
+    cfg = load_generation_config()
+    models_dict = cfg.get("models", {})
+    defaults = {
+        "triage":    "iris-triage.gguf",
+        "router":    "iris-router.gguf",
+        "math":      "iris-math.gguf",
+        "code":      "iris-code.gguf",
+        "reasoning": "iris-reasoning.gguf",
+        "general":   "iris-general.gguf",
+        "vision":    "iris-vision.gguf",
+        "clip":      "iris-clip.bin"
+    }
+    
+    models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+    for role in list(ModelRole) + ["vision", "clip"]:
+        role_name = role.value if hasattr(role, "value") else role
+        filename = models_dict.get(role_name) or defaults.get(role_name)
+        path = os.path.join(models_dir, filename)
+        available[role_name] = os.path.exists(path)
+        
+    return jsonify({
+        "active_role": active_role,
+        "active_file": active_file,
+        "available": available
+    })
+
 if __name__ == "__main__":
     if PRO_MODE:
         mode_label = "IRIS PRO (OpenRouter Multi-Agent API)"
     else:
-        mode_label = "PREVIEW MODE" if PREVIEW_MODE else "MLX (phi-4-4bit + LoRA adapters)"
+        mode_label = "Local GGUF Multi-Model Routing System"
     print(f"[INFO] Starting Iris AI — {mode_label}")
 
     port = int(os.environ.get("PORT", "5050"))

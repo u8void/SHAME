@@ -49,11 +49,21 @@ IRIS_IDENTITY = (
 )
 
 class Model(str, Enum):
-    ORCHESTRATOR  = "cmc/deepseek/deepseek-v4-flash"
-    CODE          = "cmc/xiaomi/mimo-v2.5-pro"
+    # Top-tier Agent Brain: Sustains long trajectories across thousands of tool calls
+    ORCHESTRATOR  = "cmc/xiaomi/mimo-v2.5-pro"
+    
+    # Flagship Logic Layer: For deep engineering, math validation, and structural thinking
+    CODE_COMPLEX  = "cmc/deepseek/deepseek-v4-pro"
     REASONING     = "cmc/deepseek/deepseek-v4-pro"
-    MATH          = "cmc/deepseek/deepseek-v4-flash"
+    
+    # Ultra-Fast Context Kings: Excellent for heavy files, prompt caching, and multi-token speed
     CODE_REVIEWER = "cmc/xiaomi/mimo-v2.5-pro"
+    GENERAL       = "cmc/xiaomi/mimo-v2.5"         # Multimodal (sees/hears), cheap general chat
+    
+    # The Budget Specialists: Fast, dirt cheap ($0.10/M tokens) high-throughput workers
+    CODE_SIMPLE   = "cmc/deepseek/deepseek-v4-flash"
+    MATH          = "cmc/deepseek/deepseek-v4-flash" # Trigger internal "think" mode for complex algebra
+    SEARCH        = "cmc/deepseek/deepseek-v4-flash" #
 
 class TaskType(str, Enum):
     MATH           = "math"
@@ -66,11 +76,11 @@ class TaskType(str, Enum):
 
 TASK_TO_MODEL: dict[TaskType, Model] = {
     TaskType.MATH:           Model.MATH,
-    TaskType.CODING_SIMPLE:  Model.CODE,
-    TaskType.CODING_COMPLEX: Model.CODE,
+    TaskType.CODING_SIMPLE:  Model.CODE_SIMPLE,
+    TaskType.CODING_COMPLEX: Model.CODE_COMPLEX,
     TaskType.REASONING:      Model.REASONING,
-    TaskType.GENERAL:        Model.ORCHESTRATOR,
-    TaskType.SEARCH:         Model.ORCHESTRATOR,
+    TaskType.GENERAL:        Model.GENERAL,
+    TaskType.SEARCH:         Model.SEARCH,
 }
 
 
@@ -696,7 +706,8 @@ async def ask_stream(
 
             if task_type in (TaskType.GENERAL, TaskType.SEARCH):
                 t0 = time.perf_counter()
-                log.info("Starting general response with %s...", Model.ORCHESTRATOR.value)
+                selected_model = TASK_TO_MODEL[task_type].value
+                log.info("Starting general response with %s...", selected_model)
                 general_messages = [
                     {"role": "system", "content": GENERAL_SYSTEM_PROMPT},
                     *messages
@@ -708,7 +719,7 @@ async def ask_stream(
                         finish_reason = "stop"
                         loop_content = ""
                         async for chunk in client.stream_chat(
-                            model=Model.ORCHESTRATOR.value,
+                            model=selected_model,
                             messages=general_messages,
                             temperature=0.3,
                             max_tokens=MAX_TOKENS_GENERAL,
@@ -739,7 +750,7 @@ async def ask_stream(
                         "choices": [{"message": {"content": full_content}}],
                         "usage": last_usage
                     }
-                    hop = _timed_hop("1:general", Model.ORCHESTRATOR.value, synthetic_raw, elapsed)
+                    hop = _timed_hop("1:general", selected_model, synthetic_raw, elapsed)
                     hops.append(hop)
                 except Exception as exc:
                     log.exception("Error in General stage: %s", exc)
@@ -864,7 +875,7 @@ async def ask_stream(
 
             elif task_type == TaskType.CODING_SIMPLE:
                 t0 = time.perf_counter()
-                log.info("Starting simple coding response with %s...", Model.CODE.value)
+                log.info("Starting simple coding response with %s...", Model.CODE_SIMPLE.value)
                 code_messages = [
                     {"role": "system", "content": CODE_SYSTEM_PROMPT},
                     *messages
@@ -876,7 +887,7 @@ async def ask_stream(
                         finish_reason = "stop"
                         loop_content = ""
                         async for chunk in client.stream_chat(
-                            model=Model.CODE.value,
+                            model=Model.CODE_SIMPLE.value,
                             messages=code_messages,
                             temperature=0.2,
                             max_tokens=MAX_TOKENS,
@@ -896,7 +907,7 @@ async def ask_stream(
                             except (KeyError, IndexError):
                                 pass
                         if finish_reason == "length":
-                            log.warning("Model.CODE hit max_tokens length in CODING_SIMPLE. Auto-continuing (loop %d)...", i+1)
+                            log.warning("Model.CODE_SIMPLE hit max_tokens length in CODING_SIMPLE. Auto-continuing (loop %d)...", i+1)
                             code_messages.append({"role": "assistant", "content": loop_content})
                             code_messages.append({"role": "user", "content": "Continue exactly where you left off, from the very next character. Do not repeat anything, do not write intro text or markdown blocks, just the raw continuation."})
                         else:
@@ -907,7 +918,7 @@ async def ask_stream(
                         "choices": [{"message": {"content": full_content}}],
                         "usage": last_usage
                     }
-                    hop = _timed_hop("1:coding_simple", Model.CODE.value, synthetic_raw, elapsed)
+                    hop = _timed_hop("1:coding_simple", Model.CODE_SIMPLE.value, synthetic_raw, elapsed)
                     hops.append(hop)
                 except Exception as exc:
                     log.exception("Error in Simple Coding stage: %s", exc)
@@ -954,7 +965,7 @@ async def ask_stream(
                 # Stage 2: Code generation — streamed live so the user sees output immediately
                 t0_code = time.perf_counter()
                 yield {"type": "status", "content": "Stage 2 — Writing code..."}
-                log.info("Starting code generation with %s...", Model.CODE.value)
+                log.info("Starting code generation with %s...", Model.CODE_COMPLEX.value)
 
                 code_sys_prompt = CODE_SYSTEM_PROMPT
                 if is_continuation:
@@ -972,7 +983,7 @@ async def ask_stream(
                 ]
                 try:
                     async for chunk in client.stream_chat(
-                        model=Model.CODE.value,
+                        model=Model.CODE_COMPLEX.value,
                         messages=code_messages,
                         temperature=0.2,
                         max_tokens=MAX_TOKENS,
@@ -986,7 +997,7 @@ async def ask_stream(
                             yield {"type": "status", "content": "Writing code..."}
 
                     elapsed = time.perf_counter() - t0_code
-                    hop_code = _timed_hop("2:coding", Model.CODE.value, {"content": raw_code}, elapsed)
+                    hop_code = _timed_hop("2:coding", Model.CODE_COMPLEX.value, {"content": raw_code}, elapsed)
                     hop_code.log_summary()
                     hops.append(hop_code)
                 except Exception as exc:

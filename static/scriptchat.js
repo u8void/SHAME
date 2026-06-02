@@ -691,6 +691,7 @@ window.downloadCode = (btn, ext) => {
             chatMessages.appendChild(aiMessageDiv);
 
             let currentResponseText = "";
+            let rawResponseText = "";
             let renderPending = false;  // rAF debounce flag
             let renderFrameId = null;
             let firstTokenReceived = false;
@@ -755,10 +756,13 @@ window.downloadCode = (btn, ext) => {
                             }
                             renderPending = false;
                             currentResponseText = "";
+                            rawResponseText = "";
                             firstTokenReceived = false;
                             aiContentDiv.innerHTML = "";
                             aiMessageDiv.style.display = "none";
                             showTypingIndicator();
+                        } else if (event.type === "raw_response") {
+                            rawResponseText = event.content;
                         }
                     } catch (e) { console.error("Event parse error", e); }
                 }
@@ -773,11 +777,11 @@ window.downloadCode = (btn, ext) => {
             }
             
             // Clean up currentResponseText before saving to prevent corrupting the LLM context
-            let cleanResponse = currentResponseText;
+            let cleanResponse = rawResponseText || currentResponseText;
             try {
                 // If the response contains a JSON action block, we extract the action result 
                 // and store ONLY the clean text in history, avoiding massive JSON duplication
-                const match = currentResponseText.match(/\{[\s\S]*?"action"[\s\S]*?\}/i);
+                const match = cleanResponse.match(/\{[\s\S]*?"action"[\s\S]*?\}/i);
                 if (match) {
                     const actionObj = JSON.parse(match[0]);
                     if (actionObj.action === "chat" && actionObj.response) {

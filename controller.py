@@ -182,11 +182,10 @@ except ImportError:
     print("[INFO] Install 'pyperclip' for clipboard support: pip install pyperclip")
 
 try:
-    from iris import load_model as _mlx_load_model, get_device, generate_reply, solve_math, BookRetriever, analyze_image, MLX_MODEL_ID
+    from src.iris import ask_stream, get_device, solve_math, BookRetriever, analyze_image
     IRIS_AVAILABLE = True
 except ImportError:
     IRIS_AVAILABLE = False
-    MLX_MODEL_ID = "mlx-community/Qwen3.6-27B-4bit"
     print("[WARNING] iris.py not found or dependencies missing. Running in rule-only mode.")
 
 CONFIG_FILE  = "./config/control.conf"
@@ -399,74 +398,28 @@ def parse_ai_response(text: str) -> dict | None:
     except json.JSONDecodeError:
         return None
 
-def ai_agent_handle(user_input: str, model, tokenizer, device, retriever, history: list):
+def ai_agent_handle(user_input: str, *args, **kwargs):
     """Generator that yields events for the frontend: tokens, actions, results."""
-    if model is None:
-        yield {"type": "text", "content": "Iris model not available."}
-        return
+    if len(args) == 5:
+        retriever = args[3]
+        history = args[4]
+    elif len(args) == 2:
+        retriever = args[0]
+        history = args[1]
+    else:
+        retriever = kwargs.get("retriever")
+        history = kwargs.get("history") or []
 
-    rag_category = route_category(user_input)
+    force_role = kwargs.get("force_role") or getattr(ai_agent_handle, "force_role", None)
 
-    context = ""
-    if retriever and len(user_input.split()) >= 6:
-        context = retriever.retrieve(user_input, top_k=1, category=rag_category)
+    if not force_role:
+        math_res = solve_math(user_input)
+        if math_res is not None:
+            yield {"type": "token", "content": math_res}
+            return
 
-    web_results = ""
-    if should_web_search(user_input):
-        yield {"type": "status", "content": "Searching the web..."}
-        web_results = web_search(user_input)
-
-    try:
-        sys_prompt = _get_agent_system_prompt()
-    except Exception:
-        sys_prompt = AI_AGENT_SYSTEM_PROMPT
-    if context:
-        sys_prompt += f"\n\nREFERENCE EXCERPT:\n{context}"
-    if web_results:
-        sys_prompt += f"\n\nWEB SEARCH RESULTS:\n{web_results}"
-
-    messages = [{"role": "system", "content": sys_prompt}]
-    for msg in history[-4:] + [{"role": "user", "content": user_input}]:
-        if messages[-1]["role"] == msg["role"]:
-            messages[-1]["content"] += "\n" + msg["content"]
-        else:
-            messages.append(msg)
-
-    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-
-    from iris import generate_reply_stream
-
-    max_turns = 3
-    for turn in range(max_turns):
-        full_reply = ""
-        for token in generate_reply_stream(model, tokenizer, prompt, device):
-            full_reply += token
-            yield {"type": "token", "content": token}
-
-        action_dict = parse_ai_response(full_reply)
-        if not action_dict:
-            break
-
-        action = action_dict.get("action", "chat")
-        if action == "chat":
-            break
-
-        yield {"type": "status", "content": f"Executing {action}..."}
-
-        result = execute_action_by_dict(action_dict)
-        if result:
-            yield {"type": "action_result", "content": result}
-
-            if turn < max_turns - 1:
-                followup_prompt = f"The action '{action}' returned:\n{result}\n\nNow provide your final answer or take the next necessary action based on this info."
-                messages.append({"role": "assistant", "content": full_reply})
-                messages.append({"role": "user", "content": followup_prompt})
-
-                prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            else:
-                break
-        else:
-            break
+    from src.iris import ask_stream
+    yield from ask_stream(user_input, history, retriever=retriever, force_role=force_role)
 
 def execute_action_by_dict(action_dict: dict) -> str:
     action = action_dict.get("action", "chat")
@@ -510,7 +463,7 @@ def execute_action_by_dict(action_dict: dict) -> str:
             code = action_dict.get("code", "")
             return handle_run_code(code)
         elif action == "analyze_image":
-            from iris import analyze_image
+            from src.iris import analyze_image
             path = action_dict.get("image_path", "")
             prompt = action_dict.get("prompt", "Describe this image in detail.")
             return analyze_image(path, prompt)
@@ -534,7 +487,7 @@ def execute_action_by_dict(action_dict: dict) -> str:
             instr = action_dict.get("instructions", "")
             return handle_fix_file(path, instr)
         elif action == "browser_login":
-            from browser_agent import browser_login
+            from src.browser_agent import browser_login
             url      = action_dict.get("url", "")
             username = action_dict.get("username", "")
             password = action_dict.get("password", "")
@@ -547,7 +500,7 @@ def execute_action_by_dict(action_dict: dict) -> str:
             _dev = _iris.get_device() if _iris._cached_model else None
             return browser_login(url, username, password, model=_m, tokenizer=_tok, device=_dev)
         elif action == "browser_task":
-            from browser_agent import browser_task as _browser_task
+            from src.browser_agent import browser_task as _browser_task
             url  = action_dict.get("url", "")
             task = action_dict.get("task", "")
             if not url:
@@ -1715,7 +1668,7 @@ def handle_focus_app(name: str) -> str:
         return f"Focused app '{name}'."
     return "Focus app not supported on this OS."
 
-def handle_fix_file(path: str, instructions: str, model, tokenizer, device):
+def handle_fix_file(path: str, instructions: str, model=None, tokenizer=None, device=None):
     if not path:
         return "Path required."
     path_obj = Path(path).expanduser().resolve()
@@ -1738,10 +1691,20 @@ def handle_fix_file(path: str, instructions: str, model, tokenizer, device):
     user_msg = f"Current Content of {path_obj.name}:\n\n{content}"
 
     messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_msg}]
-    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-
-    new_content = generate_reply(model, tokenizer, prompt, device, raw_output=True, max_new_tokens=4096)
-    new_content = new_content.strip()
+    
+    from src.iris import load_model, ModelRole, unload_model
+    try:
+        llm = load_model(ModelRole.CODE)
+        res = llm.create_chat_completion(
+            messages=messages,
+            max_tokens=4096,
+            temperature=0.2,
+        )
+        new_content = res["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        return f"Generation error: {e}"
+    finally:
+        unload_model()
 
     code_block_match = re.search(r'```[a-zA-Z]*\n(.*?)```', new_content, re.DOTALL)
     if code_block_match:
@@ -1758,15 +1721,7 @@ def handle_fix_file(path: str, instructions: str, model, tokenizer, device):
         return f"Write error: {e}"
 
 def load_iris_model():
-    """
-    Load the phi-4 MLX model + LoRA adapters.
-    Returns (model, tokenizer, device) matching the old API.
-    """
-    if not IRIS_AVAILABLE:
-        return None, None, None
-    model, tokenizer = _mlx_load_model()
-    device = get_device()
-    return model, tokenizer, device
+    return None, None, None
 
 def iris_chat_reply(model, tokenizer, device, retriever, history: list, user_text: str) -> str:
     """Standard chat reply incorporating the RAG Knowledge base and live web search."""
@@ -2222,7 +2177,7 @@ def show_model_details():
         console.print("[red]Iris model is not available or not loaded.[/red]")
         return
         
-    from iris import load_generation_config
+    from src.iris import load_generation_config
     cfg = load_generation_config()
     
     table = Table(title="Active Model Settings", box=ROUNDED, border_style="green")
@@ -2240,6 +2195,17 @@ def show_model_details():
     console.print(table)
 
 def main():
+    import argparse
+    from src.iris import ModelRole
+    
+    parser = argparse.ArgumentParser(description="Iris AI PC Agent")
+    parser.add_argument("--model", choices=[m.value for m in ModelRole], default=None,
+                        help="Force using a single specific model role for all queries (bypasses routing).")
+    args, _ = parser.parse_known_args()
+    
+    if args.model:
+        ai_agent_handle.force_role = ModelRole(args.model)
+
     config = load_config()
     
     # Enter alternate screen buffer
@@ -2347,6 +2313,7 @@ def main():
                     draw_layout(model, tokenizer, retriever, display_history, status_text=status_text)
                 
                 reply_parts = []
+                final_reply = None
                 for event in ai_agent_handle(raw, model, tokenizer, device, retriever, history):
                     ev_type = event.get("type")
                     content = event.get("content", "")
@@ -2373,7 +2340,11 @@ def main():
                         else:
                             print(f"\n[Action Output]\n{content}")
                             
-                final_reply = "".join(reply_parts)
+                    elif ev_type == "raw_response":
+                        final_reply = content
+                            
+                if final_reply is None:
+                    final_reply = "".join(reply_parts)
                 history.append({"role": "user", "content": raw})
                 history.append({"role": "assistant", "content": final_reply})
                 
