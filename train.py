@@ -429,9 +429,17 @@ def merge_and_save(base_model_id: str, adapter_dir: str, out_dir: str):
     tokenizer.save_pretrained(out_dir)
 
 def convert_to_gguf(hf_adapter_dir: str, role: str, base_model_id: str, is_mlx: bool, quant_type: str = "q4_k_m") -> str:
-    convert_script = "llama.cpp/convert_hf_to_gguf.py"
-    if not os.path.exists(convert_script):
-        print(f"[GGUF] llama.cpp not found — clone it: git clone https://github.com/ggerganov/llama.cpp")
+    # locate convert script (works for both cmake and legacy make builds)
+    convert_script = None
+    for candidate in [
+        "llama.cpp/convert_hf_to_gguf.py",
+        "llama.cpp/tools/convert_hf_to_gguf.py",
+    ]:
+        if os.path.exists(candidate):
+            convert_script = candidate
+            break
+    if convert_script is None:
+        print("[GGUF] llama.cpp not found — run: bash setup.sh")
         return ""
 
     temp_dir = tempfile.mkdtemp()
@@ -468,14 +476,20 @@ def convert_to_gguf(hf_adapter_dir: str, role: str, base_model_id: str, is_mlx: 
 
         quantize_tool = "./llama.cpp/llama-quantize"
         found_quantize = False
-        for path in ["./llama.cpp/llama-quantize", "./llama.cpp/build/bin/llama-quantize", "llama-quantize"]:
+        # Search cmake build paths first, then legacy make output
+        for path in [
+            "./llama.cpp/build/bin/llama-quantize",
+            "./llama.cpp/build/llama-quantize",
+            "./llama.cpp/llama-quantize",
+            "llama-quantize",
+        ]:
             if os.path.exists(path) or (shutil.which(path) if "/" not in path else False):
                 quantize_tool = path
                 found_quantize = True
                 break
 
         if not found_quantize:
-            print("[GGUF] llama-quantize not found. Please compile llama.cpp first (e.g. run 'make' in llama.cpp). Skipping quantization.")
+            print("[GGUF] llama-quantize not found. Run 'bash setup.sh' to build llama.cpp. Skipping quantization.")
             os.rename(f16_gguf, final_gguf)
             print(f"[GGUF] ✓ Saved (F16 fallback): {final_gguf}")
             return final_gguf
