@@ -1,14 +1,13 @@
 """
 src/__init__.py
 Public API surface for the Iris AI source package.
-Import everything consumers need from the src/ submodules.
 """
-
 from .iris import (
+    download_gguf,
+    _MODEL_SOURCES,
     ask_stream,
     load_model,
     unload_model,
-    generate_reply,
     solve_math,
     analyze_image,
     BookRetriever,
@@ -16,6 +15,25 @@ from .iris import (
     TaskType,
     get_device,
     load_generation_config,
+    generate_internal_code,
 )
 from .syntax_checker import check_syntax, extract_code_blocks
-from .iris_pro import IrisPro  # noqa: F401 — re-exported for convenience
+from .context_compactor import (
+    estimate_tokens,
+    compact_light,
+    compact_context,
+    auto_compact_for_role,
+    CompactionLevel,
+)
+
+from .grpo_trainer import (
+    train_with_grpo,
+    GRPOConfig,
+    GRPOTrainer,
+    GRPOMetrics,
+    GRPOSample,
+    GRPODataset,
+    RewardScorer,
+    RewardDomain,
+    GGUFPolicyBridge,
+)

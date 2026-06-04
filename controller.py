@@ -25,7 +25,6 @@ from pathlib import Path
 import warnings
 warnings.filterwarnings("ignore")
 
-# Rich terminal styling and formatting
 try:
     from rich.console import Console
     from rich.panel import Panel
@@ -495,21 +494,33 @@ def execute_action_by_dict(action_dict: dict) -> str:
                 return "browser_login requires a 'url' field."
             if not username or not password:
                 return "Please tell me the username/email and password to use for login."
-            import iris as _iris
-            _m, _tok = _iris.load_model() if _iris._cached_model else (None, None)
-            _dev = _iris.get_device() if _iris._cached_model else None
-            return browser_login(url, username, password, model=_m, tokenizer=_tok, device=_dev)
+            return browser_login(url, username, password)
         elif action == "browser_task":
             from src.browser_agent import browser_task as _browser_task
             url  = action_dict.get("url", "")
             task = action_dict.get("task", "")
             if not url:
                 return "browser_task requires a 'url' field."
-
-            import iris as _iris
-            _m, _tok = _iris.load_model() if _iris._cached_model else (None, None)
-            _dev = _iris.get_device() if _iris._cached_model else None
-            return _browser_task(url, task, model=_m, tokenizer=_tok, device=_dev)
+            return _browser_task(url, task)
+        elif action == "browser_autopilot":
+            from src.browser_agent import browser_autopilot as _browser_autopilot
+            from src.browser_agent import parse_resume as _parse_resume
+            url         = action_dict.get("url", "")
+            task        = action_dict.get("task", "")
+            resume_path = action_dict.get("resume", "")
+            max_turns   = int(action_dict.get("max_turns", 15))
+            if not url:
+                return "browser_autopilot requires a 'url' field."
+            if not task:
+                return "browser_autopilot requires a 'task' field."
+            return _browser_autopilot(url, task, resume_path=resume_path or None, max_turns=max_turns)
+        elif action == "parse_resume":
+            from src.browser_agent import parse_resume as _parse_resume
+            resume_path = action_dict.get("path", "")
+            if not resume_path:
+                return "parse_resume requires a 'path' field."
+            result = _parse_resume(resume_path)
+            return json.dumps(result, indent=2)
         elif action == "create_file":
             path    = action_dict.get("path", "")
             content = action_dict.get("content", "")
@@ -1431,7 +1442,6 @@ def handle_bluetooth(state: str) -> str:
             res = subprocess.run(f"blueutil -p {on_val}", shell=True, capture_output=True)
             if res.returncode == 0:
                 return f"Bluetooth turned {state}."
-            # Fallback
             subprocess.run("osascript -e 'tell application \"System Events\" to tell secondary click of menu bar item 1 of menu bar 1 of process \"ControlCenter\" to click'", shell=True)
             return f"Attempted to set Bluetooth to {state} (install blueutil via brew for full reliability)."
         except Exception as e:
@@ -1877,7 +1887,6 @@ def format_assistant_message(content: str):
     if not content:
         return Text("")
         
-    # 1. Extract think block
     think_content = ""
     def replace_think(match):
         nonlocal think_content
@@ -1886,7 +1895,6 @@ def format_assistant_message(content: str):
     
     work = re.sub(r'<think>([\s\S]*?)(?:</think>|$)', replace_think, content, flags=re.IGNORECASE)
     
-    # 2. Extract JSON action
     action_text = ""
     chat_response = ""
     def replace_action(match):
@@ -1911,7 +1919,6 @@ def format_assistant_message(content: str):
     if think_content:
         renderables.append(Text.from_markup(f"[dim]Thinking: {think_content}[/dim]"))
         
-    # Main content is either the parsed chat_response, or the remaining text
     main_text = chat_response if chat_response else remaining
     if main_text:
         renderables.append(Markdown(main_text))
@@ -1958,7 +1965,6 @@ def draw_layout(model, tokenizer, retriever, history, status_text=None):
         
     cols, rows = shutil.get_terminal_size()
     
-    # 1. Gather status info
     import platform as pf
     try:
         import psutil
@@ -1977,22 +1983,13 @@ def draw_layout(model, tokenizer, retriever, history, status_text=None):
     
     divider = "─" * cols
     
-    # 2. Footer message
     footer_msg = " Type '/help' for commands │ '/exit' to quit │ Ask anything in natural language"
     if status_text:
         footer_msg = f" [bold yellow]Status: {status_text}[/bold yellow] │{footer_msg}"
         
-    # Calculate body height
-    # reserved_height:
-    # 1 line for status_line
-    # 1 line for top divider
-    # 1 line for bottom divider
-    # 1 line for footer_msg
-    # 2 lines for the prompt (which contains a leading newline '\n')
     reserved_height = 6
     body_height = max(5, rows - reserved_height)
     
-    # 3. Build Body Content
     body_table = Table(box=None, show_header=False, expand=True)
     body_table.add_column("Role", style="bold", width=10)
     body_table.add_column("Message")
@@ -2017,21 +2014,17 @@ This is a full-featured terminal interface for controlling your computer and cha
             content_render = Markdown(msg["content"]) if msg["role"] == "user" else format_assistant_message(msg["content"])
             body_table.add_row(Text(role, style=role_style), content_render)
             
-    # Reset screen cursor position to home (0,0) and overwrite
     sys.stdout.write("\033[2J\033[H")
     sys.stdout.flush()
     
-    # Render layout
     console.print(status_line)
     console.print(Text(divider, style="dim cyan"))
     
-    # Measure the height of body table with a plain console
     measure_console = Console(color_system=None, width=cols)
     with measure_console.capture() as capture:
         measure_console.print(body_table)
     body_height_actual = len(capture.get().splitlines())
     
-    # Print the colored body table directly
     console.print(body_table)
         
     padding_needed = body_height - body_height_actual
@@ -2208,7 +2201,6 @@ def main():
 
     config = load_config()
     
-    # Enter alternate screen buffer
     if RICH_AVAILABLE:
         sys.stdout.write("\033[?1049h")
         sys.stdout.write("\033[H")
@@ -2239,10 +2231,9 @@ def main():
                 except Exception as e:
                     print(f"[WARNING] Failed to load RAG: {e}")
 
-        history: list = []  # Permanent session history
+        history: list = []
 
         while True:
-            # Draw screen layout
             if RICH_AVAILABLE:
                 draw_layout(model, tokenizer, retriever, history)
                 prompt_str = get_prompt_text()
@@ -2261,7 +2252,6 @@ def main():
 
             lower = raw.lower()
             
-            # Handle slash commands
             if raw.startswith("/") or lower in ("help", "clear", "exit", "quit", "status", "config", "history", "model"):
                 cmd = raw.split()[0].lower()
                 if cmd == "/exit" or cmd == "/quit" or cmd in ("exit", "quit"):
@@ -2302,7 +2292,6 @@ def main():
                         print(f"Unknown command: {cmd}")
                     continue
 
-            # Run chat agent
             try:
                 display_history = list(history)
                 display_history.append({"role": "user", "content": raw})
@@ -2355,7 +2344,6 @@ def main():
                 else:
                     print(f"Error: {e}")
     finally:
-        # Exit alternate screen buffer
         if RICH_AVAILABLE:
             sys.stdout.write("\033[?1049l")
             sys.stdout.flush()

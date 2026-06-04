@@ -26,7 +26,7 @@ def compute_summary(csv_path: str) -> dict[str, dict]:
         with open(csv_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                bench = row.get("Benchmark", "unknown").split("-")[0]  # strip subject suffix
+                bench = row.get("Benchmark", "unknown").split("-")[0]
                 role  = row.get("Role", "")
                 key   = f"{bench} [{role}]"
                 if key not in summary:
@@ -55,7 +55,6 @@ def print_summary(summary: dict[str, dict]):
 def main():
     os.makedirs("outputs", exist_ok=True)
 
-    # Clear previous results
     if os.path.exists(CSV_PATH):
         os.remove(CSV_PATH)
 
@@ -75,14 +74,12 @@ def main():
 
     elapsed = round(time.time() - total_start, 1)
 
-    # Print + display summary
     summary = compute_summary(CSV_PATH)
     print_summary(summary)
 
     print(f"  Total time: {elapsed}s")
     print(f"  Full results saved to: {os.path.abspath(CSV_PATH)}\n")
 
-    # Try to clean up model memory
     try:
         from src.iris import unload_model
         unload_model()

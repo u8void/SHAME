@@ -26,7 +26,6 @@ def _format_gpqa_question(item: dict) -> tuple[str, str]:
     incorrect_2      = item.get("Incorrect Answer 2", "")
     incorrect_3      = item.get("Incorrect Answer 3", "")
 
-    # Shuffle choices so the correct answer isn't always the same position
     choices = [correct_answer, incorrect_1, incorrect_2, incorrect_3]
     random.shuffle(choices)
     correct_letter = ["A", "B", "C", "D"][choices.index(correct_answer)]
@@ -58,10 +57,9 @@ def _extract_letter(response: str) -> str | None:
     return None
 
 def run_gpqa_benchmark(csv_path: str):
-    # Try open alternative first; Idavidrein/gpqa is gated and requires HF token
     dataset_options = [
         ("lighteval/GPQA", "gpqa_diamond", "train"),
-        ("Idavidrein/gpqa", "gpqa_diamond", "train"),  # fallback if user has HF_TOKEN set
+        ("Idavidrein/gpqa", "gpqa_diamond", "train"),
     ]
     items = []
     for repo, config, split in dataset_options:

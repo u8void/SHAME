@@ -1,31 +1,38 @@
 """
-browser_agent.py — Selenium Browser Automation for Iris AI
-===========================================================
+browser_agent.py — Multi-Turn Selenium Browser Automation for Iris AI
+======================================================================
+Powers job applications, form filling, and complex web workflows.
+Features:
+  - Multi-turn browser loop (snapshot → act → repeat until done)
+  - File upload support
+  - Resume PDF parsing
+  - Retry/timeout wrapper
+  - Job-board field auto-mapping
 """
 
 import json
 import time
+import os
+import re
+import io
+from contextlib import redirect_stdout
+from typing import Dict, List, Optional, Tuple
+
+
 
 def _make_driver(headless: bool = False):
-    """
-    Return a configured Chrome WebDriver.
-    Selenium Manager (bundled since selenium 4.6) downloads ChromeDriver
-    automatically — no manual setup required.
-    """
+    """Return a configured Chrome WebDriver."""
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
 
     opts = Options()
-    
-    import os
-    profile_dir = os.path.join(os.path.dirname(__file__), "browser_profile")
-    opts.add_argument(f"--user-data-dir={profile_dir}")
+    profile_dir = os.path.join(os.path.dirname(__file__), "..", "browser_profile")
+    opts.add_argument(f"--user-data-dir={os.path.abspath(profile_dir)}")
     opts.add_argument("--profile-directory=Default")
-    
+
     if headless:
         opts.add_argument("--headless=new")
 
-    # Reduce bot-detection fingerprint
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -38,7 +45,6 @@ def _make_driver(headless: bool = False):
     try:
         driver = webdriver.Chrome(options=opts)
     except Exception:
-        # Fallback: try webdriver-manager if installed
         try:
             from webdriver_manager.chrome import ChromeDriverManager
             from selenium.webdriver.chrome.service import Service
@@ -49,378 +55,633 @@ def _make_driver(headless: bool = False):
         except Exception as e:
             raise RuntimeError(
                 f"Could not start Chrome WebDriver: {e}\n"
-                "Make sure Google Chrome is installed and run:\n"
-                "  pip install selenium"
+                "Make sure Google Chrome is installed and run:\n  pip install selenium"
             )
-
     driver.implicitly_wait(6)
     return driver
 
+
+
 def _page_snapshot(driver) -> dict:
-    """
-    Return a lightweight JSON snapshot of the page using JavaScript DOM traversal.
-    This handles Shadow DOMs and assigns a unique 'data-iris-id' to every interactable element.
-    """
+    """JSON snapshot of all interactable elements on the page (handles Shadow DOMs)."""
     js_code = """
     window.findIrisElement = function(id) {
         function search(root) {
             let el = root.querySelector('[data-iris-id="' + id + '"]');
             if (el) return el;
             for (let child of root.querySelectorAll('*')) {
-                if (child.shadowRoot) {
-                    let found = search(child.shadowRoot);
-                    if (found) return found;
-                }
+                if (child.shadowRoot) { let found = search(child.shadowRoot); if (found) return found; }
             }
             return null;
         }
         return search(document);
     };
-
     function extractDOM() {
-        let irisIdCounter = 1;
-        const items = [];
-        
+        let irisIdCounter = 1; const items = [];
         function isVisible(el) {
-            const rect = el.getBoundingClientRect();
-            return rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).visibility !== 'hidden';
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0 && window.getComputedStyle(el).visibility !== 'hidden';
         }
-        
-        const interactableSelectors = 'a, button, input, textarea, select, [role="button"], [role="link"], [tabindex]:not([tabindex="-1"])';
-        
+        const sel = 'a, button, input, textarea, select, [role="button"], [role="link"], [tabindex]:not([tabindex="-1"])';
         function traverse(root) {
-            const elements = root.querySelectorAll(interactableSelectors);
-            for (let el of elements) {
+            for (let el of root.querySelectorAll(sel)) {
                 if (!isVisible(el)) continue;
-                
                 let id = el.getAttribute('data-iris-id');
-                if (!id) {
-                    id = irisIdCounter++;
-                    el.setAttribute('data-iris-id', id);
-                }
-                
-                const tag = el.tagName.toLowerCase();
+                if (!id) { id = irisIdCounter++; el.setAttribute('data-iris-id', id); }
+                let tag = el.tagName.toLowerCase();
                 let text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '').trim();
-                if (text.length > 50) text = text.substring(0, 47) + '...';
-                
+                if (text.length > 60) text = text.substring(0, 57) + '...';
                 let obj = { id: parseInt(id), tag: tag };
                 if (text) obj.text = text;
-                
-                const type = el.getAttribute('type');
-                if (type) obj.type = type;
-                
-                const name = el.getAttribute('name');
-                if (name) obj.name = name;
-                
-                if (text || tag === 'input' || tag === 'textarea' || tag === 'select') {
-                    items.push(obj);
-                }
+                let type = el.getAttribute('type'); if (type) obj.type = type;
+                let name = el.getAttribute('name'); if (name) obj.name = name;
+                if (text || tag === 'input' || tag === 'textarea' || tag === 'select') items.push(obj);
             }
-            
-            for (let el of root.querySelectorAll('*')) {
-                if (el.shadowRoot) traverse(el.shadowRoot);
-            }
+            for (let el of root.querySelectorAll('*')) { if (el.shadowRoot) traverse(el.shadowRoot); }
         }
-        
         traverse(document);
         return items;
     }
     return extractDOM();
     """
-    
     try:
         elements = driver.execute_script(js_code)
-        return {
-            "title": driver.title,
-            "url": driver.current_url,
-            "elements": elements
-        }
+        return {"title": driver.title, "url": driver.current_url, "elements": elements}
     except Exception as e:
-        print(f"  [Browser] Warning: JS DOM extraction failed: {e}")
         return {"title": driver.title, "url": driver.current_url, "elements": []}
 
 
-_USERNAME_SELECTORS = [
-    "input[autocomplete='username']",
-    "input[autocomplete='email']",
-    "input[type='email']",
-    "input[name='email']",
-    "input[name='username']",
-    "input[name='login']",
-    "input[name='user']",
-    "input[id*='email']",
-    "input[id*='user']",
-    "input[placeholder*='email' i]",
-    "input[placeholder*='username' i]",
-    "input[type='text']",   # broad fallback
-]
 
-_PASSWORD_SELECTORS = [
-    "input[type='password']",
-    "input[autocomplete='current-password']",
-    "input[name='password']",
-    "input[name='pass']",
-]
-
-_SUBMIT_SELECTORS = [
-    "button[type='submit']",
-    "input[type='submit']",
-    "button[id*='login' i]",
-    "button[id*='signin' i]",
-]
+_MAX_RETRIES = 3
+_RETRY_DELAY = 1.5
+_ACTION_TIMEOUT = 10
 
 
-def _find_first(driver, css_list):
-    """Return the first visible element matching any selector in the list."""
-    from selenium.webdriver.common.by import By
-
-    for css in css_list:
+def _retry(fn, name: str = "action"):
+    """Retry wrapper with timeout."""
+    for attempt in range(1, _MAX_RETRIES + 1):
         try:
-            els = driver.find_elements(By.CSS_SELECTOR, css)
-            for el in els:
-                if el.is_displayed() and el.is_enabled():
-                    return el
-        except Exception:
-            pass
-    return None
+            return fn()
+        except Exception as e:
+            if attempt == _MAX_RETRIES:
+                raise
+            print(f"  [Browser] {name} attempt {attempt} failed: {e} — retrying...")
+            time.sleep(_RETRY_DELAY * attempt)
 
 
-def browser_login(url: str, username: str, password: str, model=None, tokenizer=None, device=None) -> str:
-    from selenium.webdriver.common.keys import Keys
+def _make_helpers(driver):
+    """Create click_element / fill_element / upload_file bound to this driver."""
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.common.keys import Keys
 
-    driver = _make_driver(headless=False)
-    
-    # SSO fast path delegation
-    sso_providers = ["google", "apple", "github", "facebook", "microsoft"]
-    if username.lower() in sso_providers and not password and model is not None:
-        print(f"  [Browser] SSO Login detected ({username}). Delegating to AI task...")
-        return browser_task(url, f"Log into this page using the 'Continue with {username}' button.", model, tokenizer, device, existing_driver=driver)
+    def click_element(iris_id):
+        def _do():
+            el = driver.execute_script(f"return window.findIrisElement('{iris_id}')")
+            if not el:
+                raise Exception(f"Element iris_id={iris_id} not found")
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+            time.sleep(0.3)
+            el.click()
+            time.sleep(0.5)
+        _retry(_do, f"click #{iris_id}")
 
-    try:
-        print(f"  [Browser] Navigating to {url}")
-        driver.get(url)
-        time.sleep(2.5)
+    def fill_element(iris_id, text: str):
+        def _do():
+            el = driver.execute_script(f"return window.findIrisElement('{iris_id}')")
+            if not el:
+                raise Exception(f"Element iris_id={iris_id} not found")
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+            time.sleep(0.3)
+            el.clear()
+            el.send_keys(text)
+            time.sleep(0.3)
+        _retry(_do, f"fill #{iris_id}")
 
-        # ── Step 1: fill username ────────────────────────────────────────────
-        user_el = _find_first(driver, _USERNAME_SELECTORS)
-        if not user_el:
-            if model is not None:
-                print("  [Browser] CSS selectors failed. Delegating to AI task...")
-                return browser_task("", f"Log into this page using username '{username}' and password '{password}'.", model, tokenizer, device, existing_driver=driver)
-            return (
-                "⚠️ Could not find a username / email field on that page.\n"
-                "The browser is open — you can log in manually."
-            )
-        user_el.clear()
-        user_el.send_keys(username)
-        print(f"  [Browser] Filled username field.")
+    def upload_file(iris_id, file_path: str):
+        """Upload a file to a file input element."""
+        def _do():
+            el = driver.execute_script(f"return window.findIrisElement('{iris_id}')")
+            if not el:
+                raise Exception(f"Element iris_id={iris_id} not found")
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+            time.sleep(0.3)
+            abs_path = os.path.abspath(file_path)
+            if not os.path.exists(abs_path):
+                raise Exception(f"File not found: {abs_path}")
+            el.send_keys(abs_path)
+            time.sleep(1.0)
+        _retry(_do, f"upload #{iris_id}")
 
-        # ── Step 2: look for password on same page ───────────────────────────
-        pass_el = _find_first(driver, _PASSWORD_SELECTORS)
+    def select_option(iris_id, option_text: str):
+        """Select a dropdown option by visible text."""
+        def _do():
+            el = driver.execute_script(f"return window.findIrisElement('{iris_id}')")
+            if not el:
+                raise Exception(f"Element iris_id={iris_id} not found")
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+            time.sleep(0.3)
+            from selenium.webdriver.support.ui import Select
+            Select(el).select_by_visible_text(option_text)
+            time.sleep(0.3)
+        _retry(_do, f"select #{iris_id}")
 
-        if not pass_el:
-            # Two-step flow: submit username first
-            print("  [Browser] Password field not visible yet — submitting username.")
-            sub_el = _find_first(driver, _SUBMIT_SELECTORS)
-            if sub_el:
-                sub_el.click()
-            else:
-                user_el.send_keys(Keys.RETURN)
+    return {
+        "driver": driver,
+        "By": By,
+        "WebDriverWait": WebDriverWait,
+        "EC": EC,
+        "Keys": Keys,
+        "time": time,
+        "json": json,
+        "click_element": click_element,
+        "fill_element": fill_element,
+        "upload_file": upload_file,
+        "select_option": select_option,
+    }
 
-            # Wait up to 8 s for password field to appear
+
+
+def parse_resume(file_path: str) -> Dict[str, str]:
+    """Extract structured data from a resume PDF.
+
+    Returns dict with keys: name, email, phone, location, skills, experience_years, education.
+    Falls back gracefully if pypdf is unavailable.
+    """
+    result = {
+        "name": "", "email": "", "phone": "", "location": "",
+        "skills": "", "experience_years": "", "education": "", "raw_text": ""
+    }
+
+    if not os.path.exists(file_path):
+        return result
+
+    text = ""
+    ext = os.path.splitext(file_path)[1].lower()
+
+    if ext == ".pdf":
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(file_path)
+            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        except ImportError:
             try:
-                WebDriverWait(driver, 8).until(
-                    EC.visibility_of_element_located(
-                        (By.CSS_SELECTOR, "input[type='password']")
-                    )
-                )
+                import subprocess, tempfile
+                with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp:
+                    subprocess.run(["pdftotext", file_path, tmp.name], timeout=15, capture_output=True)
+                    text = open(tmp.name).read()
+                    os.unlink(tmp.name)
             except Exception:
-                pass
-            pass_el = _find_first(driver, _PASSWORD_SELECTORS)
-
-        if not pass_el:
-            if model is not None:
-                print("  [Browser] Password selector failed. Delegating to AI task...")
-                return browser_task("", f"Find the password field, fill it with '{password}' and submit.", model, tokenizer, device, existing_driver=driver)
-            return (
-                "⚠️ Could not find a password field after submitting your username.\n"
-                "The browser is open — please complete the login manually."
-            )
-
-        # ── Step 3: fill password and submit ────────────────────────────────
-        pass_el.clear()
-        pass_el.send_keys(password)
-        print("  [Browser] Filled password field.")
-
-        sub_el = _find_first(driver, _SUBMIT_SELECTORS)
-        if sub_el:
-            sub_el.click()
-        else:
-            pass_el.send_keys(Keys.RETURN)
-
-        time.sleep(3)
-        new_title = driver.title
-        print(f"  [Browser] After login → '{new_title}'")
-
-        return (
-            f"✅ Login submitted on **{url}**.\n"
-            f"Current page: **{new_title}**\n\n"
-            "The browser is open — check if you're logged in.\n"
-            "If 2FA or a CAPTCHA appeared, please complete it manually."
-        )
-
-    except Exception as exc:
-        try:
-            driver.quit()
+                text = "[Could not extract PDF — install pypdf: pip install pypdf]"
         except Exception:
-            pass
-        return f"❌ Login automation failed: {exc}"
+            text = "[PDF extraction failed]"
 
-    # Intentionally NOT calling driver.quit() — keep the browser open.
+    elif ext in (".docx", ".doc"):
+        try:
+            from docx import Document
+            doc = Document(file_path)
+            text = "\n".join(p.text for p in doc.paragraphs)
+        except ImportError:
+            text = "[Could not extract DOCX — install python-docx: pip install python-docx]"
+        except Exception:
+            text = "[DOCX extraction failed]"
+
+    else:
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                text = f.read()
+        except Exception:
+            text = f"[Could not read {ext} file]"
+
+    result["raw_text"] = text[:8000]
+
+    if not text or text.startswith("["):
+        return result
+
+    email_match = re.search(r'[\w.+-]+@[\w-]+\.[\w.-]+', text)
+    if email_match:
+        result["email"] = email_match.group(0)
+
+    phone_match = re.search(
+        r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', text
+    )
+    if phone_match:
+        result["phone"] = phone_match.group(0).strip()
+
+    lines = [l.strip() for l in text.split("\n") if l.strip() and len(l.strip()) > 2]
+    for line in lines[:5]:
+        if "@" in line or re.search(r'\d{3}[-.]\d{3}', line):
+            continue
+        if re.match(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+$', line) and 5 < len(line) < 50:
+            result["name"] = line
+            break
+
+    loc_match = re.search(
+        r'([A-Z][a-z]+,\s*[A-Z]{2}\s*\d{5})|'
+        r'([A-Z][a-z]+,\s*[A-Z]{2}(?:\s|$))|'
+        r'([A-Z][a-z]+,\s*(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY))',
+        text
+    )
+    if loc_match:
+        result["location"] = loc_match.group(0).strip()
+
+    skills_section = re.search(
+        r'(?:SKILLS|TECHNICAL SKILLS|CORE COMPETENCIES|TECHNOLOGIES)[:\s]*(.+?)(?:\n\n|\n[A-Z][A-Z\s]{3,}|$)',
+        text, re.IGNORECASE | re.DOTALL
+    )
+    if skills_section:
+        result["skills"] = skills_section.group(1).strip()[:500]
+
+    exp_match = re.search(r'(\d+)\+?\s*(?:years|yrs)(?:\s+of)?\s+experience', text, re.IGNORECASE)
+    if exp_match:
+        result["experience_years"] = exp_match.group(1)
+
+    edu_match = re.search(
+        r'(?:EDUCATION|ACADEMIC)[:\s]*(.+?)(?:\n\n|\n[A-Z][A-Z\s]{3,}|$)',
+        text, re.IGNORECASE | re.DOTALL
+    )
+    if edu_match:
+        result["education"] = edu_match.group(1).strip()[:500]
+
+    return result
 
 
-# ── Generic browser task ───────────────────────────────────────────────────────
 
-def browser_task(url: str, task: str, model=None, tokenizer=None, device=None, existing_driver=None) -> str:
+_FIELD_MAP = {
+    "first_name":     "first_name",   "firstname":      "first_name",
+    "given_name":     "first_name",   "fname":          "first_name",
+    "last_name":      "last_name",    "lastname":       "last_name",
+    "surname":        "last_name",    "family_name":    "last_name",
+    "lname":          "last_name",
+    "full_name":      "full_name",
+
+    "email":          "email",        "email_address":  "email",
+    "phone":          "phone",        "phone_number":   "phone",
+    "mobile":         "phone",        "cell":           "phone",
+    "telephone":      "phone",
+
+    "location":       "location",     "city":           "location",
+    "address":        "location",     "country":        "location",
+
+    "resume":         "resume",       "cv":             "resume",
+    "upload_resume":  "resume",       "upload_cv":      "resume",
+    "attach_resume":  "resume",       "resume_upload":  "resume",
+    "file":           "resume",       "attachment":     "resume",
+
+    "cover_letter":   "cover_letter", "coverletter":    "cover_letter",
+    "cover":          "cover_letter",
+
+    "linkedin":       "linkedin",     "linkedin_url":   "linkedin",
+    "website":        "website",      "portfolio":      "website",
+    "github":         "website",      "url":            "website",
+
+    "race":           "demographic",  "ethnicity":      "demographic",
+    "gender":         "demographic",  "pronouns":       "demographic",
+    "veteran":        "demographic",  "disability":     "demographic",
+
+    "work_auth":      "work_auth",    "sponsorship":    "work_auth",
+    "visa":           "work_auth",    "eligible":       "work_auth",
+    "authorized":     "work_auth",    "citizen":        "work_auth",
+
+    "school":         "education",    "university":     "education",
+    "college":        "education",    "degree":         "education",
+    "education":      "education",    "major":          "education",
+
+    "experience":     "experience_years", "years_of_experience": "experience_years",
+    "total_years":    "experience_years",
+
+    "salary":         "skip",         "compensation":   "skip",
+    "desired_pay":    "skip",         "expected_salary":"skip",
+
+    "current_company":"experience",   "current_employer":"experience",
+    "company":        "experience",   "employer":       "experience",
+    "job_title":      "experience",   "title":          "experience",
+
+    "how_did_you_hear":"source",      "referral":       "source",
+    "source":         "source",       "referred_by":    "source",
+    "hear_about":    "source",       "hear":           "source",
+}
+
+
+def _infer_field_type(element: dict) -> Tuple[str, str]:
+    """Given a DOM element, return (field_type, is_upload).
+
+    field_type is one of: first_name, last_name, full_name, email, phone,
+    location, resume, cover_letter, linkedin, website, demographic, work_auth,
+    education, experience_years, skip, source, unknown
     """
-    Open *url* in a visible Chrome window and execute an arbitrary *task*
-    using AI-generated Selenium code.
+    text = (element.get("text") or "").lower()
+    name = (element.get("name") or "").lower()
+    tag = element.get("tag", "").lower()
+    etype = (element.get("type") or "").lower()
 
-    Flow
-    ----
-    1. Navigate to the URL.
-    2. Take a page snapshot (inputs, buttons, links, title).
-    3. Ask the Iris model to write Selenium code for the task.
-    4. Execute the generated code inside the live browser session.
-    5. Return a status message; browser stays open.
+    if etype == "file":
+        return ("resume", True)
+
+    search = f"{name} {text} {element.get('placeholder', '')} {element.get('aria-label', '')}".lower()
+
+    search = re.sub(r'[*:·•]+', '', search)
+    search = re.sub(r'\(.*?\)', '', search)
+    search = re.sub(r'\breq\w*\b', '', search)
+
+    for key, field_type in _FIELD_MAP.items():
+        if key in search:
+            return (field_type, False)
+
+    if tag == "input" and etype in ("text", "") and not name and not element.get("placeholder"):
+        if "first" in search or "given" in search:
+            return ("first_name", False)
+        if "last" in search or "sur" in search:
+            return ("last_name", False)
+
+    if tag == "textarea":
+        return ("cover_letter", False)
+
+    return ("unknown", False)
+
+
+
+def browser_autopilot(
+    url: str,
+    task: str,
+    resume_path: Optional[str] = None,
+    max_turns: int = 15,
+    existing_driver=None,
+) -> str:
+    """Multi-turn browser loop: snapshot → plan → execute → repeat until done.
+
+    Args:
+        url: Starting URL
+        task: Natural language description (e.g. "Apply for the Senior Engineer role")
+        resume_path: Optional path to resume PDF for auto-filling
+        max_turns: Maximum snapshot→act cycles
+        existing_driver: Reuse an existing Chrome session
+
+    Returns:
+        Result summary string
     """
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    from selenium.webdriver.common.keys import Keys
+    from .iris import generate_internal_code, ModelRole
+
+    resume = {}
+    if resume_path and os.path.exists(resume_path):
+        print(f"[Browser] Parsing resume: {resume_path}")
+        resume = parse_resume(resume_path)
+        for k, v in resume.items():
+            if v and k != "raw_text":
+                print(f"  ✓ {k}: {v[:60]}")
 
     driver = existing_driver if existing_driver else _make_driver(headless=False)
+    helpers = _make_helpers(driver)
+
+    turn_log = []
+    completed = False
 
     try:
         if url:
-            print(f"  [Browser] Navigating to {url}")
+            print(f"[Browser] Opening: {url}")
             driver.get(url)
-            time.sleep(2.5)
+            time.sleep(3)
 
-        snapshot = _page_snapshot(driver)
-        print(f"  [Browser] Page: {snapshot['title']}")
+        for turn in range(1, max_turns + 1):
+            print(f"\n[Browser] ── Turn {turn}/{max_turns} ──")
 
-        # ── Generate Selenium code via Iris ──────────────────────────────────
-        if model is not None and tokenizer is not None:
-            from .iris import generate_reply
+            snapshot = _page_snapshot(driver)
+            if not snapshot.get("elements"):
+                print("  [Browser] No interactable elements — page may still be loading.")
+                time.sleep(2)
+                snapshot = _page_snapshot(driver)
 
-            code_prompt = f"""You are a Selenium automation expert writing Python code.
+            field_hints = []
+            upload_elements = []
+            for el in snapshot.get("elements", []):
+                ftype, is_upload = _infer_field_type(el)
+                if ftype != "unknown":
+                    val = None
+                    if is_upload and resume_path:
+                        val = resume_path
+                        upload_elements.append(el["id"])
+                    elif ftype == "first_name" and resume.get("name"):
+                        parts = resume["name"].split()
+                        if len(parts) >= 1:
+                            val = parts[0]
+                    elif ftype == "last_name" and resume.get("name"):
+                        parts = resume["name"].split()
+                        if len(parts) >= 2:
+                            val = parts[-1]
+                    elif ftype == "full_name" and resume.get("name"):
+                        val = resume["name"]
+                    elif ftype == "email" and resume.get("email"):
+                        val = resume["email"]
+                    elif ftype == "phone" and resume.get("phone"):
+                        val = resume["phone"]
+                    elif ftype == "location" and resume.get("location"):
+                        val = resume["location"]
+                    elif ftype == "experience_years" and resume.get("experience_years"):
+                        val = resume["experience_years"]
+                    elif ftype == "linkedin":
+                        val = "https://linkedin.com/in/iris-ai"
+                    elif ftype == "website":
+                        val = "https://iris-ai.app"
+                    elif ftype == "work_auth":
+                        val = "Yes"
+                    elif ftype == "demographic":
+                        val = "Prefer not to say"
+                    elif ftype == "source":
+                        val = "LinkedIn"
+                    elif ftype == "skip":
+                        val = None
+                    elif ftype == "education" and resume.get("education"):
+                        val = resume["education"][:200]
+                    elif ftype == "cover_letter":
+                        val = "[Generated cover letter — see below]"
 
-The Selenium WebDriver is already running. You have access to `driver` (a Chrome instance).
-Also pre-imported: By, WebDriverWait, EC, Keys, time.
+                    if val:
+                        field_hints.append({
+                            "iris_id": el["id"],
+                            "field_type": ftype,
+                            "suggested_value": str(val),
+                            "element": el,
+                        })
 
-We have injected a JS script that assigns a unique `data-iris-id` (an integer) to all interactable elements (including inside Shadow DOMs).
-You have access to two powerful helper functions in your environment:
-1. `click_element(iris_id)` - Scrolls to and clicks the element with the given ID.
-2. `fill_element(iris_id, text)` - Scrolls to, clears, and types `text` into the element with the given ID.
+            prompt_parts = [
+                "You are a Selenium automation expert. You have ONE turn to act on the current page.",
+                "",
+                f"TASK: {task}",
+                f"TURN: {turn}/{max_turns}",
+            ]
 
-Current page snapshot (JSON list of interactable elements):
-{json.dumps(snapshot.get('elements', []), indent=2, ensure_ascii=False)}
+            if turn == 1:
+                prompt_parts.append("PHASE: This is the FIRST turn. Navigate, search, or start filling the form.")
 
-Task to complete: {task}
+            if field_hints:
+                prompt_parts.append("")
+                prompt_parts.append("AUTO-DETECTED FORM FIELDS (use these values):")
+                for h in field_hints:
+                    prompt_parts.append(
+                        f"  iris_id={h['iris_id']}  field={h['field_type']}  "
+                        f"value={h['suggested_value'][:60]}  element={json.dumps(h['element'])}"
+                    )
 
-Rules:
-- PREFER using `click_element(id)` and `fill_element(id, text)` based on the IDs in the snapshot. This is much safer than writing CSS selectors!
-- If the task requires multiple steps (like searching then clicking a result), use `time.sleep(3)` after clicking to allow the page or popup to load before interacting with the next element.
-- Do NOT create a new driver or call driver.quit().
-- print() a one-line summary of what happened at the very end.
-- Output ONLY raw Python code. No markdown, no explanation.
-"""
-            raw_code = generate_reply(
-                model, tokenizer, code_prompt, device, max_new_tokens=512
+            if upload_elements:
+                prompt_parts.append("")
+                prompt_parts.append("FILE UPLOAD elements detected — use upload_file(id, path) for these:")
+                prompt_parts.append(f"  IDs: {upload_elements}")
+                prompt_parts.append(f"  Resume path: {resume_path}")
+
+            prompt_parts.append("")
+            prompt_parts.append("CURRENT PAGE SNAPSHOT:")
+            prompt_parts.append(json.dumps(snapshot.get("elements", []), indent=2, ensure_ascii=False))
+            prompt_parts.append("")
+            prompt_parts.append("AVAILABLE FUNCTIONS:")
+            prompt_parts.append("  click_element(id)    — click a button/link")
+            prompt_parts.append("  fill_element(id, text) — type into a field")
+            prompt_parts.append("  upload_file(id, path)  — attach a file (<input type=file>)")
+            prompt_parts.append("  select_option(id, text)— pick from a dropdown")
+            prompt_parts.append("  time.sleep(n)          — wait for page load")
+            prompt_parts.append("")
+            prompt_parts.append("RULES:")
+            prompt_parts.append("- Complete AS MUCH as possible this turn.")
+            prompt_parts.append("- If you see a submit/next/continue button AND all required fields are filled, CLICK IT.")
+            prompt_parts.append("- If you reach a confirmation page ('thank you', 'application submitted'), print('DONE').")
+            prompt_parts.append("- After clicking, use time.sleep(3) for page transitions.")
+            prompt_parts.append("- Prefer the suggested values from AUTO-DETECTED FORM FIELDS above.")
+            prompt_parts.append("- Output ONLY raw Python. No markdown, no explanation.")
+
+            code_prompt = "\n".join(prompt_parts)
+
+            raw_code = generate_internal_code(
+                system_prompt="You are a Selenium automation expert.",
+                user_prompt=code_prompt,
+                max_tokens=1024,
+                role=ModelRole.ROUTER,
             )
-            # Strip any accidental markdown fences
             raw_code = raw_code.strip()
             if raw_code.startswith("```"):
                 raw_code = "\n".join(raw_code.split("\n")[1:])
             if raw_code.endswith("```"):
                 raw_code = "\n".join(raw_code.split("\n")[:-1])
+
+            print(f"  [Browser] Generated {len(raw_code)} bytes of automation code")
+
+            captured = io.StringIO()
+            try:
+                with redirect_stdout(captured):
+                    exec(raw_code, helpers)
+                output = captured.getvalue().strip()
+            except Exception as exec_err:
+                output = f"Error: {exec_err}"
+                print(f"  [Browser] Turn {turn} failed: {exec_err}")
+
+            turn_log.append({"turn": turn, "url": driver.current_url, "title": driver.title, "output": output})
+
+            print(f"  [Browser] Turn {turn} → {driver.title}")
+
+            page_text = (driver.title + " " + driver.page_source[:2000]).lower()
+            done_signals = [
+                "thank you", "application submitted", "applied successfully",
+                "we've received", "confirmation", "your application has been",
+                "submitted", "successfully applied"
+            ]
+            if any(sig in page_text for sig in done_signals) or "DONE" in output:
+                print("[Browser] ✅ Application appears complete!")
+                completed = True
+                break
+
+            time.sleep(1.5)
+
+        if completed:
+            summary = f"✅ Application submitted successfully on **{driver.title}**.\n"
         else:
-            # No model — fall back to a simple "just navigate" result
-            return (
-                f"Opened **{snapshot['title']}** at {url}.\n"
-                "No AI model available to automate further steps — "
-                "the browser is open for manual use."
+            summary = (
+                f"⚠️ Reached turn limit ({max_turns}). The browser is open — "
+                f"you can complete manually.\nLast page: **{driver.title}**\n\n"
             )
 
-        # ── Execute the generated code inside the live session ───────────────
-        import io
-        from contextlib import redirect_stdout
+        summary += f"URL: {driver.current_url}\n"
+        summary += f"Turns completed: {len(turn_log)}/{max_turns}\n"
 
-        def click_element(iris_id):
-            el = driver.execute_script(f"return window.findIrisElement('{iris_id}')")
-            if el:
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
-                time.sleep(0.5)
-                el.click()
-            else:
-                raise Exception(f"Element with iris_id {iris_id} not found")
+        if turn_log:
+            summary += "\nTurn log:\n"
+            for t in turn_log:
+                summary += f"  Turn {t['turn']}: {t['title'][:60]} — {t['output'][:80]}\n"
 
-        def fill_element(iris_id, text):
-            el = driver.execute_script(f"return window.findIrisElement('{iris_id}')")
-            if el:
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
-                time.sleep(0.5)
-                el.clear()
-                el.send_keys(text)
-            else:
-                raise Exception(f"Element with iris_id {iris_id} not found")
+        if resume and resume.get("raw_text"):
+            fields_found = [k for k, v in resume.items() if v and k != "raw_text"]
+            summary += f"\nResume parsed: {', '.join(fields_found)}"
 
-        exec_env = {
-            "driver": driver,
-            "By": By,
-            "WebDriverWait": WebDriverWait,
-            "EC": EC,
-            "Keys": Keys,
-            "time": time,
-            "json": json,
-            "click_element": click_element,
-            "fill_element": fill_element,
-        }
+        return summary
+
+    finally:
+        if not existing_driver:
+            pass
+
+
+
+def browser_task(url: str, task: str, existing_driver=None) -> str:
+    """Single-turn browser task (original API)."""
+    driver = existing_driver if existing_driver else _make_driver(headless=False)
+    from .iris import generate_internal_code, ModelRole
+
+    try:
+        if url:
+            driver.get(url)
+            time.sleep(2.5)
+        snapshot = _page_snapshot(driver)
+        helpers = _make_helpers(driver)
+
+        code_prompt = f"""You are a Selenium automation expert.
+Functions: click_element(id), fill_element(id, text), time.sleep(n)
+
+Page snapshot:
+{json.dumps(snapshot.get('elements', []), indent=2, ensure_ascii=False)}
+
+Task: {task}
+
+Output ONLY raw Python code. No markdown."""
+
+        raw_code = generate_internal_code(
+            system_prompt="You are a Selenium automation expert.",
+            user_prompt=code_prompt,
+            max_tokens=512,
+            role=ModelRole.ROUTER,
+        )
+        raw_code = raw_code.strip()
+        if raw_code.startswith("```"):
+            raw_code = "\n".join(raw_code.split("\n")[1:])
+        if raw_code.endswith("```"):
+            raw_code = "\n".join(raw_code.split("\n")[:-1])
 
         captured = io.StringIO()
-        try:
-            with redirect_stdout(captured):
-                exec(raw_code, exec_env)   # noqa: S102
-            output = captured.getvalue().strip()
-            time.sleep(1.5)
-            final_title = driver.title
+        with redirect_stdout(captured):
+            exec(raw_code, helpers)
+        output = captured.getvalue().strip()
 
-            result = (
-                f"✅ Browser task complete on **{url}**.\n"
-                f"Final page: **{final_title}**"
-            )
-            if output:
-                result += f"\n\nAutomation log:\n```\n{output}\n```"
-            result += "\n\nThe browser is open — check the result."
-            return result
+        return f"✅ Browser task complete. Final page: **{driver.title}**\n\n{output}"
+    except Exception as e:
+        return f"❌ Browser task failed: {e}"
 
-        except Exception as exec_err:
-            time.sleep(1)
-            return (
-                f"⚠️ Automation partially failed: {exec_err}\n\n"
-                f"Generated code that was attempted:\n```python\n{raw_code}\n```\n\n"
-                "The browser is open — you can complete the task manually."
-            )
 
-    except Exception as exc:
-        try:
-            driver.quit()
-        except Exception:
-            pass
-        return f"❌ Browser task failed: {exc}"
+def browser_login(url: str, username: str, password: str) -> str:
+    """Quick login helper."""
+    driver = _make_driver(headless=False)
+    try:
+        driver.get(url)
+        time.sleep(2.5)
+        helpers = _make_helpers(driver)
 
-    # Intentionally NOT calling driver.quit() — keep browser open.
+        from .iris import generate_internal_code, ModelRole
+        prompt = (
+            f"Log into this page with username '{username}' and password '{password}'.\n"
+            f"Page elements: {json.dumps(_page_snapshot(driver).get('elements', []), indent=2)}\n"
+            "Use fill_element(id, text) and click_element(id). Output raw Python only."
+        )
+        code = generate_internal_code(
+            system_prompt="Login automation expert.",
+            user_prompt=prompt, max_tokens=256, role=ModelRole.ROUTER
+        ).strip()
+        exec(code, helpers)
+        time.sleep(2)
+        return f"✅ Logged in. Currently at: **{driver.title}** — {driver.current_url}"
+    except Exception as e:
+        return f"❌ Login failed: {e}"

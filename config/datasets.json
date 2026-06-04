@@ -1,45 +1,162 @@
 {
   "triage": {
     "huggingface": [
-      {"path": "blended_skill_talk", "max_samples": 5000},
-      {"path": "daily_dialog", "max_samples": 5000}
+      {
+        "path": "MBZUAI-Paris/Egyptian-SFT-Mixture",
+        "max_samples": 8000
+      },
+      {
+        "path": "HuggingFaceH4/ultrachat_200k",
+        "max_samples": 8000
+      },
+      {
+        "path": "OpenAssistant/oasst1",
+        "max_samples": 8000
+      },
+      {
+        "path": "blended_skill_talk",
+        "max_samples": 8000
+      },
+      {
+        "path": "daily_dialog",
+        "max_samples": 8000
+      }
     ],
-    "local_dirs": ["training/general", "training/shared"]
+    "local_dirs": [
+      "training/general",
+      "training/shared"
+    ]
   },
   "router": {
-    "huggingface": [],
-    "local_dirs": ["training/control", "training/shared"]
+    "huggingface": [
+      {
+        "path": "NousResearch/hermes-function-calling-v1",
+        "max_samples": 8000
+      },
+      {
+        "path": "Jofthomas/hermes-function-calling-thinking-V1",
+        "max_samples": 8000
+      }
+    ],
+    "local_dirs": [
+      "training/control",
+      "training/shared"
+    ]
   },
   "math": {
     "huggingface": [
-      {"path": "EleutherAI/hendrycks_math", "max_samples": 5000},
-      {"path": "deepmind/math_dataset", "max_samples": 5000}
+      {
+        "path": "AI-MO/NuminaMath-CoT",
+        "max_samples": 8000
+      },
+      {
+        "path": "meta-math/MetaMathQA",
+        "max_samples": 8000
+      },
+      {
+        "path": "EleutherAI/hendrycks_math",
+        "max_samples": 8000
+      },
+      {
+        "path": "deepmind/math_dataset",
+        "max_samples": 8000
+      }
     ],
-    "local_dirs": ["training/math", "training/shared"]
+    "local_dirs": [
+      "training/math",
+      "training/shared"
+    ]
   },
   "code": {
     "huggingface": [
-      {"path": "m-a-p/CodeFeedback-Filtered-Instruction", "max_samples": 5000}
+      {
+        "path": "ise-uiuc/Magicoder-OSS-Instruct-75K",
+        "max_samples": 8000
+      },
+      {
+        "path": "nvidia/OpenCodeReasoning",
+        "max_samples": 8000
+      },
+      {
+        "path": "bigcode/self-oss-instruct-sc2-exec-filter-50k",
+        "max_samples": 8000
+      },
+      {
+        "path": "m-a-p/CodeFeedback-Filtered-Instruction",
+        "max_samples": 8000
+      }
     ],
-    "local_dirs": ["training/coding", "training/shared"]
+    "local_dirs": [
+      "training/coding",
+      "training/shared"
+    ]
   },
   "reasoning": {
     "huggingface": [
-      {"path": "angrygiraffe/claude-opus-4.6-4.7-reasoning-8.7k", "max_samples": 8000},
-      {"path": "allenai/Dolci-Think-SFT-7B", "max_samples": 8000},
-      {"path": "prithivMLmods/Deepthink-Reasoning", "max_samples": 8000},
-      {"path": "trjxter/DeepSeek-V4-Pro-Reasoning-8000x", "max_samples": 8000},
-      {"path": "Jackrong/GLM-5.1-Reasoning-1M-Cleaned", "max_samples": 8000},
-      {"path": "teknium/OpenHermes-2.5", "max_samples": 8000}
+      {
+        "path": "nvidia/Daring-Anteater",
+        "max_samples": 8000
+      },
+      {
+        "path": "HuggingFaceH4/ultrachat_200k",
+        "max_samples": 8000
+      },
+      {
+        "path": "angrygiraffe/claude-opus-4.6-4.7-reasoning-8.7k",
+        "max_samples": 8000
+      },
+      {
+        "path": "allenai/Dolci-Think-SFT-7B",
+        "max_samples": 8000
+      },
+      {
+        "path": "prithivMLmods/Deepthink-Reasoning",
+        "max_samples": 8000
+      },
+      {
+        "path": "teknium/OpenHermes-2.5",
+        "max_samples": 8000
+      }
     ],
-    "local_dirs": ["training/reasoning", "training/shared"]
+    "local_dirs": [
+      "training/reasoning",
+      "training/shared"
+    ]
   },
   "general": {
     "huggingface": [
-      {"path": "blended_skill_talk", "max_samples": 5000},
-      {"path": "daily_dialog", "max_samples": 5000},
-      {"path": "teknium/OpenHermes-2.5", "max_samples": 5000}
+      {
+        "path": "MBZUAI-Paris/Egyptian-SFT-Mixture",
+        "max_samples": 8000
+      },
+      {
+        "path": "HuggingFaceH4/ultrachat_200k",
+        "max_samples": 8000
+      },
+      {
+        "path": "OpenAssistant/oasst1",
+        "max_samples": 8000
+      },
+      {
+        "path": "databricks/databricks-dolly-15k",
+        "max_samples": 8000
+      },
+      {
+        "path": "blended_skill_talk",
+        "max_samples": 8000
+      },
+      {
+        "path": "daily_dialog",
+        "max_samples": 8000
+      },
+      {
+        "path": "teknium/OpenHermes-2.5",
+        "max_samples": 8000
+      }
     ],
-    "local_dirs": ["training/general", "training/shared"]
+    "local_dirs": [
+      "training/general",
+      "training/shared"
+    ]
   }
 }

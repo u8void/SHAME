@@ -338,50 +338,29 @@ def save_settings():
 
 @app.route("/model_status", methods=["GET"])
 def model_status():
-    from src.iris import _active_model, ModelRole, load_generation_config
-    
+    from src.iris import _active_role, load_generation_config, ModelRole, DEFAULT_MODEL_FILES
+
     active_role = None
     active_file = None
-    if _active_model and "role" in _active_model:
-        active_role = _active_model["role"].value
-        
+    if _active_role is not None:
+        active_role = _active_role.value
         cfg = load_generation_config()
         models_dict = cfg.get("models", {})
-        active_file = models_dict.get(active_role)
-        if not active_file:
-            defaults = {
-                "triage":    "iris-triage.gguf",
-                "router":    "iris-router.gguf",
-                "math":      "iris-math.gguf",
-                "code":      "iris-code.gguf",
-                "reasoning": "iris-reasoning.gguf",
-                "general":   "iris-general.gguf",
-                "vision":    "iris-vision.gguf",
-                "clip":      "iris-clip.bin"
-            }
-            active_file = defaults.get(active_role)
-            
+        active_file = models_dict.get(active_role) or DEFAULT_MODEL_FILES.get(active_role)
+
     available = {}
     cfg = load_generation_config()
     models_dict = cfg.get("models", {})
-    defaults = {
-        "triage":    "iris-triage.gguf",
-        "router":    "iris-router.gguf",
-        "math":      "iris-math.gguf",
-        "code":      "iris-code.gguf",
-        "reasoning": "iris-reasoning.gguf",
-        "general":   "iris-general.gguf",
-        "vision":    "iris-vision.gguf",
-        "clip":      "iris-clip.bin"
-    }
-    
     models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
-    for role in list(ModelRole) + ["vision", "clip"]:
-        role_name = role.value if hasattr(role, "value") else role
-        filename = models_dict.get(role_name) or defaults.get(role_name)
-        path = os.path.join(models_dir, filename)
-        available[role_name] = os.path.exists(path)
-        
+    all_roles = [r.value for r in ModelRole] + ["clip"]
+    for role_name in all_roles:
+        filename = models_dict.get(role_name) or DEFAULT_MODEL_FILES.get(role_name)
+        if filename:
+            path = os.path.join(models_dir, filename)
+            available[role_name] = os.path.exists(path)
+        else:
+            available[role_name] = False
+
     return jsonify({
         "active_role": active_role,
         "active_file": active_file,

@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from benchmark.utils import run_inference, append_to_csv
 from src.iris import ModelRole
 
-NUM_SAMPLES    = 50   # total questions across all subjects
+NUM_SAMPLES    = 50
 FIELDNAMES     = ["Benchmark", "Role", "Prompt", "Expected", "Model_Answer", "Passed", "Time_Sec"]
 CHOICE_LABELS  = ["A", "B", "C", "D"]
 
@@ -33,8 +33,8 @@ SUBJECTS = [
 def _format_question(item: dict) -> tuple[str, str]:
     """Return (formatted_prompt, correct_letter)."""
     q       = item["question"]
-    choices = item["choices"]       # list of 4 strings
-    answer  = item["answer"]        # int 0-3
+    choices = item["choices"]
+    answer  = item["answer"]
 
     choices_text = "\n".join(f"  {CHOICE_LABELS[i]}. {choices[i]}" for i in range(len(choices)))
     prompt = (
@@ -48,20 +48,16 @@ def _format_question(item: dict) -> tuple[str, str]:
 def _extract_letter(response: str) -> str | None:
     """Extract the first A/B/C/D letter from the model response."""
     response = response.strip()
-    # Direct single-letter answer
     m = re.match(r"^\s*([ABCD])\b", response, re.IGNORECASE)
     if m:
         return m.group(1).upper()
-    # "The answer is B" style
     m = re.search(r"(?:answer(?:\s+is)?|correct(?:\s+answer)?(?:\s+is)?)\s*[:\-]?\s*([ABCD])\b",
                   response, re.IGNORECASE)
     if m:
         return m.group(1).upper()
-    # Bold letter **B**
     m = re.search(r"\*{1,2}([ABCD])\*{1,2}", response, re.IGNORECASE)
     if m:
         return m.group(1).upper()
-    # Fallback: first standalone letter
     m = re.search(r"\b([ABCD])\b", response, re.IGNORECASE)
     if m:
         return m.group(1).upper()

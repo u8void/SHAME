@@ -11,4 +11,5 @@ uploads/*
 node_modules/
 *.zip
 scratch/
-
+mlx_data/
+models/

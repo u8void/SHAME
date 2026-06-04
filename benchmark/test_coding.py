@@ -21,11 +21,9 @@ FIELDNAMES = ["Benchmark", "Role", "Prompt", "Expected", "Model_Answer", "Passed
 
 def _extract_python_code(response: str) -> str:
     """Extract the first Python code block from the model response."""
-    # Fenced code block
     m = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL | re.IGNORECASE)
     if m:
         return m.group(1).strip()
-    # If no fence, treat everything after the first def as code
     m = re.search(r"(def\s+\w+.*)", response, re.DOTALL)
     if m:
         return m.group(1).strip()
@@ -69,7 +67,6 @@ def run_coding_benchmark(csv_path: str):
             response, t = run_inference(prompt, role=role)
             extracted_code = _extract_python_code(response)
 
-            # Syntax check using existing syntax_checker
             try:
                 is_valid, err = check_syntax(extracted_code, "python")
                 passed = is_valid

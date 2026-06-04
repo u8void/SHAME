@@ -29,19 +29,15 @@ def _extract_model_answer(response: str) -> str | None:
       - = 42
       - **42**
     """
-    # GSM8K-style delimiter
     m = re.search(r"####\s*([\-\d,\.]+)", response)
     if m:
         return m.group(1).replace(",", "").strip()
-    # "The answer is X" / "answer: X"
     m = re.search(r"(?:answer(?:\s+is)?|result(?:\s+is)?)\s*[:\-]?\s*([\-\d,\.]+)", response, re.IGNORECASE)
     if m:
         return m.group(1).replace(",", "").strip()
-    # bold/boxed number at end of response
     m = re.search(r"\*{1,2}([\-\d,\.]+)\*{1,2}\s*$", response.strip())
     if m:
         return m.group(1).replace(",", "").strip()
-    # last standalone number in response
     nums = re.findall(r"\b([\-]?\d[\d,\.]*)\b", response)
     if nums:
         return nums[-1].replace(",", "").strip()

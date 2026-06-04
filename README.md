@@ -115,7 +115,7 @@ Aggregates pairs from all enabled sources, applies the `is_degenerate` filter, a
 
 #### `SFTDataset`
 
-A `torch.utils.data.Dataset` that tokenizes `(user, bot)` pairs using the `User:/Bot:` format (non-chat-template path). Computes a per-token `loss_mask` that masks the prompt tokens, ensuring loss is computed only on the bot response. Used by the legacy training path in `iris.py` — not used by the current `train.py`.
+A `torch.utils.data.Dataset` that tokenizes `(user, bot)` pairs using `tokenizer.apply_chat_template()`. Computes a per-token `loss_mask` that masks the prompt tokens, ensuring loss is computed only on the bot response. Used by the legacy training path in `iris.py` — not used by the current `train.py`.
 
 #### `collate_fn(batch, tokenizer)`
 
@@ -310,10 +310,6 @@ Returns `{"running": true|false}`.
 
 Sends `SIGTERM` to the training subprocess. Waits up to 5 seconds, then sends `SIGKILL` if it has not exited.
 
-#### Chat History Format in `app.py`
-
-`app.py` uses the legacy `User:/Bot:` prompt format rather than Gemma's chat template. The `history` string is constructed on the client side and passed as a plain-text block. This is distinct from the chat-template-aware loop in `iris.chat()`.
-
 ---
 
 ## Data Sources
@@ -420,7 +416,6 @@ The base model outperforms the fine-tuned model for general tasks such as coding
 
 ## Known Limitations
 
-- `app.py` uses the `User:/Bot:` prompt format rather than Gemma's chat template. This is inconsistent with the training format used in `train.py` and may cause response quality degradation through the web interface.
 - Multi-line `Bot:` responses in markdown files are not supported. Only the first line after `Bot:` is captured by `load_markdown_files()`.
 - The `max_sentences` parameter is accepted by `app.py` and forwarded to `generate_reply()`, but `generate_reply()` in `iris.py` does not implement sentence-count truncation. Passing this argument will raise a `TypeError`.
 - MPS does not support `torch.autocast`, so training runs in raw FP16 without mixed-precision gradient scaling. This is stable for Gemma 2 but may cause gradient underflow on other architectures.

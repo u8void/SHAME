@@ -35,22 +35,75 @@ from src.iris import (
 SYSTEM_PROMPT = "You are Iris, an intelligent and helpful AI assistant trained to assist the user with their tasks."
 
 ROLE_MODEL_MAP = {
-    "triage":    "Qwen/Qwen2.5-3B-Instruct",
-    "router":    "Qwen/Qwen2.5-Coder-7B-Instruct",
+    "triage":    "meta-llama/Llama-3.2-3B-Instruct",
+    "router":    "NousResearch/Hermes-3-Llama-3.1-8B",
+    "control":   "NousResearch/Hermes-3-Llama-3.1-8B",
     "math":      "Qwen/Qwen2.5-Math-7B-Instruct",
-    "code":      "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-    "reasoning": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
-    "general":   "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+    "code":      "Qwen/Qwen2.5-Coder-14B-Instruct",
+    "reasoning": "deepseek-ai/deepseek-llm-14b-chat",
+    "general":   "Qwen/Qwen3.5-9B-Instruct",
+    "vision":    "Qwen/Qwen3-VL-4B-Instruct",
 }
+
+ROLE_TO_GGUF = {
+    "triage":    "iris_001.gguf",
+    "router":    "iris_002.gguf",
+    "control":   "iris_003.gguf",
+    "math":      "iris_004.gguf",
+    "code":      "iris_005.gguf",
+    "reasoning": "iris_006.gguf",
+    "general":   "iris_007.gguf",
+    "vision":    "iris_008.gguf",
+}
+
+# Role → output file numbering
+ROLE_NUMBERS = {
+    "triage":    "001",
+    "router":    "002",
+    "control":   "003",
+    "math":      "004",
+    "code":      "005",
+    "reasoning": "006",
+    "general":   "007",
+    "vision":    "008",
+}
+
+SIZE_CONFIG = None  # loaded by apply_size_config
+
 
 ROLE_TRAINING_DIRS = {
     "triage":    ["training/general",   "training/shared"],
     "router":    ["training/control",   "training/shared"],
+    "control":   ["training/control",   "training/shared"],
     "math":      ["training/math",      "training/shared"],
     "code":      ["training/coding",    "training/shared"],
     "reasoning": ["training/reasoning", "training/shared"],
     "general":   ["training/general",   "training/shared"],
+    "vision":    ["training/general",   "training/shared"],
 }
+
+
+def load_size_config(size: str) -> dict:
+    """Load a size-tier config from config/sizes/{size}.json and return it."""
+    import json
+    path = os.path.join(os.path.dirname(__file__), "config", "sizes", f"{size}.json")
+    if not os.path.exists(path):
+        print(f"[WARNING] Size config {size}.json not found — falling back to medium.")
+        path = os.path.join(os.path.dirname(__file__), "config", "sizes", "medium.json")
+    with open(path) as f:
+        return json.load(f)
+
+def apply_size_config(size: str):
+    """Override ROLE_MODEL_MAP, ROLE_TO_GGUF, and download URLs from a size config."""
+    cfg = load_size_config(size)
+    desc = cfg.get("_description", size)
+    print(f"[SIZE] Iris AI — {size.upper()} tier")
+    print(f"[SIZE] {desc}")
+    # Override ROLE_MODEL_MAP
+    global ROLE_MODEL_MAP, ROLE_TO_GGUF, SIZE_CONFIG
+    ROLE_MODEL_MAP.update(cfg.get("models", {}))
+    ROLE_TO_GGUF.update(cfg.get("gguf", {}))
+    SIZE_CONFIG = cfg
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Unified GGUF Training for Iris AI")
@@ -59,7 +112,10 @@ def parse_args():
                         help="Roles to train: triage, router, math, code, reasoning, general, all")
     parser.add_argument("--quant-type", choices=["q4_k_m", "q8_0", "f16"], default="q4_k_m",
                         help="GGUF quantization level")
+    parser.add_argument("--size", choices=["tiny", "small", "medium", "large"], default="medium",
+                        help="Iris AI model size tier (tiny/small/medium/large)")
     parser.add_argument("--skip-gguf", action="store_true", help="Skip merge and GGUF conversion")
+    parser.add_argument("--resume", action="store_true", help="Resume training from the last successful checkpoint/model")
     
     parser.add_argument("--model", default=None, help="Override base model ID")
     parser.add_argument("--iters", type=int, default=3000, help="Iterations (MLX) or max pairs (Torch)")
@@ -115,9 +171,23 @@ def load_generic_hf_dataset(path: str, limit: int = None) -> List[Tuple[str, str
     import re
     print(f"[DATA] Attempting to load dataset {path} with generic loader...")
     try:
-        ds = load_dataset(path, split="train")
+        ds = load_dataset(path, split="train", streaming=True)
+        if limit:
+            try:
+                ds = ds.shuffle(buffer_size=10000, seed=42)
+            except Exception:
+                pass
         pairs = []
-        features = ds.features
+        try:
+            features = ds.features
+        except AttributeError:
+            features = None
+            
+        if not features:
+            try:
+                features = next(iter(ds))
+            except StopIteration:
+                return []
         
         if "messages" in features:
             for row in ds:
@@ -179,11 +249,9 @@ def load_generic_hf_dataset(path: str, limit: int = None) -> List[Tuple[str, str
                     if u and b:
                         pairs.append((u, b))
             else:
-                print(f"[WARNING] Could not determine columns for {path}. Available columns: {list(features.keys())}")
+                keys_list = list(features.keys()) if hasattr(features, "keys") else list(features)
+                print(f"[WARNING] Could not determine columns for {path}. Available columns: {keys_list}")
                 
-        if limit and len(pairs) > limit:
-            random.shuffle(pairs)
-            return pairs[:limit]
         return pairs
     except Exception as e:
         print(f"[WARNING] Generic loader failed for {path}: {e}")
@@ -205,7 +273,6 @@ def load_all_data(role: str, max_pairs: int) -> List[Tuple[str, str]]:
         
     pairs = []
     
-    # 1. Load HuggingFace datasets
     for hf_dataset in role_config.get("huggingface", []):
         path = hf_dataset.get("path")
         limit = hf_dataset.get("max_samples", max_pairs)
@@ -223,7 +290,6 @@ def load_all_data(role: str, max_pairs: int) -> List[Tuple[str, str]]:
             except Exception as e:
                 print(f"[WARNING] Failed to load HF dataset {path} using generic loader: {e}")
             
-    # 2. Load local markdown directories
     for local_dir in role_config.get("local_dirs", []):
         if os.path.exists(local_dir):
             print(f"[DATA] Loading local markdown files from: {local_dir}...")
@@ -262,6 +328,61 @@ def export_to_jsonl(pairs: List[Tuple[str, str]], out_dir: str):
     write_jsonl(valid_data, "valid.jsonl")
     print(f"[DATA] Exported {len(train_data)} training and {len(valid_data)} validation samples to {out_dir}")
 
+def base_models_match(configured_base: str, existing_base: str) -> bool:
+    if not configured_base or not existing_base:
+        return False
+    import re
+    def clean(s: str) -> str:
+        s = s.lower()
+        s = s.replace("deepseek-ai/", "").replace("qwen/", "")
+        s = re.sub(r'[^a-z0-9]', '', s)
+        return s
+    cfg_clean = clean(configured_base)
+    ext_clean = clean(existing_base)
+    return (cfg_clean in ext_clean) or (ext_clean in cfg_clean)
+
+def get_gguf_base_model(gguf_path: str):
+    from typing import Optional
+    try:
+        from gguf import GGUFReader
+    except ImportError:
+        return None
+    try:
+        reader = GGUFReader(gguf_path)
+        for key in ["general.base_model.0.name", "general.base_model.0.repo_url", "general.name"]:
+            field = reader.get_field(key)
+            if field is not None:
+                parts = field.parts
+                if not parts:
+                    continue
+                last_part = parts[-1]
+                if isinstance(last_part, (bytes, bytearray)):
+                    return last_part.decode('utf-8', errors='ignore')
+                elif hasattr(last_part, 'tobytes'):
+                    return last_part.tobytes().decode('utf-8', errors='ignore')
+                elif isinstance(last_part, list) or hasattr(last_part, '__iter__'):
+                    try:
+                        return "".join(chr(x) for x in last_part)
+                    except Exception:
+                        pass
+                return str(last_part)
+    except Exception as e:
+        print(f"[WARNING] Could not read GGUF metadata from {gguf_path}: {e}")
+    return None
+
+def check_adapter_base_model_matches(adapter_dir: str, base_model: str) -> bool:
+    config_path = os.path.join(adapter_dir, "adapter_config.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            existing_base = cfg.get("model") or cfg.get("base_model_name_or_path")
+            if existing_base:
+                return base_models_match(base_model, existing_base)
+        except Exception:
+            pass
+    return True
+
 def run_mlx_path(args, role: str):
     print("\n" + "="*60)
     print("  Iris AI — MLX Training Path (Apple Silicon)")
@@ -287,6 +408,23 @@ def run_mlx_path(args, role: str):
         "--max-seq-length", str(args.max_seq_length),
         "--grad-checkpoint"
     ]
+
+    should_resume = getattr(args, "resume", False)
+    if should_resume and os.path.exists(args.output_dir):
+        if not check_adapter_base_model_matches(args.output_dir, args.model):
+            print(f"[INFO] Existing adapter in {args.output_dir} has a different base model. Starting training from scratch.")
+            should_resume = False
+
+    if should_resume and os.path.exists(args.output_dir):
+        resume_file = None
+        for fname in ["adapters.safetensors", "adapters.npz"]:
+            fpath = os.path.join(args.output_dir, fname)
+            if os.path.exists(fpath):
+                resume_file = fpath
+                break
+        if resume_file:
+            print(f"[INFO] Resuming MLX training from adapter file: {resume_file}")
+            train_cmd += ["--resume-adapter-file", resume_file]
 
     print(f"\n[1/3] Starting MLX Training...")
     try:
@@ -406,7 +544,24 @@ def run_torch_path(args, device_type: str, role: str):
     )
 
     print("\n[INFO] Starting HF Trainer...")
-    trainer.train()
+    resume_checkpoint = False
+    should_resume = getattr(args, "resume", False)
+    if should_resume and os.path.exists(args.output_dir):
+        if not check_adapter_base_model_matches(args.output_dir, args.model):
+            print(f"[INFO] Existing adapter in {args.output_dir} has a different base model. Starting training from scratch.")
+            should_resume = False
+
+    if should_resume and os.path.exists(args.output_dir):
+        import glob
+        checkpoints = glob.glob(os.path.join(args.output_dir, "checkpoint-*"))
+        if checkpoints:
+            resume_checkpoint = True
+
+    if resume_checkpoint:
+        print(f"[INFO] Resuming Torch training from checkpoint in {args.output_dir}")
+        trainer.train(resume_from_checkpoint=True)
+    else:
+        trainer.train()
     trainer.save_model(args.output_dir)
     print(f"\n[OK] Training complete. Adapters saved to {args.output_dir}")
 
@@ -428,10 +583,11 @@ def merge_and_save(base_model_id: str, adapter_dir: str, out_dir: str):
     model.save_pretrained(out_dir)
     tokenizer.save_pretrained(out_dir)
 
+
 def convert_to_gguf(hf_adapter_dir: str, role: str, base_model_id: str, is_mlx: bool, quant_type: str = "q4_k_m") -> str:
-    # locate convert script (works for both cmake and legacy make builds)
     convert_script = None
     for candidate in [
+        "./scripts/convert_hf_to_gguf.py",
         "llama.cpp/convert_hf_to_gguf.py",
         "llama.cpp/tools/convert_hf_to_gguf.py",
     ]:
@@ -439,7 +595,7 @@ def convert_to_gguf(hf_adapter_dir: str, role: str, base_model_id: str, is_mlx: 
             convert_script = candidate
             break
     if convert_script is None:
-        print("[GGUF] llama.cpp not found — run: bash setup.sh")
+        print("[GGUF] GGUF converter script not found — run: bash setup.sh")
         return ""
 
     temp_dir = tempfile.mkdtemp()
@@ -457,7 +613,7 @@ def convert_to_gguf(hf_adapter_dir: str, role: str, base_model_id: str, is_mlx: 
             merge_and_save(base_model_id, hf_adapter_dir, temp_dir)
 
         os.makedirs("./models", exist_ok=True)
-        f16_gguf = f"./models/iris-{role}_f16.gguf"
+        f16_gguf = f"./models/iris_{ROLE_NUMBERS.get(role, role)}_f16.gguf"
         print(f"[GGUF] Converting merged model to F16 GGUF...")
         convert_cmd = [
             "python3", convert_script, temp_dir,
@@ -467,29 +623,31 @@ def convert_to_gguf(hf_adapter_dir: str, role: str, base_model_id: str, is_mlx: 
         subprocess.run(convert_cmd, check=True)
 
         quant_type_upper = quant_type.upper()
-        final_gguf = f"./models/iris-{role}.gguf"
+        final_gguf = f"./models/iris_{ROLE_NUMBERS.get(role, role)}.gguf"
 
         if quant_type_upper == "F16":
             os.rename(f16_gguf, final_gguf)
             print(f"[GGUF] ✓ Saved: {final_gguf}")
             return final_gguf
 
-        quantize_tool = "./llama.cpp/llama-quantize"
+        quantize_tool = "llama-quantize"
         found_quantize = False
-        # Search cmake build paths first, then legacy make output
         for path in [
+            "llama-quantize",
+            "quantize",
+            "./scripts/llama-quantize",
             "./llama.cpp/build/bin/llama-quantize",
             "./llama.cpp/build/llama-quantize",
             "./llama.cpp/llama-quantize",
-            "llama-quantize",
         ]:
-            if os.path.exists(path) or (shutil.which(path) if "/" not in path else False):
-                quantize_tool = path
+            resolved = shutil.which(path) if "/" not in path else (path if os.path.exists(path) else None)
+            if resolved:
+                quantize_tool = resolved
                 found_quantize = True
                 break
 
         if not found_quantize:
-            print("[GGUF] llama-quantize not found. Run 'bash setup.sh' to build llama.cpp. Skipping quantization.")
+            print("[GGUF] llama-quantize not found. Run 'brew install llama.cpp' to enable quantization. Skipping quantization.")
             os.rename(f16_gguf, final_gguf)
             print(f"[GGUF] ✓ Saved (F16 fallback): {final_gguf}")
             return final_gguf
@@ -542,6 +700,9 @@ def ensure_training_subdirs():
 def main():
     args = parse_args()
 
+    # Apply size-tier config (overrides ROLE_MODEL_MAP + ROLE_TO_GGUF)
+    apply_size_config(args.size)
+
     ensure_training_subdirs()
 
     if args.device:
@@ -561,67 +722,161 @@ def main():
     print(f"[INFO] Target training device: {target.upper()}")
     print(f"[INFO] Roles to train: {roles_to_train}")
 
+    download_all_models()
+
+    model_override = getattr(args, "_model_override", None)
+    if model_override is None:
+        model_override = args.model
+        args._model_override = model_override
+
     for role in roles_to_train:
         print(f"\n{'='*60}\n  Training: {role.upper()} — {ROLE_MODEL_MAP[role]}\n{'='*60}\n")
         
-        base_model = args.model if args.model else ROLE_MODEL_MAP[role]
+        base_model = model_override if model_override else ROLE_MODEL_MAP[role]
         
         args.model = base_model
         args.output_dir = f"./iris_adapters/{role}"
         args.md_dir = ROLE_TRAINING_DIRS[role]
 
-        if target == "mps":
-            run_mlx_path(args, role)
-        else:
-            run_torch_path(args, target, role)
+        final_gguf = f"./models/iris_{ROLE_NUMBERS.get(role, role)}.gguf"
+        
+        has_finished_adapter = False
+        if os.path.exists(args.output_dir):
+            for fname in ["adapters.safetensors", "adapters.npz", "adapter_model.safetensors", "adapter_model.bin"]:
+                if os.path.exists(os.path.join(args.output_dir, fname)):
+                    has_finished_adapter = True
+                    break
+
+        adapter_matches = True
+        if has_finished_adapter:
+            adapter_matches = check_adapter_base_model_matches(args.output_dir, base_model)
+            
+        gguf_matches = True
+        if os.path.exists(final_gguf) and not args.skip_gguf:
+            gguf_base = get_gguf_base_model(final_gguf)
+            if gguf_base:
+                gguf_matches = base_models_match(base_model, gguf_base)
+
+        skip_training = False
+        if args.resume:
+            if (has_finished_adapter and adapter_matches) or (not args.skip_gguf and os.path.exists(final_gguf) and gguf_matches):
+                skip_training = True
+                print(f"[INFO] Existing model/adapter matches base model '{base_model}' for role '{role}'. Skipping training.")
+            else:
+                if has_finished_adapter and not adapter_matches:
+                    print(f"[INFO] Existing adapter in {args.output_dir} has a different base model. Will train from scratch.")
+                if os.path.exists(final_gguf) and not gguf_matches:
+                    print(f"[INFO] Existing GGUF model {final_gguf} has a different base model. Will train/convert from scratch.")
+
+        if not skip_training:
+            if target == "mps":
+                run_mlx_path(args, role)
+            else:
+                run_torch_path(args, target, role)
 
         if not args.skip_gguf:
-            convert_to_gguf(
-                hf_adapter_dir=args.output_dir,
-                role=role,
-                base_model_id=base_model,
-                is_mlx=(target == "mps"),
-                quant_type=args.quant_type
-            )
+            if not args.resume or not os.path.exists(final_gguf) or not gguf_matches:
+                convert_to_gguf(
+                    hf_adapter_dir=args.output_dir,
+                    role=role,
+                    base_model_id=base_model,
+                    is_mlx=(target == "mps"),
+                    quant_type=args.quant_type
+                )
+            else:
+                print(f"[INFO] GGUF model {final_gguf} already exists and matches base model. Skipping GGUF conversion.")
 
-    check_and_download_default_models()
 
-def check_and_download_default_models():
+def download_all_models():
+    """Download all required GGUF models from Hugging Face before training.
+
+    Downloads the source-named files, then renames to iris_NNN.gguf.
+    If a size config is active, uses its download_urls and source_filenames.
+    """
     import urllib.request
     import time
-    
-    default_urls = {
-        #"iris-triage.gguf":    "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q8_0.gguf",
-        #"iris-router.gguf":    "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
-        #"iris-math.gguf":      "https://huggingface.co/Qwen/Qwen2.5-Math-7B-Instruct-GGUF/resolve/main/qwen2.5-math-7b-instruct-q4_k_m.gguf",
-        #"iris-code.gguf":      "https://huggingface.co/Bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
-        #"iris-reasoning.gguf": "https://huggingface.co/Bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf",
-        #"iris-general.gguf":   "https://huggingface.co/Bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf",
-        "iris-vision.gguf":    "https://huggingface.co/ggml-org/InternVL2_5-4B-GGUF/resolve/main/ggml-model-q4_k.gguf",
-        "iris-clip.bin":       "https://huggingface.co/ggml-org/InternVL2_5-4B-GGUF/resolve/main/mmproj-model-f16.gguf"
-    }
 
     os.makedirs("./models", exist_ok=True)
-    
-    for filename, url in default_urls.items():
-        dest_path = os.path.join("./models", filename)
-        if not os.path.exists(dest_path):
-            print(f"\n[Auto-Download] Missing model file detected: {filename}")
-            print(f"[Auto-Download] Starting download from Hugging Face...")
-            start_time = time.time()
-            try:
-                def progress_hook(count, block_size, total_size):
-                    duration = time.time() - start_time
-                    progress_size = int(count * block_size)
-                    speed = int(progress_size / (1024 * 1024 * max(duration, 0.001))) # MB/s
-                    percent = int(count * block_size * 100 / total_size) if total_size > 0 else 0
-                    sys.stdout.write(f"\r... {percent}% | {progress_size / (1024*1024):.1f} MB | {speed} MB/s | {duration:.1f}s")
-                    sys.stdout.flush()
-                
-                urllib.request.urlretrieve(url, dest_path, progress_hook)
-                print(f"\n[Auto-Download] Successfully saved: {dest_path} ({time.time() - start_time:.1f}s)")
-            except Exception as e:
-                print(f"\n[Auto-Download] Failed to download {filename}: {e}")
+
+    # Build download map: target_name → (url, source_filename)
+    download_map = {}
+
+    if SIZE_CONFIG and "download_urls" in SIZE_CONFIG and "source_filenames" in SIZE_CONFIG:
+        source_map = SIZE_CONFIG["source_filenames"]  # role → source filename
+        url_map = SIZE_CONFIG["download_urls"]         # source_filename → url
+        target_map = SIZE_CONFIG["gguf"]               # role → target filename
+        for role, target_name in target_map.items():
+            src_name = source_map.get(role)
+            url = url_map.get(src_name) if src_name else None
+            if url and src_name:
+                download_map[target_name] = (url, src_name)
+        # Also handle clip
+        clip_src = SIZE_CONFIG.get("clip")
+        if clip_src and clip_src in url_map:
+            download_map[clip_src] = (url_map[clip_src], clip_src)
+    else:
+        # Fallback — hardcoded medium tier
+        fallback = {
+            "iris_001.gguf": ("https://huggingface.co/unsloth/Llama-3.2-3B-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf", "Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
+            "iris_002.gguf": ("https://huggingface.co/NousResearch/Hermes-3-Llama-3.1-8B-GGUF/resolve/main/Hermes-3-Llama-3.1-8B.Q4_K_M.gguf", "Hermes-3-Llama-3.1-8B.Q4_K_M.gguf"),
+            "iris_003.gguf": ("https://huggingface.co/NousResearch/Hermes-3-Llama-3.1-8B-GGUF/resolve/main/Hermes-3-Llama-3.1-8B.Q4_K_M.gguf", "Hermes-3-Llama-3.1-8B.Q4_K_M.gguf"),
+            "iris_004.gguf": ("https://huggingface.co/Qwen/Qwen2.5-Math-7B-Instruct-GGUF/resolve/main/qwen2.5-math-7b-instruct-q4_k_m.gguf", "qwen2.5-math-7b-instruct-q4_k_m.gguf"),
+            "iris_005.gguf": ("https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF/resolve/main/qwen2.5-coder-14b-instruct-q4_k_m.gguf", "qwen2.5-coder-14b-instruct-q4_k_m.gguf"),
+            "iris_006.gguf": ("https://huggingface.co/TheBloke/deepseek-llm-14b-chat-GGUF/resolve/main/deepseek-llm-14b-chat.Q4_K_M.gguf", "deepseek-llm-14b-chat.Q4_K_M.gguf"),
+            "iris_007.gguf": ("https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf", "Qwen3.5-9B-Q4_K_M.gguf"),
+            "iris_008.gguf": ("https://huggingface.co/unsloth/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3-VL-4B-Instruct-Q4_K_M.gguf", "Qwen3-VL-4B-Instruct-Q4_K_M.gguf"),
+            "iris_009.gguf": ("https://huggingface.co/unsloth/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-F16.gguf", "mmproj-F16.gguf"),
+        }
+        download_map = fallback
+
+    print("\n" + "="*60)
+    print("[Pre-Training] Checking all required GGUF models...")
+    print("="*60)
+
+    missing = {}
+    for target_name, (url, src_name) in download_map.items():
+        dest_path = os.path.join("./models", target_name)
+        if not os.path.exists(dest_path) or os.path.getsize(dest_path) < 1024:
+            missing[target_name] = (url, src_name)
+
+    if not missing:
+        print("[Pre-Training] All GGUF models already present. Nothing to download.\n")
+        return
+
+    print(f"[Pre-Training] {len(missing)} model(s) missing. Starting downloads...\n")
+    for target_name, (url, src_name) in missing.items():
+        temp_path = os.path.join("./models", f"_dl_{src_name}")
+        dest_path = os.path.join("./models", target_name)
+        print(f"[Download] {target_name}")
+        print(f"  ← {src_name}")
+        print(f"  URL: {url}")
+        start_time = time.time()
+        try:
+            def progress_hook(count, block_size, total_size):
+                duration = time.time() - start_time
+                progress_size = int(count * block_size)
+                speed = int(progress_size / (1024 * 1024 * max(duration, 0.001)))
+                percent = int(count * block_size * 100 / total_size) if total_size > 0 else 0
+                sys.stdout.write(
+                    f"\r  ... {percent}% | {progress_size / (1024*1024):.1f} MB "
+                    f"| {speed} MB/s | {duration:.1f}s"
+                )
+                sys.stdout.flush()
+
+            urllib.request.urlretrieve(url, temp_path, progress_hook)
+            elapsed = time.time() - start_time
+            size_mb = os.path.getsize(temp_path) / (1024 * 1024)
+            # Rename downloaded file to target name
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            os.rename(temp_path, dest_path)
+            print(f"\n  Done → {target_name}: {size_mb:.0f} MB in {elapsed:.0f}s\n")
+        except Exception as e:
+            print(f"\n  Failed: {e}\n")
+            print(f"  Please download manually to {dest_path}")
+
+    print("[Pre-Training] Model download phase complete. All models → iris_NNN.gguf")
+    print("="*60 + "\n")
 
 if __name__ == "__main__":
     main()

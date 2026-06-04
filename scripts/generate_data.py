@@ -13,7 +13,6 @@ def format_dolly_to_markdown(num_samples=500, output_file="training/generated_do
         print(f"[!] Error loading dataset: {e}")
         return
 
-    # Shuffle and select samples
     samples = list(dataset)
     random.shuffle(samples)
     selected = samples[:num_samples]
@@ -31,7 +30,6 @@ def format_dolly_to_markdown(num_samples=500, output_file="training/generated_do
             response = row['response']
             category = row['category']
 
-            # Construct the prompt
             if context:
                 user_text = f"Context: {context}\n\nTask: {instruction}"
             else:
@@ -55,7 +53,6 @@ def generate_synthetic_math(num_samples=100, output_file="training/generated_mat
         f.write("# Generated Synthetic Math - Chain of Thought\n\n")
         
         for _ in range(num_samples):
-            # Simple linear equations: ax + b = c
             a = random.randint(2, 10)
             x = random.randint(1, 20)
             b = random.randint(1, 50)
@@ -139,9 +136,6 @@ def format_egyptian_arabic(num_samples=500, output_file="training/generated_arab
     with open(output_file, "w", encoding="utf-8") as f:
         f.write("# Generated Egyptian Arabic Data\n\n")
         for row in selected:
-            # Assuming row has 'instruction' and 'response' or similar
-            # If the dataset structure is different, we adjust. 
-            # Most SFT mixtures use 'instruction'/'output' or 'prompt'/'completion'
             prompt = row.get('prompt', row.get('instruction', ''))
             completion = row.get('completion', row.get('output', ''))
             
@@ -182,7 +176,6 @@ def format_orca_reasoning(num_samples=500, output_file="training/generated_orca.
         return
     print(f"[*] Downloading Open-Orca reasoning dataset...")
     try:
-        # Using a smaller subset to ensure speed
         dataset = load_dataset("Open-Orca/SlimOrca", split="train")
     except Exception as e:
         print(f"[!] Error loading Orca dataset: {e}")
@@ -195,7 +188,6 @@ def format_orca_reasoning(num_samples=500, output_file="training/generated_orca.
     with open(output_file, "w", encoding="utf-8") as f:
         f.write("# Generated Deep Reasoning Data - Orca Style\n\n")
         for row in selected:
-            # SlimOrca is structured as a list of 'conversations'
             convs = row.get('conversations', [])
             if len(convs) >= 2:
                 user_msg = convs[0]['value']
@@ -258,29 +250,18 @@ def generate_web_design_data(num_samples=200, output_file="training/generated_we
     print(f"[+] Success! Web design data saved to {output_file}")
 
 if __name__ == "__main__":
-    # 1. General Knowledge (1000)
     format_dolly_to_markdown(num_samples=1000)
     
-    # 2. Reasoning/Math (200)
     generate_synthetic_math(num_samples=200)
 
-    # 3. Coding Intelligence (500)
     format_code_alpaca(num_samples=500)
 
-    # 4. Logic & Puzzles (100)
     generate_logic_puzzles(num_samples=100)
 
-    # 5. Multilingual / Arabic (500)
     format_egyptian_arabic(num_samples=500)
 
-    # 6. Summarization Skills (300)
-    #format_summarization(num_samples=300)
 
-    # 7. Deep Reasoning (Orca) (500)
-    #format_orca_reasoning(num_samples=500)
 
-    # 8. Science Intelligence (SciQ) (400)
     format_science_sciq(num_samples=400)
 
-    # 9. Web Design & Development (200)
     generate_web_design_data(num_samples=200)

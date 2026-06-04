@@ -19,21 +19,17 @@ section() { echo -e "\n${BOLD}${CYAN}══ $* ══${RESET}"; }
 
 # ── Parse flags ───────────────────────────────────────────────────────────────
 SKIP_PIP=false
-SKIP_BUILD=false
-JOBS=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
+SKIP_SCRIPT=false
 
 for arg in "$@"; do
   case "$arg" in
     --no-pip)   SKIP_PIP=true ;;
-    --no-build) SKIP_BUILD=true ;;
-    --jobs)     shift; JOBS="$1" ;;
-    --jobs=*)   JOBS="${arg#*=}" ;;
+    --no-build|--no-script) SKIP_SCRIPT=true ;;
     -h|--help)
-      echo "Usage: bash setup.sh [--no-pip] [--no-build] [--jobs N]"
+      echo "Usage: bash setup.sh [--no-pip] [--no-script]"
       echo ""
       echo "  --no-pip    Skip Python dependency installation"
-      echo "  --no-build  Skip llama.cpp compilation"
-      echo "  --jobs N    Parallel make jobs (default: auto-detect)"
+      echo "  --no-script Skip download of the GGUF converter script"
       exit 0 ;;
   esac
 done
@@ -45,57 +41,47 @@ echo "  ║         Iris AI — Setup Script           ║"
 echo "  ╚══════════════════════════════════════════╝"
 echo -e "${RESET}"
 
-# ── 1. Git submodules ─────────────────────────────────────────────────────────
-section "Step 1/3 — Git Submodules"
+# ── 1. Verify Environment ─────────────────────────────────────────────────────
+section "Step 1/3 — Verify Environment"
 
 if [ ! -d ".git" ]; then
   error "Run this script from the root of the Iris AI repository."
 fi
 
-if [ -f ".gitmodules" ]; then
-  info "Initialising and updating submodules..."
-  git submodule update --init --recursive --progress
-  ok "Submodules up to date."
-else
-  warn ".gitmodules not found — skipping submodule step."
+if ! command -v curl &>/dev/null; then
+  error "curl is required to download setup scripts."
 fi
 
-# ── 2. Build llama.cpp ────────────────────────────────────────────────────────
-section "Step 2/3 — Build llama.cpp"
-
-LLAMA_DIR="$(pwd)/llama.cpp"
-
-if [ "$SKIP_BUILD" = true ]; then
-  warn "--no-build passed. Skipping llama.cpp compilation."
-elif [ ! -d "$LLAMA_DIR" ]; then
-  warn "llama.cpp/ directory not found. Skipping build."
-else
-  info "Building llama.cpp with cmake (${JOBS} parallel jobs)..."
-  cd "$LLAMA_DIR"
-
-  # Use cmake for a portable, optimised build
-  BUILD_DIR="build"
-  cmake -B "$BUILD_DIR" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DLLAMA_NATIVE=ON \
-    $([ "$(uname)" = "Darwin" ] && echo "-DGGML_METAL=ON" || true) \
-    $(command -v nvcc &>/dev/null && echo "-DGGML_CUDA=ON" || true) \
-    -DLLAMA_BUILD_TESTS=OFF \
-    -DLLAMA_BUILD_EXAMPLES=ON \
-    -DLLAMA_BUILD_SERVER=ON \
-    2>&1 | tail -5
-
-  cmake --build "$BUILD_DIR" --config Release -j "$JOBS"
-
-  cd - > /dev/null
-
-  # Verify key binaries exist
-  QUANTIZE_BIN=$(find "$LLAMA_DIR/build" -name "llama-quantize" -type f 2>/dev/null | head -1)
-  if [ -n "$QUANTIZE_BIN" ]; then
-    ok "llama.cpp built successfully."
-    info "  llama-quantize → ${QUANTIZE_BIN}"
+# Inform about quantization dependencies
+if ! command -v llama-quantize &>/dev/null && ! command -v quantize &>/dev/null; then
+  warn "llama-quantize tool not found in PATH."
+  warn "If you plan to perform GGUF quantization (e.g. Q4_K_M), please install llama.cpp:"
+  if [ "$(uname)" = "Darwin" ]; then
+    warn "  brew install llama.cpp"
   else
-    warn "Build completed but llama-quantize binary not found. GGUF quantization may fall back to F16."
+    warn "  Follow instructions at https://github.com/ggerganov/llama.cpp to install or compile it."
+  fi
+else
+  ok "llama-quantize found in PATH."
+fi
+
+# ── 2. Download convert_hf_to_gguf.py ─────────────────────────────────────────
+section "Step 2/3 — GGUF Converter Script"
+
+SCRIPT_DIR="$(pwd)/scripts"
+mkdir -p "$SCRIPT_DIR"
+
+if [ "$SKIP_SCRIPT" = true ]; then
+  warn "--no-script passed. Skipping download of convert_hf_to_gguf.py."
+else
+  info "Downloading convert_hf_to_gguf.py (build b9000)..."
+  curl -s -L -o "$SCRIPT_DIR/convert_hf_to_gguf.py" "https://raw.githubusercontent.com/ggerganov/llama.cpp/b9000/convert_hf_to_gguf.py"
+  chmod +x "$SCRIPT_DIR/convert_hf_to_gguf.py"
+  
+  if [ -f "$SCRIPT_DIR/convert_hf_to_gguf.py" ]; then
+    ok "convert_hf_to_gguf.py downloaded successfully to ./scripts/"
+  else
+    error "Failed to download convert_hf_to_gguf.py."
   fi
 fi
 

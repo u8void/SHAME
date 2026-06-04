@@ -44,8 +44,8 @@ bash setup.sh
 ```
 
 This automatically:
-- Initialises the `llama.cpp` git submodule
-- Builds `llama.cpp` with cmake (Metal on Apple Silicon, CUDA if available, CPU fallback)
+- Checks your system for `llama-quantize` (warning you if it is missing)
+- Downloads the self-contained `convert_hf_to_gguf.py` script from a stable `llama.cpp` release into `./scripts/`
 - Installs all Python dependencies from `requirements.txt`
 
 **Options:**
@@ -53,34 +53,32 @@ This automatically:
 | Flag | Description |
 |------|-------------|
 | `--no-pip` | Skip Python dependency installation |
-| `--no-build` | Skip llama.cpp compilation |
-| `--jobs N` | Set parallel make jobs (default: auto-detect) |
+| `--no-script` | Skip downloading the GGUF converter script |
 
 ```bash
-# Example: build with 8 jobs, skip pip
-bash setup.sh --jobs 8 --no-pip
+# Example: skip pip installation
+bash setup.sh --no-pip
 ```
 
 > [!IMPORTANT]
-> `llama.cpp` is included as a **git submodule**. If you cloned the repo without `--recurse-submodules`, run:
+> Since we are using a standalone Python converter, the heavy `llama.cpp` submodule is **no longer needed**. GGUF quantization (e.g. `q4_k_m`) requires the compiled `llama-quantize` utility. On macOS, the easiest way to install it globally is via Homebrew:
 > ```bash
-> git submodule update --init --recursive
+> brew install llama.cpp
 > ```
-> before running `setup.sh`.
+> If `llama-quantize` is not found, the script will fall back to exporting the unquantized `F16` GGUF model.
 
 ### Manual setup
 
 If you prefer to set up manually:
 
 ```bash
-# 1. Pull submodule
-git submodule update --init --recursive
+# 1. Download the convert script
+mkdir -p scripts
+curl -L -o scripts/convert_hf_to_gguf.py "https://raw.githubusercontent.com/ggerganov/llama.cpp/b9000/convert_hf_to_gguf.py"
+chmod +x scripts/convert_hf_to_gguf.py
 
-# 2. Build llama.cpp
-cd llama.cpp
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_METAL=ON  # Mac; omit METAL flag on Linux
-cmake --build build --config Release -j$(nproc)
-cd ..
+# 2. (Optional) Install llama.cpp globally for quantization
+brew install llama.cpp
 
 # 3. Install Python deps
 pip install -r requirements.txt
@@ -103,11 +101,41 @@ Iris uses **6 specialist roles**, each backed by a different base model:
 | `triage` | `Qwen2.5-3B-Instruct` | Fast query routing & conversational fallback |
 | `router` | `Qwen2.5-Coder-7B-Instruct` | JSON action generation & tool routing |
 | `math` | `Qwen2.5-Math-7B-Instruct` | Equations, proofs, algorithmic derivations |
-| `code` | `DeepSeek-R1-Distill-Qwen-7B` | Code generation & simple coding tasks |
+| `code` | `DeepSeek-R1-Distill-Qwen-7B` | Code generation, debugging, reasoning about code |
 | `reasoning` | `DeepSeek-R1-Distill-Qwen-14B` | Deep reasoning, architecture, complex code review |
 | `general` | `DeepSeek-R1-Distill-Qwen-14B` | General knowledge & open-ended questions |
 
 After fine-tuning, each model is saved as `./models/iris-{role}.gguf`.
+
+---
+
+## Size Tiers
+
+Iris AI supports **four size tiers** controlled by `--size` in `train.py` and `size` in `iris.conf`.
+Size configs live in `config/sizes/{size}.json`.
+
+| Tier | Total Size | RAM Needed | Description |
+|------|-----------|------------|-------------|
+| `tiny` | ~15 GB | 8 GB | All models ≤3B. Ultra-fast, runs on anything. |
+| `small` | ~30 GB | 16 GB | 3B–8B models. Fits M2/M3 MacBook Air. |
+| `medium` | ~45 GB | 32 GB | 3B–14B models. Current default. |
+| `large` | ~80 GB | 64 GB / CUDA 48 GB | Top-tier 14B–32B models. Desktop/server room. |
+
+| Tier | Triage | Router | Math | Code | Reasoning | General | Vision |
+|------|--------|--------|------|------|-----------|---------|--------|
+| `tiny` | Qwen2.5-0.5B | Qwen2.5-1.5B | Qwen2.5-Math-1.5B | R1-Distill-Qwen-1.5B | Qwen2.5-3B | Qwen2.5-3B | Qwen2.5-VL-3B |
+| `small` | Llama-3.2-3B | Qwen2.5-Coder-3B | Qwen2.5-Math-7B | Qwen2.5-Coder-7B | R1-Distill-Qwen-7B | Llama-3.2-3B | Qwen3-VL-4B |
+| `medium` | Llama-3.2-3B | Hermes-3-8B | Qwen2.5-Math-7B | Qwen2.5-Coder-14B | DeepSeek-LLM-14B | Qwen3.5-9B | Qwen3-VL-4B |
+| `large` | Qwen2.5-7B | Qwen2.5-Coder-7B | R1-Distill-Qwen-14B | R1-Distill-Qwen-32B | R1-Distill-Qwen-32B | Qwen3.5-20B | Qwen3-VL-8B |
+
+**Usage:**
+```bash
+# Training — auto-downloads the right GGUFs for the tier
+python train.py --size small --train-role math
+
+# Inference — set in config/iris.conf
+# "size": "medium"  — then models block should match config/sizes/medium.json
+```
 
 ---
 
@@ -273,8 +301,8 @@ python train.py [OPTIONS]
 GGUF conversion runs **automatically** after each role's training (unless `--skip-gguf` is set). The pipeline:
 
 1. **Merge** — LoRA adapters are merged into the base model weights
-2. **Convert** — `llama.cpp/convert_hf_to_gguf.py` produces an F16 GGUF
-3. **Quantize** — `llama-quantize` compresses to the target format
+2. **Convert** — `./scripts/convert_hf_to_gguf.py` produces an F16 GGUF
+3. **Quantize** — `llama-quantize` (installed via brew or on PATH) compresses to the target format
 
 **Output files:**
 
@@ -373,7 +401,7 @@ The file [`config/datasets.json`](config/datasets.json) controls exactly which d
 
 ### Memory management
 
-- On Apple Silicon, training a 14B model (reasoning/general) requires **≥ 32 GB RAM**. For 7B models, 16 GB is usually sufficient.
+- On Apple Silicon, training a 14B model (reasoning/general) requires **≥ 32 GB RAM**. For 7B models, 16 GB is usually sufficient. At 16GB, train triage, router, math, and code only; use pre-quantized GGUF inference for 14B roles.
 - On CUDA, 4-bit QLoRA allows training a 14B model on a 24 GB GPU (e.g., RTX 3090/4090).
 - Reduce `--max-seq-length` (e.g., to `256`) to cut VRAM usage at the cost of shorter training samples.
 

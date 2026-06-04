@@ -22,7 +22,6 @@ from typing import Optional, List, Tuple
 
 def guess_language_from_content(code: str) -> str:
     """Guess the programming language of a code block based on common syntax markers."""
-    # Heuristics based on signature markers
     if re.search(r'\bdef\s+\w+\s*\(|import\s+\w+|\bif\s+__name__\s*==', code):
         return "python"
     if re.search(r'#include\s+<[^>]+>|#include\s+"[^"]+"|\bint\s+main\s*\(', code):
@@ -59,7 +58,7 @@ def _check_python(code: str) -> Optional[str]:
 
 def _check_javascript(code: str, lang: str = "javascript") -> Optional[str]:
     if not shutil.which("node"):
-        return None  # node not installed — skip check
+        return None
     suffix = ".ts" if lang == "typescript" else ".js"
     with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False, encoding="utf-8") as f:
         f.write(code)
@@ -83,7 +82,7 @@ def _check_javascript(code: str, lang: str = "javascript") -> Optional[str]:
 def _check_c(code: str, lang: str = "c") -> Optional[str]:
     compiler = shutil.which("clang") or shutil.which("gcc")
     if not compiler:
-        return None  # no compiler found
+        return None
     suffix = ".cpp" if lang in ("cpp", "c++") else ".c"
     std_flag = "-std=c++17" if lang in ("cpp", "c++") else "-std=c11"
     with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False, encoding="utf-8") as f:

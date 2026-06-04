@@ -18,7 +18,6 @@ def run_inference(prompt: str, role: ModelRole) -> tuple[str, float]:
                 full_response = event["content"]
                 break
             elif event["type"] == "token" and not full_response:
-                # We will use raw_response if available, otherwise just accumulate
                 full_response += event["content"]
     except FileNotFoundError as e:
         full_response = f"ERROR: Model file missing ({e})"

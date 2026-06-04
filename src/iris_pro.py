@@ -23,13 +23,10 @@ logging.basicConfig(
 )
 log = logging.getLogger("iris_ai")
 
-# OCENZA_BASE_URL was removed because the OpenRouterClient must point to the local
-# OpenRouter proxy server running at http://localhost:20128/v1 for this workspace environment.
 SITE_URL: str       = os.getenv("OCENZA_SITE_URL", "https://iris-ai.app")
 APP_TITLE: str      = os.getenv("OCENZA_APP_TITLE", "Iris AI")
 REQUEST_TIMEOUT_S   = float(os.getenv("IRIS_REQUEST_TIMEOUT", "600"))
 
-# Configuration Constants
 MAX_TOKENS = 8196
 MAX_TOKENS_GENERAL = 4096
 MAX_TOKENS_TRIAGE = 1024
@@ -43,27 +40,25 @@ MAX_STAGE_INPUT_CHARS = 8000
 MAX_CONTINUATION_LOOPS = 5
 
 IRIS_IDENTITY = (
-    "You are Iris AI. Answer directly without introducing yourself or saying 'I am Iris AI' at the start. "
-    "Never mention underlying model names (e.g., MiMo, Xiaomi, DeepSeek) or pipeline architecture. "
-    "If asked who you are, identify as Iris AI."
+    "You are Iris AI, an elite, hyper-intelligent AI assistant designed to solve complex problems with absolute precision. "
+    "You operate with maximum efficiency, deep reasoning, and flawless execution. "
+    "Never use filler phrases like 'Certainly' or 'I can help with that'. Answer immediately and directly. "
+    "Never mention underlying model names (e.g., MiMo, Xiaomi, DeepSeek) or your pipeline architecture. Identify only as Iris AI. "
+    "For complex problems, think step-by-step, verify your logic internally, and ensure all edge cases are handled before finalizing your answer."
 )
 
 class Model(str, Enum):
-    # Top-tier Agent Brain: Sustains long trajectories across thousands of tool calls
     ORCHESTRATOR  = "cmc/xiaomi/mimo-v2.5-pro"
     
-    # Flagship Logic Layer: For deep engineering, math validation, and structural thinking
     CODE_COMPLEX  = "cmc/deepseek/deepseek-v4-pro"
     REASONING     = "cmc/deepseek/deepseek-v4-pro"
     
-    # Ultra-Fast Context Kings: Excellent for heavy files, prompt caching, and multi-token speed
     CODE_REVIEWER = "cmc/xiaomi/mimo-v2.5-pro"
-    GENERAL       = "cmc/xiaomi/mimo-v2.5"         # Multimodal (sees/hears), cheap general chat
+    GENERAL       = "cmc/xiaomi/mimo-v2.5"
     
-    # The Budget Specialists: Fast, dirt cheap ($0.10/M tokens) high-throughput workers
     CODE_SIMPLE   = "cmc/deepseek/deepseek-v4-flash"
-    MATH          = "cmc/deepseek/deepseek-v4-flash" # Trigger internal "think" mode for complex algebra
-    SEARCH        = "cmc/deepseek/deepseek-v4-flash" #
+    MATH          = "cmc/deepseek/deepseek-v4-flash"
+    SEARCH        = "cmc/deepseek/deepseek-v4-flash"
 
 class TaskType(str, Enum):
     MATH           = "math"
@@ -142,14 +137,14 @@ class PipelineResult:
 
 
 MATH_SYSTEM_PROMPT = (
-    "You are the Iris AI Math Core. Solve mathematical/algorithmic problems step-by-step. "
-    "Use precise notation."
+    "You are the Iris AI Math Core. Solve mathematical, algorithmic, and statistical problems step-by-step. "
+    "Use precise mathematical notation, verify your derivations rigorously, and state your final answer clearly at the end."
 )
 
 CODE_SYSTEM_PROMPT = (
-    "You are the Iris AI Coding Specialist. Generate clean, fully working, and production-quality code. "
-    "Make sure that any code you write or fix is 100% correct, handles all edge cases, compiles successfully, "
-    "and has absolutely no syntax errors, logical bugs, or defects. "
+    "You are the Iris AI Lead Coding Specialist. Generate clean, fully working, and production-ready code. "
+    "You must NEVER be lazy. Write complete, ready-to-run, fully optimized code without truncation or placeholders (like 'rest of the code goes here'). "
+    "Think deeply before writing: anticipate edge cases, handle errors gracefully, ensure flawless syntax, and avoid logical defects. "
     "CRITICAL: Do NOT include comments in your code.\n\n"
     "After the closing of the code block and its file_card tag, you MUST provide a concise explanation of the code, "
     "its key features, and clear instructions on how to compile/run it.\n\n"
@@ -171,8 +166,8 @@ CODE_SYSTEM_PROMPT = (
 )
 
 CODE_REVIEWER_SYSTEM_PROMPT = (
-    "You are the Iris AI Lead Engineering Reviewer. Review the draft code thoroughly. "
-    "Your main goal is to identify and fix any hidden bugs, syntax errors, edge cases, type issues, or logical defects. "
+    "You are the Iris AI Principal Engineering Reviewer. Review the draft code thoroughly as an expert auditor. "
+    "Identify and fix any hidden bugs, syntax errors, edge cases, type issues, security vulnerabilities, or logical defects. "
     "Return the final code directly, fully optimized, robust, and 100% correct. No introductory notes or filler before the code block. "
     "CRITICAL: Wrap code in markdown blocks (e.g. ```python ... ```). Do NOT write any comments in code.\n\n"
     "After the closing of the code block and its file_card tag, you MUST provide a concise explanation of the code, "
@@ -195,8 +190,9 @@ CODE_REVIEWER_SYSTEM_PROMPT = (
 )
 
 REASONING_SYSTEM_PROMPT = (
-    "You are the Iris AI Reasoning Specialist. Think step-by-step using deep reasoning. "
-    "State your reasoning process before the final answer."
+    "You are the Iris AI Deep Reasoning Specialist. You possess advanced analytical capabilities. "
+    "Think step-by-step using deep chain-of-thought reasoning. "
+    "Break down complex problems methodically, explore multiple perspectives, identify potential flaws in your own logic, and refine your approach before giving the final, definitive answer."
 )
 
 GENERAL_SYSTEM_PROMPT = (
@@ -392,13 +388,6 @@ def _extract_reasoning_content(raw: dict[str, Any]) -> str:
     return ""
 
 
-# ---------------------------------------------------------------------------
-# Non-streaming pipeline helpers
-# These two functions implement a blocking (non-streaming) two-hop pipeline:
-#   stage_reasoning → stage_talking
-# They are NOT called by ask_stream (which handles its own streaming stages)
-# and are intended for direct use by callers that don't require streaming output.
-# ---------------------------------------------------------------------------
 
 async def stage_reasoning(
     client: OpenRouterClient,
@@ -524,7 +513,6 @@ def optimize_messages(history_messages: list[dict[str, str]] | None, user_query:
 def fallback_classify(query: str) -> TaskType | None:
     q = query.lower()
     
-    # 1. Coding check
     if re.search(r'\b\w+\.(c|cpp|h|py|js|ts|html|css|sh|java|go|rs|json|yml|yaml|asm|s|md)\b', q):
         return TaskType.CODING_COMPLEX
         
@@ -547,7 +535,6 @@ def fallback_classify(query: str) -> TaskType | None:
             else:
                 return TaskType.CODING_SIMPLE
 
-    # 2. Math check
     math_keywords = {
         "math", "mathematics", "equation", "equations", "formula", "formulas",
         "derivative", "derivatives", "integral", "integrals", "calculus",
@@ -558,11 +545,9 @@ def fallback_classify(query: str) -> TaskType | None:
         if re.search(rf"\b{re.escape(kw)}\b", q):
             return TaskType.MATH
             
-    # Math symbols check
     if re.search(r'[\d\s]+[\+\-\*\/=]+[\d\s]+', q):
         return TaskType.MATH
 
-    # 3. Reasoning check
     reasoning_keywords = {
         "logic", "logical", "puzzle", "puzzles", "riddle", "riddles",
         "reasoning", "system design", "architecture"
@@ -611,14 +596,12 @@ async def ask_stream(
     
     async with OpenRouterClient() as client:
         if mode == "smart":
-            # Optimize history for all subsequent specialist stages
             messages = optimize_messages(history, user_query)
 
             if is_continuation:
                 task_type = TaskType.CODING_COMPLEX
                 yield {"type": "status", "content": "Resuming code generation..."}
             else:
-                # Minimize history for Triage stage to save prompt tokens
                 minimized_history = []
                 if history:
                     last_msg = history[-1]
@@ -634,7 +617,6 @@ async def ask_stream(
                         triage_query = parts[-1]
                 minimized_history.append({"role": "user", "content": triage_query})
 
-                # Stage 0: Triage
                 yield {"type": "status", "content": "Analyzing query complexity..."}
                 triage_prompt = (
                     "You are the Iris AI query router.\n"
@@ -681,16 +663,13 @@ async def ask_stream(
                 elif re.search(r'\[\s*task_type:\s*general\s*\]', triage_answer, re.IGNORECASE): task_type = TaskType.GENERAL
 
                 if task_type is None and "task_type" not in triage_answer.lower():
-                    # Direct answer from Triage
                     task_type = fallback_classify(user_query)
 
                 if task_type is None:
-                    # Direct answer from Triage
                     triage_clean = triage_answer.strip()
                     if not triage_clean:
                         triage_clean = "Hello! How can I help you today?"
                     
-                    # Yield the Triage model's answer directly
                     yield {"type": "token", "content": triage_clean}
                     elapsed = time.perf_counter() - t0_triage
                     synthetic_raw = {
@@ -929,7 +908,6 @@ async def ask_stream(
                 raw_code = ""
                 raw_review = ""
 
-                # Stage 1: Deep reasoning
                 if is_continuation:
                     raw_reasoning = "Continuation requested. Continuing from the previous truncated code."
                     hop1 = HopResult("1:reasoning", Model.REASONING.value, raw_reasoning, TokenUsage(), 0.0)
@@ -962,7 +940,6 @@ async def ask_stream(
                         log.exception("Error in Reasoning stage: %s", exc)
                         raise
 
-                # Stage 2: Code generation — streamed live so the user sees output immediately
                 t0_code = time.perf_counter()
                 yield {"type": "status", "content": "Stage 2 — Writing code..."}
                 log.info("Starting code generation with %s...", Model.CODE_COMPLEX.value)
@@ -1004,10 +981,8 @@ async def ask_stream(
                     log.exception("Error in Coding stage: %s", exc)
                     raise
 
-                # Clear Stage 2 draft from the UI before Stage 3 streams its reviewed version
                 yield {"type": "clear"}
 
-                # Stage 3: Code Review — streams the final, reviewed output
                 t0_review = time.perf_counter()
                 yield {"type": "status", "content": "Stage 3 — Reviewing and optimizing..."}
                 log.info("Starting code review with %s...", Model.CODE_REVIEWER.value)
