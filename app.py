@@ -4,7 +4,7 @@ import argparse
 import threading
 import subprocess
 
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, Response
 from werkzeug.utils import secure_filename
 
 from src.iris import ask_stream, solve_math, BookRetriever, analyze_image
@@ -111,7 +111,9 @@ def chat():
         role = "assistant" if msg.get("role") == "bot" else "user"
         agent_history.append({"role": role, "content": msg.get("content", "")})
 
-    if PRO_MODE:
+    # Support per-request mode override: body { "use_pro": true } OR CLI --pro
+    use_pro = str(data.get("use_pro", "")).lower() in ("true", "1", "yes")
+    if PRO_MODE or use_pro:
         import asyncio
         import time
         import src.iris_pro as iris_pro
@@ -120,8 +122,9 @@ def chat():
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 mode = data.get("mode", "smart")
+                workspace_root = data.get("workspace_root", "")
                 
-                agen = iris_pro.ask_stream(user_message, agent_history, mode=mode)
+                agen = iris_pro.ask_stream(user_message, agent_history, mode=mode, workspace_root=workspace_root)
                 try:
                     while True:
                         event = loop.run_until_complete(agen.__anext__())
@@ -145,7 +148,6 @@ def chat():
                     err_msg = f"{e.__class__.__name__}: The API request took too long or dropped connection."
                 yield f"data: {json.dumps({'type': 'text', 'content': f'Iris Pro Error: {err_msg}'})}\n\n"
         
-        from flask import Response
         resp = Response(pro_generate(), mimetype='text/event-stream')
         resp.headers['X-Accel-Buffering'] = 'no'
         resp.headers['Cache-Control']     = 'no-cache'
@@ -156,14 +158,17 @@ def chat():
     controller.IS_INTERACTIVE = False
     from controller import ai_agent_handle
 
-    from flask import Response
     def generate():
-        for event in ai_agent_handle(
-            user_message,
-            get_retriever(),
-            agent_history
-        ):
-            yield f"data: {json.dumps(event)}\n\n"
+        try:
+            for event in ai_agent_handle(
+                user_message,
+                get_retriever(),
+                agent_history
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            err_msg = str(e)
+            yield f"data: {json.dumps({'type': 'token', 'content': f'\\n\\n> ❌ **Iris Error:** {err_msg}'})}\n\n"
 
     resp = Response(generate(), mimetype='text/event-stream')
     resp.headers['X-Accel-Buffering'] = 'no'

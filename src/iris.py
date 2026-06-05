@@ -212,6 +212,95 @@ def _model_path(filename: str) -> str:
     return os.path.join(os.path.dirname(_HERE), "models", filename)
 
 
+def download_gguf(filename: str, quiet: bool = False) -> bool:
+    """Download a single GGUF model file from HuggingFace using hf_hub_download.
+
+    Tries multiple repos in priority order. Handles auth-gated repos gracefully.
+    Returns True on success.
+    """
+    if filename not in _MODEL_SOURCES:
+        if not quiet:
+            print(f"[Iris] No download sources known for {filename}")
+        return False
+
+    dest_path = os.path.join(os.path.dirname(_HERE), "models", filename)
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
+    if os.path.exists(dest_path) and os.path.getsize(dest_path) > 1024:
+        if not quiet:
+            print(f"[Iris] {filename} already present, skipping download")
+        return True
+
+    if not quiet:
+        print(f"[Iris] Downloading {filename} ...")
+
+    sources = _MODEL_SOURCES[filename]
+    last_error = None
+
+    try:
+        from huggingface_hub import hf_hub_download
+        import time as _time
+
+        for repo_id, remote_name in sources:
+            try:
+                if not quiet:
+                    print(f"  Trying {repo_id}/{remote_name} ...")
+                start = _time.time()
+                hf_hub_download(
+                    repo_id=repo_id,
+                    filename=remote_name,
+                    local_dir=os.path.join(os.path.dirname(_HERE), "models"),
+                    local_dir_use_symlinks=False,
+                )
+                elapsed = _time.time() - start
+                size_mb = os.path.getsize(dest_path) / (1024 * 1024)
+                if not quiet:
+                    print(f"  Done: {filename} — {size_mb:.0f} MB in {elapsed:.0f}s")
+                return True
+            except Exception as e:
+                last_error = str(e)
+                if '401' in last_error or 'gated' in last_error.lower():
+                    continue
+                if 'already exists' in last_error.lower():
+                    return True
+                if not quiet:
+                    print(f"  Failed: {last_error[:60]}...")
+    except ImportError:
+        pass
+
+    # Fallback: direct urllib download
+    try:
+        import urllib.request
+        import time as _time
+
+        for repo_id, remote_name in sources:
+            url = f"https://huggingface.co/{repo_id}/resolve/main/{remote_name}"
+            try:
+                if not quiet:
+                    print(f"  Trying direct: {url[:80]}...")
+                start = _time.time()
+                tmp = dest_path + ".part"
+                urllib.request.urlretrieve(url, tmp)
+                if os.path.exists(dest_path):
+                    os.remove(dest_path)
+                os.rename(tmp, dest_path)
+                elapsed = _time.time() - start
+                size_mb = os.path.getsize(dest_path) / (1024 * 1024)
+                if not quiet:
+                    print(f"  Done: {filename} — {size_mb:.0f} MB in {elapsed:.0f}s")
+                return True
+            except Exception as e:
+                last_error = str(e)
+                if not quiet:
+                    print(f"  Failed: {last_error[:60]}...")
+    except Exception:
+        pass
+
+    if not quiet:
+        print(f"[Iris] Failed to download {filename}: {last_error}")
+    return False
+
+
 def _unload_locked() -> None:
     """Internal: unload without acquiring lock (caller holds _model_lock)."""
     global _active_role, _active_llm

@@ -187,6 +187,16 @@ except ImportError:
     IRIS_AVAILABLE = False
     print("[WARNING] iris.py not found or dependencies missing. Running in rule-only mode.")
 
+# Model display name — pulled from environment or iris.conf if available
+MLX_MODEL_ID = os.environ.get("IRIS_MODEL_ID", "")
+if not MLX_MODEL_ID:
+    try:
+        with open("./config/iris.conf") as f:
+            cfg = json.load(f)
+        MLX_MODEL_ID = cfg.get("size", "medium") + " tier"
+    except:
+        MLX_MODEL_ID = "Iris AI"
+
 CONFIG_FILE  = "./config/control.conf"
 
 DEFAULT_CONFIG = {
@@ -312,7 +322,7 @@ def detect_intent(text: str):
     return "ai_agent", None
 
 import os
-_prompt_path = os.path.join(os.path.dirname(__file__), "training", "control.md")
+_prompt_path = os.path.join(os.path.dirname(__file__), "training", "control", "control.md")
 try:
     with open(_prompt_path, "r", encoding="utf-8") as f:
         _content = f.read().strip()

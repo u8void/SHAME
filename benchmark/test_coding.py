@@ -67,13 +67,9 @@ def run_coding_benchmark(csv_path: str):
             response, t = run_inference(prompt, role=role)
             extracted_code = _extract_python_code(response)
 
-            try:
-                is_valid, err = check_syntax(extracted_code, "python")
-                passed = is_valid
-                syntax_note = "" if is_valid else str(err)
-            except Exception as ex:
-                passed = False
-                syntax_note = str(ex)
+            syntax_err = check_syntax(extracted_code, "python")
+            passed = syntax_err is None
+            syntax_note = "" if passed else str(syntax_err)
 
             if passed:
                 passed_count += 1

@@ -190,12 +190,20 @@ CHECKERS = {
 }
 
 def check_syntax(code_output: str, language: Optional[str] = None) -> Optional[str]:
-    """Check code blocks for syntax errors. Dispatches to matching CHECKERS.
+    """Check code for syntax errors. Dispatches to matching CHECKERS.
 
-    Returns the first error found, or None if clean.
+    If fenced code blocks are present they are extracted and checked
+    individually.  Otherwise the entire input is treated as raw code
+    for the given *language*.
+
+    Returns the first error string found, or None when clean.
     """
     blocks = extract_code_blocks(code_output)
     if not blocks:
+        if language:
+            checker = CHECKERS.get(language)
+            if checker:
+                return checker(code_output)
         return None
 
     for lang, code in blocks:

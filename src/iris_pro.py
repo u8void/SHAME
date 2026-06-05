@@ -145,14 +145,19 @@ CODE_SYSTEM_PROMPT = (
     "You are the Iris AI Lead Coding Specialist. Generate clean, fully working, and production-ready code. "
     "You must NEVER be lazy. Write complete, ready-to-run, fully optimized code without truncation or placeholders (like 'rest of the code goes here'). "
     "Think deeply before writing: anticipate edge cases, handle errors gracefully, ensure flawless syntax, and avoid logical defects. "
-    "CRITICAL: Do NOT include comments in your code.\n\n"
-    "After the closing of the code block and its file_card tag, you MUST provide a concise explanation of the code, "
-    "its key features, and clear instructions on how to compile/run it.\n\n"
-    "RULE — FILE CARDS:\n"
-    "When you produce a response that contains a complete, self-contained file (not just a snippet "
-    "or a fragment), you MUST emit a special machine-readable tag immediately after the closing "
-    "triple-backtick of that code block. The tag looks like this:\n"
+    "CRITICAL: Do NOT include comments in your code.\n"
+    "CRITICAL: You MUST wrap all generated code in a standard Markdown code block (e.g., ```python ... ```).\n"
+    "CRITICAL: The <file_card> tag MUST be placed strictly OUTSIDE and AFTER the closing triple-backticks. NEVER put the <file_card> inside the code block!\n\n"
+    "CRITICAL FORMAT TEMPLATE:\n"
+    "When you produce a response that contains a complete, self-contained file, you MUST strictly follow this exact structure:\n\n"
+    "```[language]\n"
+    "// FULL CODE GOES HERE\n"
+    "```\n"
     "<file_card filename=\"FILENAME.EXT\" lang=\"LANGUAGE\"></file_card>\n\n"
+    "**Explanation:**\n"
+    "Brief explanation, key features, and instructions on how to compile/run it.\n\n"
+    "DO NOT put your explanation inside the file_card tag. The file_card tag must be an empty, self-closing tag.\n"
+    "DO NOT output raw code without the markdown triple-backticks.\n\n"
     "Guidelines for choosing the filename:\n"
     "- Make it descriptive of what the file actually does (e.g. 'weather_dashboard.html', 'user_auth.py', 'api_client.js').\n"
     "- Use the correct extension for the language (py, js, ts, html, css, json, sh, md, etc.).\n"
@@ -169,14 +174,18 @@ CODE_REVIEWER_SYSTEM_PROMPT = (
     "You are the Iris AI Principal Engineering Reviewer. Review the draft code thoroughly as an expert auditor. "
     "Identify and fix any hidden bugs, syntax errors, edge cases, type issues, security vulnerabilities, or logical defects. "
     "Return the final code directly, fully optimized, robust, and 100% correct. No introductory notes or filler before the code block. "
-    "CRITICAL: Wrap code in markdown blocks (e.g. ```python ... ```). Do NOT write any comments in code.\n\n"
-    "After the closing of the code block and its file_card tag, you MUST provide a concise explanation of the code, "
-    "its features, what optimizations/bug fixes were made, and clear step-by-step instructions on how to compile and run the code.\n\n"
-    "RULE — FILE CARDS:\n"
-    "When you produce a response that contains a complete, self-contained file (not just a snippet "
-    "or a fragment), you MUST emit a special machine-readable tag immediately after the closing "
-    "triple-backtick of that code block. The tag looks like this:\n"
+    "CRITICAL: Wrap code in markdown blocks (e.g. ```python ... ```). Do NOT write any comments in code.\n"
+    "CRITICAL: The <file_card> tag MUST be placed strictly OUTSIDE and AFTER the closing triple-backticks. NEVER put the <file_card> inside the code block!\n\n"
+    "CRITICAL FORMAT TEMPLATE:\n"
+    "When you produce a response that contains a complete, self-contained file, you MUST strictly follow this exact structure:\n\n"
+    "```[language]\n"
+    "// FULL CODE GOES HERE\n"
+    "```\n"
     "<file_card filename=\"FILENAME.EXT\" lang=\"LANGUAGE\"></file_card>\n\n"
+    "**Explanation:**\n"
+    "Brief explanation, optimizations made, and instructions on how to compile/run it.\n\n"
+    "DO NOT put your explanation inside the file_card tag. The file_card tag must be an empty, self-closing tag.\n"
+    "DO NOT output raw code without the markdown triple-backticks.\n\n"
     "Guidelines for choosing the filename:\n"
     "- Make it descriptive of what the file actually does (e.g. 'weather_dashboard.html', 'user_auth.py', 'api_client.js').\n"
     "- Use the correct extension for the language (py, js, ts, html, css, json, sh, md, etc.).\n"
@@ -244,6 +253,7 @@ class OpenRouterClient:
         max_tokens:      int                    = MAX_TOKENS,
         response_format: dict[str, str] | None  = None,
         extra_body:      dict[str, Any] | None  = None,
+        tools:           list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "model":       model,
@@ -255,6 +265,8 @@ class OpenRouterClient:
             kwargs["response_format"] = response_format
         if extra_body:
             kwargs["extra_body"] = extra_body
+        if tools:
+            kwargs["tools"] = tools
 
         for attempt in range(MAX_RETRIES):
             try:
@@ -272,6 +284,7 @@ class OpenRouterClient:
         max_tokens:      int                    = MAX_TOKENS,
         response_format: dict[str, str] | None  = None,
         extra_body:      dict[str, Any] | None  = None,
+        tools:           list[dict[str, Any]] | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         kwargs: dict[str, Any] = {
             "model":       model,
@@ -284,6 +297,8 @@ class OpenRouterClient:
             kwargs["response_format"] = response_format
         if extra_body:
             kwargs["extra_body"] = extra_body
+        if tools:
+            kwargs["tools"] = tools
 
         for attempt in range(MAX_RETRIES):
             try:
@@ -589,7 +604,8 @@ def is_continuation_query(query: str, history: list[dict[str, str]] | None) -> b
 async def ask_stream(
     user_query: str,
     history:    list[dict[str, str]] | None = None,
-    mode:       str = "smart"
+    mode:       str = "smart",
+    workspace_root: str = ""
 ) -> AsyncGenerator[dict[str, Any], None]:
     hops: list[HopResult] = []
     is_continuation = is_continuation_query(user_query, history)
@@ -597,12 +613,119 @@ async def ask_stream(
     async with OpenRouterClient() as client:
         if mode == "smart":
             messages = optimize_messages(history, user_query)
+            
+            try:
+                from src.tools_harness import TOOLS_SCHEMA, execute_tool
+                import json
+            except ImportError:
+                TOOLS_SCHEMA = None
 
-            if is_continuation:
-                task_type = TaskType.CODING_COMPLEX
-                yield {"type": "status", "content": "Resuming code generation..."}
+            if TOOLS_SCHEMA:
+                yield {"type": "status", "content": "Initializing Agentic IDE Harness..."}
+                t0 = time.perf_counter()
+                selected_model = Model.CODE_COMPLEX.value
+                log.info("Starting Agentic Loop with %s...", selected_model)
+                
+                agent_sys_prompt = GENERAL_SYSTEM_PROMPT + (
+                    "\\n\\n[AGENTIC HARNESS ENABLED]\\n"
+                    "You are now an autonomous IDE agent. You have access to local tools. "
+                    "Use them to list directories, read files, write files, and execute shell commands to solve the user's problem. "
+                    "You must test your code by running it before finalizing your answer. "
+                    "Iterate using tools until you have completely fulfilled the user's request. "
+                )
+                
+                agent_messages = [{"role": "system", "content": agent_sys_prompt}, *messages]
+                full_content = ""
+                last_usage = {}
+                
+                for agent_loop in range(15):
+                    finish_reason = "stop"
+                    loop_content = ""
+                    tool_calls_dict = {}
+                    
+                    async for chunk in client.stream_chat(
+                        model=selected_model,
+                        messages=agent_messages,
+                        temperature=0.3,
+                        max_tokens=MAX_TOKENS,
+                        tools=TOOLS_SCHEMA
+                    ):
+                        try:
+                            choice = chunk.get("choices", [{}])[0]
+                            if chunk.get("usage"): last_usage = chunk["usage"]
+                            delta = choice.get("delta", {})
+                            
+                            token = delta.get("content", "")
+                            if token:
+                                loop_content += token
+                                full_content += token
+                                yield {"type": "token", "content": token}
+                                
+                            if "tool_calls" in delta and delta["tool_calls"]:
+                                for tc in delta["tool_calls"]:
+                                    idx = tc.get("index", 0)
+                                    if idx not in tool_calls_dict:
+                                        tool_calls_dict[idx] = {
+                                            "id": tc.get("id", ""),
+                                            "type": "function",
+                                            "function": {"name": tc["function"].get("name", ""), "arguments": ""}
+                                        }
+                                    if "function" in tc and "arguments" in tc["function"]:
+                                        tool_calls_dict[idx]["function"]["arguments"] += tc["function"]["arguments"]
+                                        
+                            if "finish_reason" in choice and choice["finish_reason"]:
+                                finish_reason = choice["finish_reason"]
+                        except (KeyError, IndexError):
+                            pass
+                            
+                    if tool_calls_dict:
+                        tc_list = list(tool_calls_dict.values())
+                        agent_messages.append({"role": "assistant", "content": loop_content, "tool_calls": tc_list})
+                        
+                        for tc in tc_list:
+                            func_name = tc["function"]["name"]
+                            try:
+                                args = json.loads(tc["function"]["arguments"])
+                            except Exception:
+                                args = {}
+                                
+                            yield {"type": "status", "content": f"Running {func_name}..."}
+                            yield {"type": "tool_call", "name": func_name, "args": args}
+                            
+                            result = execute_tool(func_name, args, workspace_root)
+                            
+                            agent_messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc["id"],
+                                "name": func_name,
+                                "content": str(result)
+                            })
+                        continue
+                        
+                    if finish_reason == "length":
+                        log.warning("Agent hit max_tokens length. Auto-continuing...")
+                        agent_messages.append({"role": "assistant", "content": loop_content})
+                        agent_messages.append({"role": "user", "content": "Continue exactly where you left off, from the very next character."})
+                        continue
+                        
+                    break
+                    
+                elapsed = time.perf_counter() - t0
+                synthetic_raw = {"choices": [{"message": {"content": full_content}}], "usage": last_usage}
+                hop = _timed_hop("agentic_loop", selected_model, synthetic_raw, elapsed)
+                hops.append(hop)
+                
+                aggregate_usage = TokenUsage()
+                for h in hops:
+                    aggregate_usage = aggregate_usage + h.usage
+                log.info("Pipeline complete — aggregate tokens: [%s]", aggregate_usage)
+                return
             else:
-                minimized_history = []
+                if is_continuation:
+                    task_type = TaskType.CODING_COMPLEX
+                    yield {"type": "status", "content": "Resuming code generation..."}
+                else:
+                    minimized_history = []
                 if history:
                     last_msg = history[-1]
                     content = last_msg.get("content", "")
@@ -959,20 +1082,55 @@ async def ask_stream(
                     {"role": "user", "content": f"User Query: {user_query}\n\nArchitecture/Plan:\n{raw_reasoning[-MAX_STAGE_INPUT_CHARS:]}"}
                 ]
                 try:
-                    async for chunk in client.stream_chat(
-                        model=Model.CODE_COMPLEX.value,
-                        messages=code_messages,
-                        temperature=0.2,
-                        max_tokens=MAX_TOKENS,
-                    ):
-                        choice = chunk.get("choices", [{}])[0]
-                        token = choice.get("delta", {}).get("content", "")
-                        if token:
-                            raw_code += token
-                            yield {"type": "token", "content": token}
-                        if chunk.get("keepalive"):
-                            yield {"type": "status", "content": "Writing code..."}
-
+                    last_code_usage = {}
+                    for i in range(MAX_CONTINUATION_LOOPS):
+                        finish_reason = "stop"
+                        loop_content = ""
+                        async for chunk in client.stream_chat(
+                            model=Model.CODE_COMPLEX.value,
+                            messages=code_messages,
+                            temperature=0.2,
+                            max_tokens=MAX_TOKENS,
+                        ):
+                            try:
+                                choice = chunk.get("choices", [{}])[0]
+                                if chunk.get("usage"):
+                                    last_code_usage = chunk["usage"]
+                                delta = choice.get("delta", {})
+                                token = delta.get("content", "")
+                                if token:
+                                    raw_code += token
+                                    loop_content += token
+                                    yield {"type": "token", "content": token}
+                                    
+                                if "finish_reason" in choice and choice["finish_reason"]:
+                                    finish_reason = choice["finish_reason"]
+                                    
+                                if chunk.get("keepalive"):
+                                    yield {"type": "status", "content": "Writing code..."}
+                            except (KeyError, IndexError):
+                                pass
+                                
+                        if finish_reason == "length":
+                            log.warning("MiMo hit max_tokens length. Auto-continuing (loop %d)...", i+1)
+                            
+                            # Heal RLHF auto-closed markdown blocks at truncation boundaries
+                            strip_len = 0
+                            if loop_content.endswith("```\n"): strip_len = 4
+                            elif loop_content.endswith("```"): strip_len = 3
+                            elif loop_content.endswith("``"): strip_len = 2
+                            elif loop_content.endswith("`"): strip_len = 1
+                            
+                            if strip_len > 0:
+                                loop_content = loop_content[:-strip_len]
+                                raw_code = raw_code[:-strip_len]
+                                yield {"type": "backspace", "count": strip_len}
+                                
+                            code_messages.append({"role": "assistant", "content": loop_content})
+                            code_messages.append({"role": "user", "content": "Continue exactly where you left off, from the very next character. Do not repeat anything, do not write intro text or markdown blocks, just the raw continuation."})
+                        else:
+                            break
+                            
                     elapsed = time.perf_counter() - t0_code
                     hop_code = _timed_hop("2:coding", Model.CODE_COMPLEX.value, {"content": raw_code}, elapsed)
                     hop_code.log_summary()
@@ -1032,6 +1190,19 @@ async def ask_stream(
                                 
                         if finish_reason == "length":
                             log.warning("MiMo hit max_tokens length. Auto-continuing (loop %d)...", i+1)
+                            
+                            # Heal RLHF auto-closed markdown blocks at truncation boundaries
+                            strip_len = 0
+                            if loop_content.endswith("```\n"): strip_len = 4
+                            elif loop_content.endswith("```"): strip_len = 3
+                            elif loop_content.endswith("``"): strip_len = 2
+                            elif loop_content.endswith("`"): strip_len = 1
+                            
+                            if strip_len > 0:
+                                loop_content = loop_content[:-strip_len]
+                                raw_review = raw_review[:-strip_len]
+                                yield {"type": "backspace", "count": strip_len}
+                                
                             review_messages.append({"role": "assistant", "content": loop_content})
                             review_messages.append({"role": "user", "content": "Continue exactly where you left off, from the very next character. Do not repeat anything, do not write intro text or markdown blocks, just the raw continuation."})
                         else:

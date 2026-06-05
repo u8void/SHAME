@@ -77,7 +77,12 @@ def run_math_benchmark(csv_path: str):
 
             response, t = run_inference(prompt, role=role)
             model_answer = _extract_model_answer(response)
-            passed = (model_answer is not None) and (model_answer == ground_truth)
+            passed = False
+            if model_answer is not None and ground_truth is not None:
+                try:
+                    passed = abs(float(model_answer) - float(ground_truth)) < 1e-9
+                except ValueError:
+                    passed = model_answer.strip() == ground_truth.strip()
             if passed:
                 passed_count += 1
 
