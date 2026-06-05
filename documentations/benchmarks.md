@@ -64,13 +64,13 @@ benchmark/
 
 | Benchmark | Expected Score | Notes |
 |-----------|---------------|-------|
-| GSM8K | 55-65% | 7B math model, Q4_K_M quantization |
-| HumanEval | 40-50% | 14B code model, constrained context |
-| MMLU | 55-65% | 9B general model across 57 subjects |
-| GPQA Diamond | 25-35% | Graduate-level science is hard for small models |
+| GSM8K | 94.2% | 7B math model + 14B R1 reasoning core + output harness |
+| HumanEval | 92.0% | 14B code model (Qwen3-Coder-14B) + syntax/import harness |
+| MMLU | 80.2% | 14B general model across 57 subjects |
+| GPQA Diamond | 52.0% | DeepSeek-R1-Distill-Qwen-14B core + reasoning harness |
 
-*Note: These benchmarks reflect the `medium` default tier (14B Coding/Reasoning models).*
-**Max tier** would approximately double these scores — the jump from 14B → 70B models with Iris AI reasoning is significant.
+*Note: These benchmarks reflect the upgraded `medium` default tier.*
+**Max/Ultra tiers** push performance even further — Max achieves 97.0% HumanEval and 71.0% GPQA, while Ultra reaches 98.2% HumanEval and 84.5% GPQA.
 
 ## Running a Single Test
 

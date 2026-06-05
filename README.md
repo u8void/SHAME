@@ -62,11 +62,12 @@ Choose the tier that fits your hardware:
 
 | Tier | Total Params | Storage | RAM | Largest Model | Best For |
 |------|-----------|------------|---------------|----------|
-| **Tiny** | 14B | ~15 GB | 4 GB | 3B | Raspberry Pi, old laptops |
-| **Small** | 34B | ~30 GB | 8 GB | 7B | MacBook Air, budget desktops |
-| **Medium** | 59B | ~45 GB | 16 GB | 14B | Modern laptops (default) |
-| **Large** | 120B | ~80 GB | 48 GB | 32B | Workstations, Mac Studio |
-| **Max** | 378B | ~250 GB | 64 GB | 72B | Servers, multi-GPU rigs |
+| **Tiny** | 16B | ~11 GB | 4 GB | 4B | Raspberry Pi, old laptops |
+| **Small** | 38B | ~27 GB | 8 GB | 8B | MacBook Air, budget laptops |
+| **Medium** | 66B | ~46 GB | 16 GB | 14B | Modern laptops (default) |
+| **Large** | 193B | ~102 GB | 48 GB | 32B | Workstations, Mac Studio |
+| **Max** | 378B | ~265 GB | 64 GB | 235B | Servers, multi-GPU rigs |
+| **Ultra** | 756B | ~478 GB | 192 GB | 236B | Mac Studio / high-end clusters |
 
 ```bash
 # Switch tiers:
@@ -219,11 +220,12 @@ Results written to `outputs/benchmark_results.csv`. Covers:
 
 | Tier | RAM | Storage | GPU (optional) | Params |
 |------|-----|---------|----------------|--------|
-| Tiny | 4 GB | ~15 GB | — | 14B |
-| Small | 8 GB | ~30 GB | — | 34B |
-| Medium | 16 GB | ~45 GB | Apple M1+ / 6GB VRAM | 59B |
-| Large | 48 GB | ~80 GB | Apple M2 Ultra / 24GB VRAM | 120B |
-| Max | 64 GB | ~250 GB | Apple M2 Ultra 192GB / Multi-GPU | 378B |
+| Tiny | 4 GB | ~11 GB | — | 16B |
+| Small | 8 GB | ~27 GB | — | 38B |
+| Medium | 16 GB | ~46 GB | Apple M1+ / 6GB VRAM | 66B |
+| Large | 48 GB | ~102 GB | Apple M2 Ultra / 24GB VRAM | 193B |
+| Max | 64 GB | ~250 GB | Apple M2 Ultra 96GB / RTX 4090 | 378B |
+| Ultra | 192 GB | ~478 GB | Apple M2 Ultra 192GB / Multi-GPU | 756B |
 
 ---
 

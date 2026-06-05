@@ -120,11 +120,12 @@ python train.py --size max --download-models
 
 | Tier | Triage | Code | Math | Reasoning | General | Vision | Total Params |
 |------|--------|------|------|-----------|---------|--------|-------|
-| Tiny | 0.5B | 1.5B | 1.5B | 3B | 3B | 3B | 14B |
-| Small | 3B | 7B | 7B | 7B | 3B | 4B | 34B |
-| Medium | 3B | 14B | 7B | 14B | 9B | 4B | 59B |
-| Large | 7B | 32B | 14B | 32B | 20B | 8B | 120B |
-| Max | 32B | 32B+ | 72B | 70B | 70B | 72B | 378B |
+| Tiny | 1.7B | 3B | 1.5B | 3B | 4B | 3B | 16B |
+| Small | 4B | 8B | 7B | 7B | 8B | 7B | 38B |
+| Medium | 4B | 14B | 7B | 14B | 14B | 7B | 66B |
+| Large | 8B | 32B | 32B | 32B | 32B | 8B | 193B |
+| Max | 32B | 32B+ | 72B | 235B | 32B | 72B | 378B |
+| Ultra | 35B | 120B | 120B | 236B | 17B-128E | 72B | 756B |
 
 ---
 

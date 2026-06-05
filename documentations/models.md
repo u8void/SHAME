@@ -19,59 +19,70 @@ Iris uses **8 distinct roles**, each backed by a specialized GGUF model. The rol
 
 ## Model Selection By Tier
 
-### Tiny — 14B params (~15 GB, 4 GB RAM)
+### Tiny — 16B params (4 GB RAM)
 | Role | Model | Parameters |
 |------|-------|------------|
-| Triage | Iris AI Triage | 0.5B |
-| Router | Iris AI Router | 1.5B |
+| Triage | Iris AI Triage | 1.7B |
+| Router | Iris AI Router | 1.7B |
 | Math | Iris AI Math | 1.5B |
-| Code | Iris AI Code | 1.5B |
+| Code | Iris AI Code | 3B |
 | Reasoning | Iris AI Reasoning | 3B |
-| General | Iris AI General | 3B |
+| General | Iris AI General | 4B |
 | Vision | Iris AI Vision | 3B |
 
-### Small — 34B params (~30 GB, 8 GB RAM)
+### Small — 38B params (8 GB RAM)
 | Role | Model | Parameters |
 |------|-------|------------|
-| Triage | Iris AI Triage | 3B |
-| Router | Iris AI Router | 3B |
+| Triage | Iris AI Triage | 4B |
+| Router | Iris AI Router | 4B |
 | Math | Iris AI Math | 7B |
-| Code | Iris AI Code | 7B |
+| Code | Iris AI Code | 8B |
 | Reasoning | Iris AI Reasoning | 7B |
-| General | Iris AI General | 3B |
-| Vision | Iris AI Vision | 4B |
+| General | Iris AI General | 8B |
+| Vision | Iris AI Vision | 7B |
 
-### Medium — 59B params (~45 GB, 16 GB RAM) [DEFAULT]
+### Medium — 66B params (16 GB RAM) [DEFAULT]
 | Role | Model | Parameters |
 |------|-------|------------|
-| Triage | Iris AI Triage | 3B |
+| Triage | Iris AI Triage | 4B |
 | Router | Iris AI Router | 8B |
 | Math | Iris AI Math | 7B |
 | Code | Iris AI Code | 14B |
 | Reasoning | Iris AI Reasoning | 14B |
-| General | Iris AI General | 9B |
-| Vision | Iris AI Vision | 4B |
+| General | Iris AI General | 14B |
+| Vision | Iris AI Vision | 7B |
 
-### Large — 120B params (~80 GB, 48 GB RAM)
+### Large — 193B params (48 GB RAM)
 | Role | Model | Parameters |
 |------|-------|------------|
-| Triage | Iris AI Triage | 7B |
-| Router | Iris AI Router | 7B |
-| Math | Iris AI Math | 14B |
+| Triage | Iris AI Triage | 8B |
+| Router | Iris AI Router | 32B |
+| Math | Iris AI Math | 32B |
 | Code | Iris AI Code | 32B |
 | Reasoning | Iris AI Reasoning | 32B |
-| General | Iris AI General | 20B |
+| General | Iris AI General | 32B |
 | Vision | Iris AI Vision | 8B |
 
-### Max — 378B params (~250 GB, 64 GB RAM)
+### Max — 378B params (64 GB RAM)
 | Role | Model | Parameters |
 |------|-------|------------|
 | Triage | Iris AI Triage | 32B |
 | Router | Iris AI Router | 32B |
 | Math | Iris AI Math | 72B |
-| Code | Iris AI Code | 236B |
-| Reasoning | Iris AI Reasoning | 70B |
-| General | Iris AI General | 70B |
+| Code | Iris AI Code | 32B+ |
+| Reasoning | Iris AI Reasoning | 235B (MoE) |
+| General | Iris AI General | 32B |
+| Vision | Iris AI Vision | 72B |
+
+### Ultra — 756B params (192 GB RAM)
+| Role | Model | Parameters |
+|------|-------|------------|
+| Triage | Iris AI Triage | 35B |
+| Router | Iris AI Router | 32B |
+| Math | Iris AI Math | 120B |
+| Code | Iris AI Code | 120B |
+| Reasoning | Iris AI Reasoning | 236B |
+| General | Iris AI General | 17B-128E |
 | Vision | Iris AI Vision | 72B |
 
 ---

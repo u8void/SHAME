@@ -112,7 +112,7 @@ def parse_args():
                         help="Roles to train: triage, router, math, code, reasoning, general, all")
     parser.add_argument("--quant-type", choices=["q4_k_m", "q8_0", "f16"], default="q4_k_m",
                         help="GGUF quantization level")
-    parser.add_argument("--size", choices=["tiny", "small", "medium", "large", "max"], default="medium",
+    parser.add_argument("--size", choices=["tiny", "small", "medium", "large", "max", "ultra"], default="medium",
                         help="Iris AI model size tier (tiny/small/medium/large/max)")
     parser.add_argument("--skip-gguf", action="store_true", help="Skip merge and GGUF conversion")
     parser.add_argument("--resume", action="store_true", help="Resume training from the last successful checkpoint/model")
