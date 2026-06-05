@@ -1,5 +1,5 @@
 {
-  "_description": "Iris AI — Large (193B total params). 8B–32B models. Fits 48 GB RAM. Beats Qwen3-32B, Qwen3-30B-A3B MoE, Mistral Large 3 at same RAM.",
+  "_description": "Iris AI — Large (193B total params). 8B–32B models. Fits 24 GB RAM. Beats Qwen3-32B, Qwen3-30B-A3B MoE, Mistral Large 3 at same RAM.",
   "models": {
     "triage": "Qwen/Qwen3-8B",
     "router": "Qwen/Qwen3-Coder-32B",

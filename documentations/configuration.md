@@ -124,7 +124,7 @@ python train.py --size max --download-models
 | Small | 4B | 8B | 7B | 7B | 8B | 7B | 38B |
 | Medium | 4B | 14B | 7B | 14B | 14B | 7B | 66B |
 | Large | 8B | 32B | 32B | 32B | 32B | 8B | 193B |
-| Max | 32B | 32B+ | 72B | 235B | 32B | 72B | 378B |
+| Max | 32B | 32B+ | 72B | 70B | 32B | 26B | 328B |
 | Ultra | 35B | 120B | 120B | 236B | 17B-128E | 72B | 756B |
 
 ---

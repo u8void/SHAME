@@ -52,7 +52,7 @@ Iris uses **8 distinct roles**, each backed by a specialized GGUF model. The rol
 | General | Iris AI General | 14B |
 | Vision | Iris AI Vision | 7B |
 
-### Large — 193B params (48 GB RAM)
+### Large — 193B params (24 GB RAM)
 | Role | Model | Parameters |
 |------|-------|------------|
 | Triage | Iris AI Triage | 8B |
@@ -63,16 +63,16 @@ Iris uses **8 distinct roles**, each backed by a specialized GGUF model. The rol
 | General | Iris AI General | 32B |
 | Vision | Iris AI Vision | 8B |
 
-### Max — 378B params (64 GB RAM)
+### Max — 328B params (48 GB RAM)
 | Role | Model | Parameters |
 |------|-------|------------|
 | Triage | Iris AI Triage | 32B |
 | Router | Iris AI Router | 32B |
 | Math | Iris AI Math | 72B |
 | Code | Iris AI Code | 32B+ |
-| Reasoning | Iris AI Reasoning | 235B (MoE) |
+| Reasoning | Iris AI Reasoning | 70B |
 | General | Iris AI General | 32B |
-| Vision | Iris AI Vision | 72B |
+| Vision | Iris AI Vision | 26B |
 
 ### Ultra — 756B params (192 GB RAM)
 | Role | Model | Parameters |

@@ -65,8 +65,8 @@ Choose the tier that fits your hardware:
 | **Tiny** | 16B | ~11 GB | 4 GB | 4B | Raspberry Pi, old laptops |
 | **Small** | 38B | ~27 GB | 8 GB | 8B | MacBook Air, budget laptops |
 | **Medium** | 66B | ~46 GB | 16 GB | 14B | Modern laptops (default) |
-| **Large** | 193B | ~102 GB | 48 GB | 32B | Workstations, Mac Studio |
-| **Max** | 378B | ~265 GB | 64 GB | 235B | Servers, multi-GPU rigs |
+| **Large** | 193B | ~102 GB | 24 GB | 32B | Workstations, Mac Studio |
+| **Max** | 328B | ~235 GB | 48 GB | 72B | Servers, multi-GPU rigs |
 | **Ultra** | 756B | ~478 GB | 192 GB | 236B | Mac Studio / high-end clusters |
 
 ```bash
@@ -223,8 +223,8 @@ Results written to `outputs/benchmark_results.csv`. Covers:
 | Tiny | 4 GB | ~11 GB | — | 16B |
 | Small | 8 GB | ~27 GB | — | 38B |
 | Medium | 16 GB | ~46 GB | Apple M1+ / 6GB VRAM | 66B |
-| Large | 48 GB | ~102 GB | Apple M2 Ultra / 24GB VRAM | 193B |
-| Max | 64 GB | ~250 GB | Apple M2 Ultra 96GB / RTX 4090 | 378B |
+| Large | 24 GB | ~102 GB | Apple M2 Ultra / 24GB VRAM | 193B |
+| Max | 48 GB | ~220 GB | Apple M3 Max 48GB / 2x RTX 3090 | 328B |
 | Ultra | 192 GB | ~478 GB | Apple M2 Ultra 192GB / Multi-GPU | 756B |
 
 ---
