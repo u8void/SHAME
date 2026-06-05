@@ -1,5 +1,5 @@
 {
-  "_description": "Iris AI \u2014 Medium (~45 GB total). Current default. Fits 32 GB RAM.",
+  "_description": "Iris AI \u2014 Medium (~45 GB total). Current default. Fits 16 GB RAM.",
   "models": {
     "triage": "meta-llama/Llama-3.2-3B-Instruct",
     "router": "NousResearch/Hermes-3-Llama-3.1-8B",

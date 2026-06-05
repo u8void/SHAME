@@ -1,423 +1,253 @@
-<img width="500" height="500" alt="Retina_Eye_Care_Logo__1_-removebg-preview" src="https://github.com/user-attachments/assets/034506ea-4183-46f1-b3ac-b3a987b47db4" />
+<p align="center">
+  <img src="static/logo.png" width="120" alt="Iris AI Logo">
+</p>
 
-# Iris AI — Technical Documentation
+<h1 align="center">Iris AI</h1>
 
-## Overview
+<p align="center">
+  <strong>Local Multi-Model AI Router — Private. Offline. Specialized.</strong>
+</p>
 
-Iris AI is a fine-tuned conversational assistant built on top of `google/gemma-2-2b-it`. The system supports LoRA-based supervised fine-tuning (SFT) across CUDA, MPS (Apple Silicon), and CPU backends, with a Flask web interface and a terminal chat client. Training uses Gemma's native chat template throughout, and inference is handled via a shared generation pipeline in `iris.py`.
-
----
-
-## Repository Structure
-
-```
-iris/
-├── iris.py            # Unified Backend: MLX, CUDA, and CPU support + data loaders
-├── iris_pro.py        # Advanced multi-agent Orchestrator & Reasoning routing logic
-├── train.py           # Legacy Torch training entry point
-├── app.py             # Flask web server (unified backend)
-├── controller.py      # PC Agent controller (unified backend)
-├── training/          # Custom markdown training files
-├── mlx_data/          # MLX training data (JSONL)
-├── iris_14b_model/    # Quantized model
-└── templates/
-    └── index.html     # Web UI template
-```
+<p align="center">
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#architecture">Architecture</a> •
+  <a href="#models">Models</a> •
+  <a href="#training">Training</a> •
+  <a href="documentations/">Documentation</a>
+</p>
 
 ---
 
-## Hardware Support
+## What is Iris AI?
 
-Iris AI now uses a **Unified Backend** that automatically detects your hardware:
+Iris AI is a **local AI routing system** that runs multiple specialized GGUF models on your machine. Instead of one large general-purpose model trying to do everything, Iris routes every query to the best specialist.
 
-- **Apple Silicon (M1-M4)**: Uses `mlx_lm` for high-speed inference and training.
-- **NVIDIA GPU**: Uses `transformers` with `bitsandbytes` 4-bit quantization.
-- **CPU**: Universal fallback using standard `transformers`.
+| Role | Purpose | Example Query |
+|------|---------|--------------|
+| **Triage** | Classify & route queries | *"build me an OS kernel"* → `[ROUTE: CODE_COMPLEX]` |
+| **Code** | Generate code, fix bugs | Full apps, websites, kernels, scripts |
+| **Math** | Equations, proofs, computation | Calculus, linear algebra, statistics |
+| **Reasoning** | System design, strategy, debugging | Architecture decisions, scaling, tradeoffs |
+| **General** | Knowledge, explanations, comparisons | "Explain quantum computing", "React vs Vue" |
+| **Vision** | Analyze images | Screenshots, diagrams, photos |
+
+**No cloud. No API keys. Everything runs on your hardware.**
 
 ---
 
-## Module Reference
-
-### `iris.py`
-
-The core engine. Automatically routes requests to the correct hardware backend.
-
-#### Functions
-
-- `load_model()`: Loads the appropriate model (Phi-4 by default).
-- `generate_reply(model, tokenizer, prompt, ...)`: Unified generation with support for both MLX and Transformers.
-- `solve_math(text)`: Sympy-based math interceptor.
-- `load_*_dataset()`: Collection of data loaders for training.
-
-### `iris_pro.py`
-
-Advanced multi-agent routing pipeline (`OpenRouterClient`) for high-complexity tasks.
-
-#### Architecture Features
-
-- **Triage Stage**: A lightweight router that classifies whether a user query requires deep reasoning or can be answered conversationally.
-- **Reasoning Stage**: Uses deep-thinking models (e.g. `mimo-v2.5-pro` or `qwen3-32b`) to build a chain-of-thought analysis before generating a draft.
-- **Orchestrator Stage**: A secondary model (e.g. `llama-3.3-70b-versatile`) synthesizes the reasoning draft into a clean, formatted final answer.
-- **Rate Limit Resilience**: Gracefully handles API provider (Groq/Ocenza) `429 Rate Limited` and `413 Payload Too Large` (Tokens-Per-Minute limit) errors using exponential back-off retries and context-safe auto-continuation loops.
-- **Strict Anti-Comment Policy**: System prompts strictly forbid code generation models from typing code comments, keeping output incredibly dense and logic-focused.
-
-### `train_mlx.py`
-
-Recommended for Mac users. A simple wrapper for the MLX LoRA training pipeline.
+## Quick Start
 
 ```bash
-python3 train_mlx.py --iters 3000 --batch-size 1 --lr 2e-5
+# 1. One-time setup
+bash setup.sh
+
+# 2. Download models for your tier
+python train.py --size medium --download-models
+
+# 3. Start the web interface
+python app.py
+
+# 4. Or use the PC controller (CLI agent)
+./controller        # C++ binary (build: g++ -std=c++17 -O2 controller.cpp -lcurl -o controller)
+python controller.py   # Python fallback
+
+# 5. Open browser → http://localhost:5000
 ```
-
-#### Constants
-
-| Name | Value | Purpose |
-|---|---|---|
-| `USER_TOKEN` | `"User:"` | Fallback prompt prefix when no chat template is present |
-| `BOT_TOKEN` | `"Bot:"` | Fallback response prefix |
-| `EOS_TOKEN` | `"<\|endoftext\|>"` | End-of-sequence marker for non-Gemma tokenizers |
-
-#### `get_device(force_cpu=False) -> torch.device`
-
-Returns the best available device. Priority: CUDA > MPS > CPU. Passing `force_cpu=True` bypasses GPU detection.
-
-#### `is_degenerate(text: str) -> bool`
-
-Filters low-quality training samples. A string is considered degenerate if:
-- It is empty or shorter than 10 characters
-- Fewer than 50% of characters are alphabetic
-- Fewer than 15 unique characters for strings longer than 20 characters
-
-Used inside `prepare_conversations()` to remove noise from BST and DailyDialog before training.
-
-#### `load_blended_skill_talk(subset_size=None) -> list[tuple[str, str]]`
-
-Loads the `blended_skill_talk` HuggingFace dataset. Extracts consecutive utterance pairs from `previous_utterance` and seeds the first `free_messages` reply as an additional pair. Returns a list of `(user, bot)` string tuples.
-
-#### `load_daily_dialog(subset_size=None) -> list[tuple[str, str]]`
-
-Loads the `daily_dialog` HuggingFace dataset. Extracts all consecutive turn pairs from each dialog. Falls back to `trust_remote_code=True` if the default load fails.
-
-#### `load_markdown_files(md_dir="md", pattern="*.md") -> list[tuple[str, str]]`
-
-Parses custom training files from a directory. Expected line format:
-
-```
-User: <user message>
-Bot: <bot reply>
-```
-
-Lines beginning with `#` or `<!--` are skipped. Pairs are only recorded when a `Bot:` line immediately follows a `User:` line. Supports case-insensitive matching (`USER:`, `BOT:`, etc.).
-
-#### `prepare_conversations(bst_size, dd_size, md_dir, use_bst, use_dd, use_md) -> list[tuple[str, str]]`
-
-Aggregates pairs from all enabled sources, applies the `is_degenerate` filter, and shuffles the result. Called from `train.py`'s data loading step.
-
-#### `SFTDataset`
-
-A `torch.utils.data.Dataset` that tokenizes `(user, bot)` pairs using `tokenizer.apply_chat_template()`. Computes a per-token `loss_mask` that masks the prompt tokens, ensuring loss is computed only on the bot response. Used by the legacy training path in `iris.py` — not used by the current `train.py`.
-
-#### `collate_fn(batch, tokenizer)`
-
-Pads a batch of variable-length samples to the longest sequence in the batch. Returns a dict with `input_ids` and `loss_mask` tensors.
-
-#### `train_one_epoch(...)`
-
-Manual training loop with gradient accumulation and gradient clipping. Calls `torch.mps.empty_cache()` after each accumulation step on MPS to prevent memory fragmentation.
-
-#### `evaluate(model, loader, device) -> float`
-
-Runs a masked cross-entropy evaluation pass with `torch.no_grad()`. Returns average loss per token.
-
-#### `generate_reply(model, tokenizer, prompt_text, device, ...) -> str`
-
-Core inference function. Parameters:
-
-| Parameter | Default | Description |
-|---|---|---|
-| `max_new_tokens` | 300 | Maximum tokens to generate |
-| `temperature` | 0.3 | Sampling temperature (lower = more deterministic) |
-| `top_p` | 0.85 | Nucleus sampling cutoff |
-| `top_k` | 40 | Top-k sampling cutoff |
-| `repetition_penalty` | 1.25 | Penalises repeated n-grams |
-
-Stop token behaviour: resolves `<end_of_turn>` from the tokenizer vocabulary and appends it to `eos_token_id` so Gemma stops cleanly at the end of its turn. Generated tokens are decoded with `skip_special_tokens=True`, then residual HTML-like tags are stripped with a regex.
-
-#### `chat(model, tokenizer, device)`
-
-Interactive terminal chat loop. Maintains a rolling message history (capped at 20 entries). Uses `tokenizer.apply_chat_template()` when a chat template is present, falling back to `User:/Bot:` formatting otherwise. Initialises the history with a system-style primer exchange to establish Iris's identity and language-mirroring behaviour before the user speaks.
 
 ---
 
-### `train.py`
+## Size Tiers
 
-Unified training entry point. Detects the hardware backend and applies the appropriate LoRA configuration and training loop.
+Choose the tier that fits your hardware:
 
-#### Device Modes
-
-| Device | Mode | Precision | LoRA r | Loop |
-|---|---|---|---|---|
-| CUDA | `cuda_qlora` | 4-bit NF4 + FP16 compute | 32 | HuggingFace Trainer |
-| MPS | `mps_fp16` | FP16 (no autocast) | 16 | Manual loop |
-| CPU | `cpu_fp32` | FP32 | 8 | Manual loop |
-
-#### Arguments
-
-| Argument | Default | Description |
-|---|---|---|
-| `--model` | `mlx-community/phi-4-4bit` | HuggingFace model ID or alias (`tiny`, `small`, `medium`, `large`) |
-| `--epochs` | 5 | Number of training epochs |
-| `--lr` | 2e-4 | AdamW learning rate |
-| `--max-pairs` | 5000 | Maximum training pairs (global cap) |
-| `--bst-size` | None | Override pair count for BST specifically |
-| `--dd-size` | None | Override pair count for DailyDialog specifically |
-| `--md-dir` | `training` | Directory containing `*.md` training files |
-| `--no-bst` | false | Disable BlendedSkillTalk |
-| `--no-dd` | false | Disable DailyDialog |
-| `--no-md` | false | Disable markdown files |
-| `--max-length` | 64 | Max tokenized sequence length |
-| `--batch-size` | 1 | Per-device batch size |
-| `--accum-steps` | 8 | Gradient accumulation steps |
-| `--device` | auto | Manually override device (`cuda`, `mps`, `cpu`) |
-| `--force-cpu` | false | Force CPU even if GPU is available |
-| `--output-dir` | `./iris_lora_unified` | Directory for LoRA adapter checkpoints |
-| `--chat-after-train` | false | Launch terminal chat after training completes |
-
-#### Model Aliases
-
-You can pass standard aliases to the `--model` argument to automatically resolve specific HuggingFace repositories:
-- `tiny`: `google/gemma-4-E2B-it`
-- `small`: `shb777/Llama-3.3-8B-Instruct-128K`
-- `medium`: `microsoft/phi-4`
-- `large`: `Qwen/Qwen3.6-27B`
-
-#### Training Pipeline
-
-1. Tokenizer loaded from `--model-name`. `pad_token` is set to `eos_token` if absent.
-2. Conversation pairs loaded via `load_conversations()`, formatted with `tokenizer.apply_chat_template()`.
-3. Tokenized with fixed padding to `--max-length`. For CUDA, stored as a HuggingFace `Dataset`; for MPS/CPU, stored as a `TensorDataset`.
-4. Base model loaded in the appropriate precision. Gradient checkpointing enabled on all paths.
-5. LoRA applied via `peft.get_peft_model()` with `target_modules="all-linear"`.
-6. Training runs via `train_cuda()` (Trainer API) or `train_manual()` (manual loop).
-7. LoRA adapter saved per epoch to `{output_dir}_epoch{n}/`.
-8. Final adapter merged into the full model weights via `model.merge_and_unload()` and saved to `./iris_merged_model`.
-
-#### LoRA Configuration
-
-```python
-LoraConfig(
-    r=16,                      # rank (varies by device: 32 CUDA, 16 MPS, 8 CPU)
-    lora_alpha=32,             # scaling factor (2x r)
-    target_modules="all-linear",
-    lora_dropout=0.05,
-    bias="none",
-    task_type=TaskType.CAUSAL_LM,
-)
-```
-
-#### Optimizer and Scheduler
-
-AdamW with `weight_decay=0.01`. Linear warmup over 5% of total steps, then linear decay to zero. Gradient norm clipped to 1.0.
-
----
-
-### `chat.py`
-
-Terminal chat client. Loads the merged model from `./iris_merged_model` and delegates to `iris.chat()`.
-
-Model loading behaviour by device:
-
-| Device | Precision | Quantization |
-|---|---|---|
-| CUDA | FP16 | 4-bit NF4 via bitsandbytes (falls back to FP16 if unavailable) |
-| MPS | FP16 | None |
-| CPU | FP32 | None |
-
-#### Usage
+| Tier | Total Size | RAM Needed | Largest Model | Best For |
+|------|-----------|------------|---------------|----------|
+| **Tiny** | ~15 GB | 4 GB | 3B | Raspberry Pi, old laptops |
+| **Small** | ~30 GB | 8 GB | 8B | MacBook Air, budget desktops |
+| **Medium** | ~45 GB | 16 GB | 14B | Modern laptops (default) |
+| **Large** | ~80 GB | 48 GB | 32B | Workstations, Mac Studio |
+| **Max** | ~250 GB | 64-128 GB | 72B | Servers, multi-GPU rigs |
 
 ```bash
-python3 chat.py
-python3 chat.py --device cpu
-python3 chat.py --device cuda
-python3 chat.py --device mps
+# Switch tiers:
+python train.py --size large --download-models
+# Then edit config/iris.conf: "size": "large"
 ```
-
-Requires `./iris_merged_model` to exist. Run `train.py` first to produce this directory.
 
 ---
 
-### `app.py`
+## Architecture
 
-Flask web server exposing the chat and training pipeline over HTTP. Runs on `127.0.0.1:5050` by default.
-
-#### Startup Flags
-
-| Flag | Description |
-|---|---|
-| `--preview-only` | Start the server without loading the model. All `/chat` requests return a mock response. Useful for UI development. |
-| `--force-cpu` | Load and run the model on CPU in FP32 regardless of available hardware. |
-
-The `FORCE_CPU` environment variable (`1`, `true`, or `yes`) has the same effect as `--force-cpu`.
-
-#### Model Loading
-
-`init_model()` is called lazily on the first request via `@app.before_request`. It is thread-safe (protected by `threading.Lock`). If `./iris_merged_model` does not exist, it falls back to loading `google/gemma-2-2b-it` directly from HuggingFace.
-
-#### Endpoints
-
-**`GET /`**
-Renders `templates/index.html`.
-
-**`POST /chat`**
-
-Accepts JSON:
-```json
-{
-  "chat_id": "string",
-  "message": "string",
-  "history": "string",
-  "settings": {
-    "max_new_tokens": 40,
-    "temperature": 0.6,
-    "top_p": 0.9,
-    "top_k": 40,
-    "repetition_penalty": 1.3,
-    "max_sentences": 1
-  }
-}
+```
+User Query
+    │
+    ▼
+┌──────────┐     ┌──────────┐     ┌──────────┐
+│  TRIAGE  │────▶│  GENERAL │     │   MATH   │
+│  (gate)  │     │  (info)  │     │ (calc)   │
+└────┬─────┘     └──────────┘     └──────────┘
+     │
+     ├──▶ ┌──────────┐     ┌──────────┐
+     │    │CODE_SIMPLE│     │ REASONING│
+     │    │(snippets) │     │ (design) │
+     │    └──────────┘     └──────────┘
+     │
+     └──▶ ┌──────────┐
+          │CODE_COMPLEX│
+          │(full apps) │
+          └──────────┘
 ```
 
-`history` is a plain-text string of prior turns. It is trimmed to the last 6 non-empty lines before being prepended to the prompt. The bot reply is appended to `logs/{chat_id}.txt`.
-
-Returns:
-```json
-{ "reply": "string" }
-```
-
-**`POST /train`**
-
-Launches `train.py` as a subprocess. Accepts JSON matching the `train.py` argument set. Output is streamed to `outputs/train_output.txt`. Returns `{"status": "already_running"}` if a training process is active.
-
-**`GET /train_logs`**
-
-Returns the contents of `outputs/train_output.txt` as `{"logs": "string"}`.
-
-**`GET /train_status`**
-
-Returns `{"running": true|false}`.
-
-**`POST /stop_train`**
-
-Sends `SIGTERM` to the training subprocess. Waits up to 5 seconds, then sends `SIGKILL` if it has not exited.
+**Only one model loaded at a time.** The triage model analyzes the query, outputs a routing tag, and the specialist model loads to handle the request.
 
 ---
 
-## Data Sources
-
-### BlendedSkillTalk (BST)
-
-HuggingFace dataset `blended_skill_talk`. Multi-skill crowdsourced conversations blending persona, empathy, and knowledge. Contains casual English chitchat. Recommended to disable with `--no-bst` if identity stability is a priority, as it introduces human persona patterns that override the model's configured identity.
-
-### DailyDialog
-
-HuggingFace dataset `daily_dialog`. English daily-life dialogues across 10 topic categories. Similar caveats to BST regarding persona leakage.
-
-### Markdown Files
-
-Custom training data in `*.md` files. This is the recommended primary data source for domain-specific or identity-defining behaviour. Format:
+## Project Structure
 
 ```
-User: What is your name?
-Bot: My name is Iris. I am an AI assistant.
-
-User: Write hello world in Python.
-Bot: print("Hello, World!")
+Iris-AI/
+├── app.py                  # Flask web server
+├── controller.py           # Python PC agent (natural-language computer control)
+├── controller.cpp          # C++ PC agent (1:1 port, compiled binary)
+├── train.py                # Unified training pipeline
+├── setup.sh                # One-shot environment setup
+├── README.md               # This file
+├── requirements.txt        # Python dependencies
+│
+├── config/
+│   ├── iris.conf           # Inference settings (temperature, context, models)
+│   ├── control.conf        # PC controller config (email, apps, contacts)
+│   ├── datasets.json       # Training dataset registry per role
+│   └── sizes/              # Size tier definitions
+│       ├── tiny.json
+│       ├── small.json
+│       ├── medium.json
+│       ├── large.json
+│       └── max.json
+│
+├── src/
+│   ├── iris.py             # Core: model loading, routing, streaming, RAG
+│   ├── iris_pro.py         # Pro mode: multi-agent API pipeline
+│   ├── browser_agent.py    # Selenium-based browser automation agent
+│   ├── context_compactor.py # Context window optimization
+│   ├── grpo_trainer.py     # GRPO reinforcement learning trainer
+│   ├── harness.py          # Code/math output post-processing
+│   ├── syntax_checker.py   # Syntax validation for generated code
+│   └── tools_harness.py    # Tool integration harness
+│
+├── training/
+│   ├── coding/             # Code training data (generated_code.md, etc.)
+│   ├── reasoning/          # Reasoning training (chain_of_thought.md, etc.)
+│   ├── math/               # Math training data
+│   ├── general/            # General knowledge (triage_prompt_engineer.md, etc.)
+│   ├── control/            # PC controller training
+│   └── shared/             # Shared across all roles
+│
+├── benchmark/              # Automated evaluation suite
+│   ├── run_all.py          # Orchestrator
+│   ├── test_math.py        # Math benchmarks
+│   ├── test_coding.py      # Code benchmarks
+│   ├── test_mmlu.py        # MMLU (knowledge)
+│   └── test_gpqa.py        # GPQA Diamond (science)
+│
+├── static/                 # Web UI assets (CSS, JS, images)
+├── templates/              # Flask HTML templates
+├── models/                 # Downloaded GGUF files
+├── outputs/                # Training logs, benchmark results
+├── logs/                   # Chat logs
+├── uploads/                # User-uploaded images
+└── documentations/         # Full documentation set
 ```
-
-Multi-line bot responses are not supported. Only the content on the same line as `Bot:` is captured.
 
 ---
 
-## Model Artifacts
+## Key Features
 
-| Path | Contents |
-|---|---|
-| `./iris_lora_unified/` | Final LoRA adapter (PEFT format) |
-| `./iris_lora_unified_epoch{n}/` | Per-epoch adapter checkpoints |
-| `./iris_merged_model/` | Full merged model weights (used at inference) |
-
-The merged model is produced by `model.merge_and_unload()`, which folds the LoRA delta weights into the base model parameters and removes the adapter structure. This is what `chat.py` and `app.py` load.
+- **Multi-model routing**: 8 specialized models, each fine-tuned for its domain
+- **Fully local & private**: No API calls, no data leaves your machine
+- **5 size tiers**: From Raspberry Pi to multi-GPU server
+- **Web interface**: Clean chat UI with streaming, image upload, settings
+- **PC controller**: Natural-language computer control (open apps, files, system ops)
+- **RAG knowledge base**: Index your documents for context-aware answers
+- **Training pipeline**: Fine-tune models with LoRA, quantize to GGUF
+- **Benchmark suite**: Automated evaluation on standard benchmarks
+- **GRPO trainer**: Reinforcement learning from group preference optimization
+- **Browser agent**: Selenium-based web automation
+- **Pro mode**: Multi-agent API pipeline for complex tasks
 
 ---
 
-## Dependencies
+## Training
 
-Core:
-```
-torch >= 2.1
-transformers >= 4.40
-peft >= 0.10
-datasets
-flask
-tqdm
-```
-
-Optional (CUDA only):
-```
-bitsandbytes >= 0.41
-```
-Required for 4-bit QLoRA training and 4-bit inference in `chat.py` on CUDA. Not required for MPS or CPU paths.
-
-Install:
 ```bash
-pip install torch transformers peft datasets flask tqdm
-pip install bitsandbytes  # CUDA only
+# Train a single role:
+python train.py --train-role code --iters 2000
+
+# Train all roles:
+python train.py --size medium --iters 2000
+
+# Custom datasets:
+python train.py --train-role math --iters 3000 --batch-size 2 --accum-steps 4
+
+# Skip GGUF conversion for faster iteration:
+python train.py --train-role code --skip-gguf
 ```
+
+Training data is Markdown files with `USER:` / `BOT:` pairs. See [documentations/training.md](documentations/training.md) for full details.
 
 ---
 
-## Quickstart
+## Benchmarks
 
-**Train on custom markdown data only (recommended):**
 ```bash
-python3 train.py --no-bst --no-dd --md-dir training --epochs 3 --lr 1e-4
+python benchmark/run_all.py
 ```
 
-**Train with all data sources:**
-```bash
-python3 train.py --md-dir training --epochs 5 --max-pairs 5000
-```
-
-**Run terminal chat:**
-```bash
-python3 chat.py
-```
-
-**Run web interface:**
-```bash
-python3 app.py
-# or in preview mode (no model loaded):
-python3 app.py --preview-only
-```
+Results written to `outputs/benchmark_results.csv`. Covers:
+- **Math**: GSM8K, MATH benchmark
+- **Code**: HumanEval, coding exercises
+- **Knowledge**: MMLU (57 subjects)
+- **Science**: GPQA Diamond
 
 ---
 
-## Training Recommendations
+## Hardware Requirements
 
-Disable BST and DailyDialog for assistant-style fine-tuning. Both datasets contain human personas that override the model's identity when trained at any significant volume.
-
-Keep epoch count low. Over-training on a small markdown dataset causes the model to memorise responses verbatim. 2-5 epochs is sufficient for identity grounding.
-
-Use a low learning rate for identity-only fine-tuning. The base Gemma 2 model has strong general capabilities. A learning rate of `1e-4` or lower minimises degradation of those capabilities while allowing personality and identity tuning.
-
-The base model outperforms the fine-tuned model for general tasks such as coding, multilingual output, and factual Q&A. If those capabilities are the primary requirement, use `google/gemma-2-2b-it` directly with a system prompt via `iris.chat()` rather than a fine-tuned merged model.
+| Tier | RAM | Storage | GPU (optional) |
+|------|-----|---------|----------------|
+| Tiny | 4 GB | 15 GB | — |
+| Small | 8 GB | 30 GB | — |
+| Medium | 16 GB | 45 GB | Apple M1+ / 6GB VRAM |
+| Large | 48 GB | 80 GB | Apple M2 Ultra / 24GB VRAM |
+| Max | 64 GB | 250 GB | Apple M2 Ultra 192GB / Multi-GPU |
 
 ---
 
-## Known Limitations
+## Full Documentation
 
-- Multi-line `Bot:` responses in markdown files are not supported. Only the first line after `Bot:` is captured by `load_markdown_files()`.
-- The `max_sentences` parameter is accepted by `app.py` and forwarded to `generate_reply()`, but `generate_reply()` in `iris.py` does not implement sentence-count truncation. Passing this argument will raise a `TypeError`.
-- MPS does not support `torch.autocast`, so training runs in raw FP16 without mixed-precision gradient scaling. This is stable for Gemma 2 but may cause gradient underflow on other architectures.
-- `iris.py` imports the `re` module twice at the module level.
-- Per-epoch adapter checkpoints are not cleaned up automatically. Disk usage grows by one full adapter per epoch.
+All detailed docs live in [`documentations/`](documentations/):
+
+| Document | Covers |
+|----------|--------|
+| [Architecture](documentations/architecture.md) | Full system design, data flow, component interactions |
+| [Configuration](documentations/configuration.md) | Every config file, every setting explained |
+| [Models](documentations/models.md) | Size tiers, role descriptions, model selection logic |
+| [Router](documentations/router.md) | Triage model, classification, routing decisions |
+| [Training](documentations/training.md) | Training pipeline, data format, LoRA, GGUF conversion |
+| [Controller](documentations/controller.md) | PC agent actions, intent detection, platform support |
+| [API Reference](documentations/api.md) | Flask endpoints, request/response formats |
+| [Benchmarks](documentations/benchmarks.md) | Evaluation suite, scoring, results format |
+| [Performance](documentations/performance.md) | Optimization, hardware tuning, latency benchmarks |
+
+---
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center">
+  Built with ❤️ by the Iris team<br>
+  <sub>Ahmed Barakat, Mazen Khaled, and contributors</sub>
+</p>

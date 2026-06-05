@@ -1,11 +1,11 @@
 {
-  "_description": "Iris AI \u2014 Large (~80 GB total). Top-tier models. Fits 64 GB RAM / CUDA 48 GB.",
+  "_description": "Iris AI \u2014 Large (~80 GB total). Top-tier models. Fits 48-64 GB RAM.",
   "models": {
     "triage": "Qwen/Qwen2.5-7B-Instruct",
     "router": "Qwen/Qwen2.5-Coder-7B-Instruct",
     "control": "Qwen/Qwen2.5-Coder-7B-Instruct",
     "math": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
-    "code": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+    "code": "Qwen/Qwen2.5-Coder-32B-Instruct",
     "reasoning": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
     "general": "Qwen/Qwen3.5-20B-Instruct",
     "vision": "Qwen/Qwen3-VL-8B-Instruct"
@@ -38,7 +38,7 @@
     "router": "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
     "control": "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
     "math": "deepseek-r1-distill-qwen-14b-q4_k_m.gguf",
-    "code": "deepseek-r1-distill-qwen-32b-q4_k_m.gguf",
+    "code": "qwen2.5-coder-32b-instruct-q4_k_m.gguf",
     "reasoning": "deepseek-r1-distill-qwen-32b-q4_k_m.gguf",
     "general": "qwen3.5-20b-instruct-q4_k_m.gguf",
     "vision": "Qwen3-VL-8B-Instruct-Q4_K_M.gguf"

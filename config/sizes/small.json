@@ -1,5 +1,5 @@
 {
-  "_description": "Iris AI \u2014 Small (~30 GB total). 3B\u20138B models. Fits 16 GB RAM (swap required for 8B at inference).",
+  "_description": "Iris AI \u2014 Small (~30 GB total). 3B\u20138B models. Fits 8 GB RAM (swap required for 8B at inference).",
   "models": {
     "triage": "meta-llama/Llama-3.2-3B-Instruct",
     "router": "Qwen/Qwen2.5-Coder-3B-Instruct",
