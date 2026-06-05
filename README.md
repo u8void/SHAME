@@ -60,13 +60,13 @@ python controller.py   # Python fallback
 
 Choose the tier that fits your hardware:
 
-| Tier | Total Size | RAM Needed | Largest Model | Best For |
+| Tier | Total Params | Storage | RAM | Largest Model | Best For |
 |------|-----------|------------|---------------|----------|
-| **Tiny** | ~15 GB | 4 GB | 3B | Raspberry Pi, old laptops |
-| **Small** | ~30 GB | 8 GB | 8B | MacBook Air, budget desktops |
-| **Medium** | ~45 GB | 16 GB | 14B | Modern laptops (default) |
-| **Large** | ~80 GB | 48 GB | 32B | Workstations, Mac Studio |
-| **Max** | ~250 GB | 64-128 GB | 72B | Servers, multi-GPU rigs |
+| **Tiny** | 14B | ~15 GB | 4 GB | 3B | Raspberry Pi, old laptops |
+| **Small** | 34B | ~30 GB | 8 GB | 7B | MacBook Air, budget desktops |
+| **Medium** | 59B | ~45 GB | 16 GB | 14B | Modern laptops (default) |
+| **Large** | 120B | ~80 GB | 48 GB | 32B | Workstations, Mac Studio |
+| **Max** | 378B | ~250 GB | 64 GB | 72B | Servers, multi-GPU rigs |
 
 ```bash
 # Switch tiers:
@@ -78,24 +78,28 @@ python train.py --size large --download-models
 
 ## Architecture
 
-```
-User Query
-    │
-    ▼
-┌──────────┐     ┌──────────┐     ┌──────────┐
-│  TRIAGE  │────▶│  GENERAL │     │   MATH   │
-│  (gate)  │     │  (info)  │     │ (calc)   │
-└────┬─────┘     └──────────┘     └──────────┘
-     │
-     ├──▶ ┌──────────┐     ┌──────────┐
-     │    │CODE_SIMPLE│     │ REASONING│
-     │    │(snippets) │     │ (design) │
-     │    └──────────┘     └──────────┘
-     │
-     └──▶ ┌──────────┐
-          │CODE_COMPLEX│
-          │(full apps) │
-          └──────────┘
+```text
+                               User Query
+                                   │
+                                   ▼
+                          ┌─────────────────┐
+                          │     TRIAGE      │
+                          │  (Query Gate)   │
+                          └────────┬────────┘
+                                   │
+       ┌───────────┬───────────────┼───────────────┬───────────┐
+       ▼           ▼               ▼               ▼           ▼
+ ┌──────────┐ ┌──────────┐   ┌───────────┐   ┌──────────┐ ┌──────────┐
+ │ GENERAL  │ │   MATH   │   │ REASONING │   │  VISION  │ │   CODE   │
+ │ (Info)   │ │ (Calc)   │   │ (Design)  │   │ (Images) │ │  (Dev)   │
+ └──────────┘ └──────────┘   └───────────┘   └──────────┘ └────┬─────┘
+                                                               │
+                                                       ┌───────┴───────┐
+                                                       ▼               ▼
+                                                 ┌───────────┐   ┌───────────┐
+                                                 │  SIMPLE   │   │  COMPLEX  │
+                                                 │(Snippets) │   │(Full Apps)│
+                                                 └───────────┘   └───────────┘
 ```
 
 **Only one model loaded at a time.** The triage model analyzes the query, outputs a routing tag, and the specialist model loads to handle the request.
@@ -213,13 +217,13 @@ Results written to `outputs/benchmark_results.csv`. Covers:
 
 ## Hardware Requirements
 
-| Tier | RAM | Storage | GPU (optional) |
-|------|-----|---------|----------------|
-| Tiny | 4 GB | 15 GB | — |
-| Small | 8 GB | 30 GB | — |
-| Medium | 16 GB | 45 GB | Apple M1+ / 6GB VRAM |
-| Large | 48 GB | 80 GB | Apple M2 Ultra / 24GB VRAM |
-| Max | 64 GB | 250 GB | Apple M2 Ultra 192GB / Multi-GPU |
+| Tier | RAM | Storage | GPU (optional) | Params |
+|------|-----|---------|----------------|--------|
+| Tiny | 4 GB | ~15 GB | — | 14B |
+| Small | 8 GB | ~30 GB | — | 34B |
+| Medium | 16 GB | ~45 GB | Apple M1+ / 6GB VRAM | 59B |
+| Large | 48 GB | ~80 GB | Apple M2 Ultra / 24GB VRAM | 120B |
+| Max | 64 GB | ~250 GB | Apple M2 Ultra 192GB / Multi-GPU | 378B |
 
 ---
 
@@ -249,5 +253,5 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 <p align="center">
   Built with ❤️ by the Iris team<br>
-  <sub>Ahmed Barakat, Mazen Khaled, and contributors</sub>
+  <sub>Ahmed Barakat, Mazen Khaled, Yasmine Omar, Hamdy Ahmed</sub>
 </p>

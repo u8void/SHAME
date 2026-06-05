@@ -167,7 +167,7 @@ ask_stream() → load_model(role) → create_chat_completion(stream=True)
     → On completion:
         yield {"type": "done", "content": full_response}
 
-DeepSeek R1 thinking mode:
+Iris AI Reasoning thinking mode:
     <think>...</think> blocks detected and separated
     think_mode="show" → yields thinking events
     think_mode="hide" → strips thinking, yields only final answer

@@ -69,7 +69,8 @@ benchmark/
 | MMLU | 55-65% | 9B general model across 57 subjects |
 | GPQA Diamond | 25-35% | Graduate-level science is hard for small models |
 
-**Max tier** would approximately double these scores — the jump from 14B → 70B models with DeepSeek-R1 reasoning is significant.
+*Note: These benchmarks reflect the `medium` default tier (14B Coding/Reasoning models).*
+**Max tier** would approximately double these scores — the jump from 14B → 70B models with Iris AI reasoning is significant.
 
 ## Running a Single Test
 

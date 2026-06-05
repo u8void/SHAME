@@ -60,7 +60,7 @@ data: {"type": "action_result", "content": "Code generated successfully"}
 |------|-------------|-----------------|
 | `status` | System status (routing decision) | `"Routing to: MATH"` |
 | `token` | Incremental text token | `"def sort_list"` |
-| `thinking` | DeepSeek R1 thinking process | `"Let me analyze..."` |
+| `thinking` | Iris AI Reasoning thinking process | `"Let me analyze..."` |
 | `done` | Complete response | Full generated text |
 | `stats` | Performance statistics | `"1.2s, 45 tokens"` |
 | `error` | Error message | `"Model failed to load: OOM"` |

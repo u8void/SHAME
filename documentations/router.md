@@ -125,4 +125,5 @@ User: "send email to mom about dinner saying I'll be late"
 Router → {"action": "send_email", "to": "mom", "subject": "dinner", "body": "I'll be late"}
 ```
 
-This is a specialized function-calling model (Hermes-3-Llama) trained to output structured JSON actions.
+2.  **`src.iris.load_model(ModelRole.ROUTER)`**
+    This is a specialized function-calling model (Iris AI Router) trained to output structured JSON actions.

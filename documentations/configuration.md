@@ -87,16 +87,16 @@ Each tier defines which HuggingFace models are used per role. The file is auto-r
 ### Example: `config/sizes/medium.json`
 ```json
 {
-  "_description": "Iris AI — Medium (~45 GB total). 3B–14B models. Fits 16 GB RAM.",
+  "_description": "Iris AI — Medium (59B total params). ~45 GB storage. 3B–14B models. Fits 16 GB RAM.",
   "models": {
-    "triage": "meta-llama/Llama-3.2-3B-Instruct",
-    "router": "NousResearch/Hermes-3-Llama-3.1-8B",
-    "control": "NousResearch/Hermes-3-Llama-3.1-8B",
-    "math": "Qwen/Qwen2.5-Math-7B-Instruct",
-    "code": "Qwen/Qwen2.5-Coder-14B-Instruct",
-    "reasoning": "deepseek-ai/deepseek-llm-14b-chat",
-    "general": "Qwen/Qwen3.5-9B-Instruct",
-    "vision": "Qwen/Qwen3-VL-4B-Instruct"
+    "triage": "iris-ai/triage",
+    "router": "iris-ai/router",
+    "control": "iris-ai/control",
+    "math": "iris-ai/math",
+    "code": "iris-ai/code",
+    "reasoning": "iris-ai/reasoning",
+    "general": "iris-ai/general",
+    "vision": "iris-ai/vision"
   },
   "gguf": { ... },
   "download_urls": { ... },
@@ -118,13 +118,13 @@ python train.py --size max --download-models
 
 ### Tier Comparison
 
-| Tier | Triage | Code | Math | Reasoning | General | Vision | Total |
+| Tier | Triage | Code | Math | Reasoning | General | Vision | Total Params |
 |------|--------|------|------|-----------|---------|--------|-------|
-| Tiny | 0.5B | 1.5B | 1.5B | 3B | 3B | 3B | ~15 GB |
-| Small | 3B | 7B | 7B | 7B | 3B | 4B | ~30 GB |
-| Medium | 3B | 14B | 7B | 14B | 9B | 4B | ~45 GB |
-| Large | 7B | 32B | 14B | 32B | 20B | 8B | ~80 GB |
-| Max | 32B | 32B+ | 72B | 70B | 70B | 72B | ~250 GB |
+| Tiny | 0.5B | 1.5B | 1.5B | 3B | 3B | 3B | 14B |
+| Small | 3B | 7B | 7B | 7B | 3B | 4B | 34B |
+| Medium | 3B | 14B | 7B | 14B | 9B | 4B | 59B |
+| Large | 7B | 32B | 14B | 32B | 20B | 8B | 120B |
+| Max | 32B | 32B+ | 72B | 70B | 70B | 72B | 378B |
 
 ---
 

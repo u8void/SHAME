@@ -19,60 +19,60 @@ Iris uses **8 distinct roles**, each backed by a specialized GGUF model. The rol
 
 ## Model Selection By Tier
 
-### Tiny (~15 GB — 4 GB RAM)
+### Tiny — 14B params (~15 GB, 4 GB RAM)
 | Role | Model | Parameters |
 |------|-------|------------|
-| Triage | Qwen2.5-0.5B-Instruct | 0.5B |
-| Router | Qwen2.5-1.5B-Instruct | 1.5B |
-| Math | Qwen2.5-Math-1.5B-Instruct | 1.5B |
-| Code | R1-Distill-Qwen-1.5B | 1.5B |
-| Reasoning | Qwen2.5-3B-Instruct | 3B |
-| General | Qwen2.5-3B-Instruct | 3B |
-| Vision | Qwen2.5-VL-3B-Instruct | 3B |
+| Triage | Iris AI Triage | 0.5B |
+| Router | Iris AI Router | 1.5B |
+| Math | Iris AI Math | 1.5B |
+| Code | Iris AI Code | 1.5B |
+| Reasoning | Iris AI Reasoning | 3B |
+| General | Iris AI General | 3B |
+| Vision | Iris AI Vision | 3B |
 
-### Small (~30 GB — 8 GB RAM)
+### Small — 34B params (~30 GB, 8 GB RAM)
 | Role | Model | Parameters |
 |------|-------|------------|
-| Triage | Llama-3.2-3B-Instruct | 3B |
-| Router | Qwen2.5-Coder-3B-Instruct | 3B |
-| Math | Qwen2.5-Math-7B-Instruct | 7B |
-| Code | Qwen2.5-Coder-7B-Instruct | 7B |
-| Reasoning | R1-Distill-Qwen-7B | 7B |
-| General | Llama-3.2-3B-Instruct | 3B |
-| Vision | Qwen3-VL-4B-Instruct | 4B |
+| Triage | Iris AI Triage | 3B |
+| Router | Iris AI Router | 3B |
+| Math | Iris AI Math | 7B |
+| Code | Iris AI Code | 7B |
+| Reasoning | Iris AI Reasoning | 7B |
+| General | Iris AI General | 3B |
+| Vision | Iris AI Vision | 4B |
 
-### Medium (~45 GB — 16 GB RAM) [DEFAULT]
+### Medium — 59B params (~45 GB, 16 GB RAM) [DEFAULT]
 | Role | Model | Parameters |
 |------|-------|------------|
-| Triage | Llama-3.2-3B-Instruct | 3B |
-| Router | Hermes-3-Llama-3.1-8B | 8B |
-| Math | Qwen2.5-Math-7B-Instruct | 7B |
-| Code | Qwen2.5-Coder-14B-Instruct | 14B |
-| Reasoning | DeepSeek-LLM-14B-Chat | 14B |
-| General | Qwen3.5-9B-Instruct | 9B |
-| Vision | Qwen3-VL-4B-Instruct | 4B |
+| Triage | Iris AI Triage | 3B |
+| Router | Iris AI Router | 8B |
+| Math | Iris AI Math | 7B |
+| Code | Iris AI Code | 14B |
+| Reasoning | Iris AI Reasoning | 14B |
+| General | Iris AI General | 9B |
+| Vision | Iris AI Vision | 4B |
 
-### Large (~80 GB — 48 GB RAM)
+### Large — 120B params (~80 GB, 48 GB RAM)
 | Role | Model | Parameters |
 |------|-------|------------|
-| Triage | Qwen2.5-7B-Instruct | 7B |
-| Router | Qwen2.5-Coder-7B-Instruct | 7B |
-| Math | R1-Distill-Qwen-14B | 14B |
-| Code | R1-Distill-Qwen-32B | 32B |
-| Reasoning | R1-Distill-Qwen-32B | 32B |
-| General | Qwen3.5-20B-Instruct | 20B |
-| Vision | Qwen3-VL-8B-Instruct | 8B |
+| Triage | Iris AI Triage | 7B |
+| Router | Iris AI Router | 7B |
+| Math | Iris AI Math | 14B |
+| Code | Iris AI Code | 32B |
+| Reasoning | Iris AI Reasoning | 32B |
+| General | Iris AI General | 20B |
+| Vision | Iris AI Vision | 8B |
 
-### Max (~250 GB — 64-128 GB RAM)
+### Max — 378B params (~250 GB, 64 GB RAM)
 | Role | Model | Parameters |
 |------|-------|------------|
-| Triage | Qwen2.5-32B-Instruct | 32B |
-| Router | Qwen2.5-Coder-32B-Instruct | 32B |
-| Math | Qwen2.5-Math-72B-Instruct | 72B |
-| Code | Qwen3-Coder-Next | Latest |
-| Reasoning | DeepSeek-R1-Distill-Llama-70B | 70B |
-| General | Llama-3.3-70B-Instruct | 70B |
-| Vision | Qwen2.5-VL-72B-Instruct | 72B |
+| Triage | Iris AI Triage | 32B |
+| Router | Iris AI Router | 32B |
+| Math | Iris AI Math | 72B |
+| Code | Iris AI Code | 236B |
+| Reasoning | Iris AI Reasoning | 70B |
+| General | Iris AI General | 70B |
+| Vision | Iris AI Vision | 72B |
 
 ---
 
