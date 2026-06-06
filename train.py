@@ -114,6 +114,7 @@ def parse_args():
                         help="GGUF quantization level")
     parser.add_argument("--size", choices=["tiny", "small", "medium", "large", "max", "ultra"], default="medium",
                         help="Iris AI model size tier (tiny/small/medium/large/max)")
+    parser.add_argument("--download-models", action="store_true", help="Download all models for the selected tier and exit")
     parser.add_argument("--skip-gguf", action="store_true", help="Skip merge and GGUF conversion")
     parser.add_argument("--resume", action="store_true", help="Resume training from the last successful checkpoint/model")
     
@@ -703,6 +704,11 @@ def main():
     # Apply size-tier config (overrides ROLE_MODEL_MAP + ROLE_TO_GGUF)
     apply_size_config(args.size)
 
+    if getattr(args, "download_models", False):
+        download_all_models()
+        print("[Pre-Training] Model downloading complete. Exiting as --download-models was set.")
+        sys.exit(0)
+
     ensure_training_subdirs()
 
     if args.device:
@@ -805,11 +811,28 @@ def download_all_models():
         source_map = SIZE_CONFIG["source_filenames"]  # role → source filename
         url_map = SIZE_CONFIG["download_urls"]         # source_filename → url
         target_map = SIZE_CONFIG["gguf"]               # role → target filename
+        import re
         for role, target_name in target_map.items():
             src_name = source_map.get(role)
             url = url_map.get(src_name) if src_name else None
             if url and src_name:
-                download_map[target_name] = (url, src_name)
+                shard_match = re.search(r'-(\d+)-of-(\d+)\.gguf$', src_name)
+                if shard_match:
+                    num_shards = int(shard_match.group(2))
+                    base_src = src_name[:shard_match.start()]
+                    target_pattern_idx = target_name.find(shard_match.group(0))
+                    if target_pattern_idx != -1:
+                        base_target = target_name[:target_pattern_idx]
+                    else:
+                        base_target = target_name.replace(".gguf", "")
+                    base_url = url[:url.find(src_name)]
+                    for i in range(1, num_shards + 1):
+                        s_name = f"{base_src}-{i:05d}-of-{num_shards:05d}.gguf"
+                        t_name = f"{base_target}-{i:05d}-of-{num_shards:05d}.gguf"
+                        u = f"{base_url}{s_name}"
+                        download_map[t_name] = (u, s_name)
+                else:
+                    download_map[target_name] = (url, src_name)
         # Also handle clip
         clip_src = SIZE_CONFIG.get("clip")
         if clip_src and clip_src in url_map:

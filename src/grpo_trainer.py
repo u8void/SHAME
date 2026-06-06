@@ -1,18 +1,12 @@
 """
 grpo_trainer.py — Pure RL Training via GRPO (Group Relative Policy Optimization)
 ================================================================================
-Implements DeepSeek R1-style GRPO: no critic model, group-relative advantage,
-clipped policy loss + KL penalty, domain-specific reward models.
-
-GRPO Algorithm (from DeepSeekMath paper, extended by DeepSeek R1):
+GRPO Algorithm :
   1. Sample a batch of prompts
   2. For each prompt, generate G responses from the current policy
   3. Score each response with domain-specific reward function(s)
   4. Compute group-relative advantage: A_i = (r_i - mean(group)) / std(group)
   5. Update policy via clipped objective + KL penalty to reference model
-
-This implementation works with llama-cpp loaded models (for inference) +
-PyTorch-based fine-tuning (LoRA/QLoRA) for the policy update.
 """
 
 import os
@@ -34,10 +28,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
-# ---------------------------------------------------------------------------
-# Data Structures
-# ---------------------------------------------------------------------------
-
 class RewardDomain(str, Enum):
     CODE      = "code"
     MATH      = "math"
@@ -52,7 +42,7 @@ class GRPOSample:
     responses: List[str] = field(default_factory=list)
     raw_rewards: List[float] = field(default_factory=list)
     advantages: List[float] = field(default_factory=list)
-    response_tokens: List[int] = field(default_factory=list)  # token counts
+    response_tokens: List[int] = field(default_factory=list) 
 
 @dataclass  
 class GRPOMetrics:
@@ -68,9 +58,6 @@ class GRPOMetrics:
     group_size: int
     num_groups: int
 
-# ---------------------------------------------------------------------------
-# Reward Functions
-# ---------------------------------------------------------------------------
 
 class RewardScorer:
     """Composite reward scorer with domain-specific sub-scorers."""
@@ -90,10 +77,8 @@ class RewardScorer:
         """Compute a 0–1 reward for a (prompt, response) pair."""
         scores = {}
         
-        # Detect domain from prompt content
         domain = self._detect_domain(prompt)
         
-        # Core reward dimensions
         scores["format"] = self._score_format(response)
         scores["coherence"] = self._score_coherence(response)
         scores["completeness"] = self._score_completeness(response)
@@ -108,13 +93,11 @@ class RewardScorer:
         elif domain == "reasoning":
             scores["correctness"] = self._score_reasoning_correctness(prompt, response)
             scores["reasoning"] = self._score_reasoning_depth(response)
-            # For pure reasoning, upweight reasoning
             self.weights = {**self.weights, "reasoning": 0.25, "correctness": 0.30}
         else:
             scores["correctness"] = self._score_general_quality(prompt, response)
             scores["reasoning"] = self._score_reasoning_depth(response)
         
-        # Weighted sum
         total = sum(scores[k] * self.weights.get(k, 0.1) for k in scores)
         return min(1.0, max(0.0, total))
 
@@ -132,62 +115,47 @@ class RewardScorer:
             return "math"
         return "reasoning"
 
-    # --- Format scoring ---
     def _score_format(self, response: str) -> float:
         score = 0.5
-        # Structured output
         if re.search(r'```', response):
             score += 0.15
         if re.search(r'^\s*[#*]+\s', response, re.MULTILINE):
             score += 0.1
-        # Sentence structure
         sentences = [s for s in re.split(r'[.!?]+', response) if len(s.strip()) > 10]
         if len(sentences) >= 3:
             score += 0.1
-        # No gibberish
         word_ratio = len(re.findall(r'\b[a-z]{2,}\b', response.lower())) / max(len(response.split()), 1)
         if word_ratio > 0.6:
             score += 0.15
         return min(1.0, score)
 
-    # --- Coherence ---
     def _score_coherence(self, response: str) -> float:
         """Check logical flow, no contradiction."""
         score = 0.4
         words = response.split()
         if len(words) < 20:
             return 0.2
-        # Has transitions
         transitions = {"therefore", "because", "however", "thus", "first", "second",
                        "finally", "consequently", "additionally", "moreover"}
         count = sum(1 for t in transitions if t in response.lower())
         score += min(0.3, count * 0.1)
-        # Not purely repetitive
         unique_ratio = len(set(words[:100])) / max(len(words[:100]), 1)
         if unique_ratio > 0.5:
             score += 0.2
-        # No obvious repetition
         if not re.search(r'(\b\w+\b)(\s+\1){3,}', response):
             score += 0.1
         return min(1.0, score)
-
-    # --- Completeness ---
     def _score_completeness(self, response: str) -> float:
         """Response isn't truncated or clearly incomplete."""
         score = 0.5
         r = response.strip()
-        # Doesn't end mid-word
         if not re.search(r'[a-zA-Z]$', r) or r.endswith(('.', '!', '?', '```', ')')):
             score += 0.2
-        # No truncation markers
         if not re.search(r'\.\.\.$|truncated|rest of the code|remaining code', r.lower()):
             score += 0.2
-        # Reasonable length
         if len(r) > 50:
             score += 0.1
         return min(1.0, score)
-
-    # --- Safety ---
     def _score_safety(self, response: str) -> float:
         """Penalize harmful content."""
         score = 1.0

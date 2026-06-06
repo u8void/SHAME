@@ -25,7 +25,6 @@ class CompactionLevel(str, Enum):
     AUTOMATIC  = "automatic"
 
 
-# --- Token estimation ---
 
 def estimate_tokens(messages: List[Dict[str, str]]) -> int:
     """Estimate token count from messages (heuristic: ~4 chars per token for English)."""
@@ -38,12 +37,9 @@ def estimate_tokens(messages: List[Dict[str, str]]) -> int:
             non_code = non_code.replace(cb, "")
         total += len(non_code) // 4
         total += sum(len(cb) // 3 for cb in code_blocks)
-        total += 4  # message overhead
-    total += 50  # system prompt overhead
+        total += 4  
+    total += 50 
     return total
-
-
-# --- Light compaction (no model needed) ---
 
 def compact_light(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
     """Strip code blocks, truncate long messages, keep roles intact."""
@@ -67,7 +63,6 @@ def compact_light(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
     return result
 
 
-# --- Model-based summarization ---
 
 _SUMMARIZE_PROMPT = """You are a conversation compressor. Summarize the following conversation excerpt into a dense, factual digest. Preserve:
 
@@ -134,11 +129,9 @@ def _format_messages_for_summary(messages: List[Dict[str, str]]) -> str:
     return "\n\n".join(parts)
 
 
-# --- Main compactor ---
-
 def compact_context(
     messages: List[Dict[str, str]],
-    role=None,  # Optional[ModelRole]
+    role=None,
     level: CompactionLevel = CompactionLevel.AUTOMATIC,
     n_ctx: Optional[int] = None,
     force_model_summary: bool = False,
@@ -156,14 +149,13 @@ def compact_context(
     else:
         effective_ctx = n_ctx or 4096
 
-    available_ctx = effective_ctx - 512 - 1024  # system prompt + max_tokens
+    available_ctx = effective_ctx - 512 - 1024 
     if available_ctx < 512:
         available_ctx = 512
 
     estimated = estimate_tokens(messages)
     info = f"estimated_tokens={estimated}, available_ctx={available_ctx}, level={level.value}"
 
-    # Decide compaction level if automatic
     if level == CompactionLevel.AUTOMATIC:
         ratio = estimated / max(available_ctx, 1)
         if ratio <= 0.5:
@@ -184,7 +176,6 @@ def compact_context(
         info += f", compacted={len(compacted)} msgs, est_tokens={estimate_tokens(compacted)}"
         return compacted, info
 
-    # Medium / Aggressive: split into old + recent
     RECENT_KEEP = 4 if level == CompactionLevel.MEDIUM else 2
     old_messages = messages[:-RECENT_KEEP] if len(messages) > RECENT_KEEP else []
     recent_messages = messages[-RECENT_KEEP:]
@@ -215,11 +206,9 @@ def compact_context(
     return compacted, info
 
 
-# --- Convenience: auto-compact for a specific role ---
-
 def auto_compact_for_role(
     messages: List[Dict[str, str]],
-    role,  # ModelRole
+    role, 
     max_output_tokens: int = 4096,
     force: bool = False,
 ) -> Tuple[List[Dict[str, str]], str]:

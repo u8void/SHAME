@@ -1114,7 +1114,6 @@ async def ask_stream(
                         if finish_reason == "length":
                             log.warning("MiMo hit max_tokens length. Auto-continuing (loop %d)...", i+1)
                             
-                            # Heal RLHF auto-closed markdown blocks at truncation boundaries
                             strip_len = 0
                             if loop_content.endswith("```\n"): strip_len = 4
                             elif loop_content.endswith("```"): strip_len = 3
@@ -1191,7 +1190,6 @@ async def ask_stream(
                         if finish_reason == "length":
                             log.warning("MiMo hit max_tokens length. Auto-continuing (loop %d)...", i+1)
                             
-                            # Heal RLHF auto-closed markdown blocks at truncation boundaries
                             strip_len = 0
                             if loop_content.endswith("```\n"): strip_len = 4
                             elif loop_content.endswith("```"): strip_len = 3

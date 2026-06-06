@@ -1,18 +1,9 @@
 """
-iris.py — Local GGUF Multi-Model Routing System for Iris AI
-==========================================================
-Sequential multi-model GGUF routing powered by llama-cpp-python.
-Only one model is loaded into RAM at a time.
-
-Model Role → GGUF Mapping (per user's model table):
-  triage   — internlm/internlm2_5-4b-chat        Q4_K_M   ctx=2048
-  reason   — deepseek-ai/deepseek-llm-14b-chat   Q4_K_M   ctx=2048
-  math     — Qwen/Qwen2.5-Math-7B-Instruct       Q4_K_M   ctx=4096
-  code     — Qwen/Qwen2.5-Coder-14B-Instruct      Q4_K_M   ctx=8192
-  general  — Qwen/Qwen2.5-8B-Instruct            Q4_K_M   ctx=4096
-  vision   — nvidia/InternVL3.5-4B               Q4_K     ctx=4096 (+mmproj)
-  control  — NousResearch/Hermes-3-Llama-3.1-8B  Q4_K_M   ctx=2048
+iris.py — Iris AI Base Model with MRA (Multi-Role Architecture)
+===============================================================
 """
+
+total_time_spent = 232 #hours (update after working)
 
 import os
 import re
@@ -268,7 +259,6 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
     except ImportError:
         pass
 
-    # Fallback: direct urllib download
     try:
         import urllib.request
         import time as _time

@@ -26,7 +26,7 @@ GPQA          34% ──── 42% ───── 52% ───── 64% ─�
 | **Medium** | 66B | 14B | ~46 GB | 16 GB | $0 (M1 Air) | GPT-4o-mini, Gemini 2.0 Flash, Claude 3.5 Haiku |
 | **Large** | 193B | 32B | ~102 GB | **24 GB** | $1K (M4 Mac Mini) | Llama 3.3 70B, Qwen 2.5 72B, DeepSeek V3 |
 | **Max** | 328B | 72B | ~235 GB | **48 GB** | $3K (M3 Max 48GB) | GPT-4o, Claude 3.5 Sonnet, Llama 3.1 405B |
-| **Ultra** | 756B | 120B | ~478 GB | 192 GB | $7K (M2 Ultra) | Claude 4.5 Opus, GPT 5.2, Gemini 3.5 Flash |
+| **Ultra** | **945B** | 310B | ~495 GB | 192 GB | $7K (M2 Ultra) | Claude 4.5 Opus, GPT 5.2, Gemini 3.5 Flash |
 
 ---
 
@@ -46,7 +46,7 @@ GPQA          34% ──── 42% ───── 52% ───── 64% ─�
 OpenAI's reasoning models leverage reinforcement learning to train the model to output a `<think>` token stream representing chain-of-thought prior to generation. Iris AI matches this mechanism using specialized reasoning core distillation. The reasoning weights force the model to explore topological dead-ends, debug its own code execution traces, and construct logical dependency graphs before generating the final response. In comparative A/B testing on system architecture formulation, the `Ultra` configuration exhibits superior self-correction vectors while keeping active VRAM costs bounded.
 
 ### 1.2 Software Engineering Output (Coding Core)
-* **Iris Target Component:** `Iris AI Coding Model` (120B active coding specialist core)
+* **Iris Target Component:** `Iris AI Coding Model` (310B coding specialist core)
 * **Commercial Target:** `Claude 4.5 Opus` / `GPT 5.2` / `DeepSeek R1`
 
 | Benchmark | Iris AI Ultra (Harnessed) | Iris AI Max (Harnessed) | GPT 5.2 | Claude 4.5 Opus | DeepSeek R1 |
@@ -258,7 +258,7 @@ Iris Max is a **true frontier-grade localized deployment**. It matches and often
 
 ---
 
-### 2.6 Iris Ultra — 756B Total Params (MoE)
+### 2.6 Iris Ultra — 945B Total Params (MoE)
 
 **Hardware**: 192 GB unified memory. M2 Ultra Mac Studio. ~$7,000 hardware.
 
@@ -269,7 +269,7 @@ Iris Max is a **true frontier-grade localized deployment**. It matches and often
 | Triage | Iris AI Triage | 35B **(3B)** | MoE — instant routing from 35B knowledge |
 | Router | Iris AI Router | 32B | Function calling |
 | Math | Iris AI Math | 120B **(40B)** | Frontier math core |
-| Code | Iris AI Code | 120B **(40B)** | Same model, code-specialized |
+| Code | Iris AI Code | 310B **(15B)** | Coder MoE specialist (Xiaomi MiMo-V2.5) |
 | Reasoning | Iris AI Reasoning | 236B **(21B)** | Advanced logic core |
 | General | Iris AI General | 17B-128E **(17B)**| Frontier generalist MoE core |
 | Vision | Iris AI Vision | 72B | Multimodal reasoning core |
@@ -283,8 +283,8 @@ Iris Max is a **true frontier-grade localized deployment**. It matches and often
 | MATH | **97.0%** | 95.2% | 88.5% | 78.4% | 97.3% |
 | GSM8K | **99.1%** | 98.5% | 96.5% | 94.2% | 96.3% |
 | GPQA | **84.5%** | 82.4% | 72.0% | 62.5% | 71.5% |
-| **Total params** | 756B | ~2.2T* | ~1.8T* | ~120B* | 671B |
-| **Active/token** | ~184B | ~300B | ~200B | ~15B | 37B |
+| **Total params** | 945B | ~2.2T* | ~1.8T* | ~120B* | 671B |
+| **Active/token** | ~160B | ~300B | ~200B | ~15B | 37B |
 | **Runs offline** | ✅ | ❌ | ❌ | ❌ | ✅** |
 | **Privacy** | Full | None | None | None | Full** |
 | **Context** | 128K | 256K | 200K | 1M+ | 128K |
@@ -316,7 +316,7 @@ GPQA          34% ──── 42% ───── 52% ───── 64% ─�
 For comparison:
   GPT-4o:    ~1.8T total → ~200B active → 200B per query (Heavy cloud reliance)
   Claude 3.5: ~1.8T total → ~200B active → 200B per query (Heavy cloud reliance)
-  Iris Ultra:  756B total → ~26B per specialist → runs on a Mac Studio
+  Iris Ultra:  945B total → ~32B per specialist → runs on a Mac Studio
 
 Iris is smaller than monolithic models, but specialization provides the advantage:
 A 40B math specialist beats a 200B generalist on math.
@@ -330,7 +330,7 @@ Because the Triage router loads only one model at a time, the RAM usage never ag
 * **Medium**: Bounded by 14B active model (Fits in 16 GB RAM)
 * **Large**: Bounded by 32B active model (Fits in **24 GB RAM**)
 * **Max**: Bounded by 72B active model (Fits in 48 GB RAM)
-* **Ultra**: Bounded by 120B active model (Fits in 192 GB RAM)
+* **Ultra**: Bounded by 310B model (Fits in 192 GB RAM)
 
 ---
 
