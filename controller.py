@@ -1940,70 +1940,81 @@ def format_assistant_message(content: str):
         return Text("")
     return Group(*renderables)
 
+# Global scroll offset — number of rendered lines to skip from the top of the chat body
+_scroll_offset: int = 0
+
+def _render_body_lines(history, cols: int) -> list[str]:
+    """Render the full chat history into a list of terminal-width text lines.
+    Returns plain text lines (with ANSI codes stripped for measurement).
+    Returns rich-rendered lines for actual printing via a secondary capture.
+    """
+    measure_console = Console(color_system=None, width=cols, highlight=False)
+    table = Table(box=None, show_header=False, expand=True)
+    table.add_column("Role", style="bold", width=10)
+    table.add_column("Message")
+    for msg in history:
+        role = "You" if msg["role"] == "user" else "Iris"
+        role_style = "bold yellow" if msg["role"] == "user" else "bold green"
+        content_render = Markdown(msg["content"]) if msg["role"] == "user" else format_assistant_message(msg["content"])
+        table.add_row(Text(role, style=role_style), content_render)
+    with measure_console.capture() as cap:
+        measure_console.print(table)
+    return cap.get().splitlines()
+
+
 def get_visible_history(history, body_height):
+    """Legacy shim — not used in the new scroll-aware draw_layout."""
     if not RICH_AVAILABLE:
         return history
-    visible_history = list(history)
-    
-    cols, _ = shutil.get_terminal_size()
-    measure_console = Console(color_system=None, width=cols)
-    
-    while len(visible_history) > 0:
-        table = Table(box=None, show_header=False, expand=True)
-        table.add_column("Role", style="bold", width=10)
-        table.add_column("Message")
-        
-        for msg in visible_history:
-            role = "You" if msg["role"] == "user" else "Iris"
-            role_style = "bold yellow" if msg["role"] == "user" else "bold green"
-            content_render = Markdown(msg["content"]) if msg["role"] == "user" else format_assistant_message(msg["content"])
-            table.add_row(Text(role, style=role_style), content_render)
-            
-        with measure_console.capture() as capture:
-            measure_console.print(table)
-        height = len(capture.get().splitlines())
-        
-        if height <= body_height:
-            break
-        visible_history.pop(0)
-        
-    return visible_history
+    return history
+
 
 def draw_layout(model, tokenizer, retriever, history, status_text=None):
+    global _scroll_offset
     if not RICH_AVAILABLE:
         return
-        
+
     cols, rows = shutil.get_terminal_size()
-    
+
     import platform as pf
     try:
         import psutil
         mem = psutil.virtual_memory()
         ram_info = f"{mem.total / (1024**3):.1f}GB ({mem.percent}% used)"
-    except:
+    except Exception:
         ram_info = "N/A"
-        
+
     rag_status = "Loaded" if retriever and retriever.chunks else "Disabled"
     if retriever and retriever.chunks:
         rag_status += f" ({len(retriever.chunks)} chunks)"
-        
+
     model_name = "iris_14b_model" if os.path.isdir("./iris_14b_model") else MLX_MODEL_ID
-    
-    status_line = f" Model: [bold cyan]{model_name}[/bold cyan] │ Device: [bold cyan]{get_device().type if IRIS_AVAILABLE else 'CPU'}[/bold cyan] │ OS: [bold cyan]{pf.system()}[/bold cyan] │ RAM: [bold cyan]{ram_info}[/bold cyan] │ RAG: [bold cyan]{rag_status}[/bold cyan]"
-    
+
+    status_line = (
+        f" Model: [bold cyan]{model_name}[/bold cyan]"
+        f" │ Device: [bold cyan]{get_device().type if IRIS_AVAILABLE else 'CPU'}[/bold cyan]"
+        f" │ OS: [bold cyan]{pf.system()}[/bold cyan]"
+        f" │ RAM: [bold cyan]{ram_info}[/bold cyan]"
+        f" │ RAG: [bold cyan]{rag_status}[/bold cyan]"
+    )
+
     divider = "─" * cols
-    
+
     footer_msg = " Type '/help' for commands │ '/exit' to quit │ Ask anything in natural language"
     if status_text:
         footer_msg = f" [bold yellow]Status: {status_text}[/bold yellow] │{footer_msg}"
-        
-    reserved_height = 6
+
+    # 2 lines header (status + divider) + 2 lines footer (divider + footer) + 1 prompt line = 5
+    reserved_height = 5
     body_height = max(5, rows - reserved_height)
-    
-    body_table = Table(box=None, show_header=False, expand=True)
-    body_table.add_column("Role", style="bold", width=10)
-    body_table.add_column("Message")
-    
+
+    # ── Clear and re-draw ──────────────────────────────────────────────────────
+    sys.stdout.write("\033[2J\033[H")
+    sys.stdout.flush()
+
+    console.print(status_line)
+    console.print(Text(divider, style="dim cyan"))
+
     if not history:
         welcome_md = """# Welcome to Iris AI CLI
 
@@ -2015,35 +2026,40 @@ This is a full-featured terminal interface for controlling your computer and cha
 - **Web Integrations**: Search DuckDuckGo, open websites, search YouTube/Spotify.
 - **RAG Memory**: Search local files in the `raw_data/` directory.
 """
-        body_table.add_row("", Markdown(welcome_md))
+        console.print(Markdown(welcome_md))
     else:
-        visible = get_visible_history(history, body_height)
-        for msg in visible:
-            role = "You" if msg["role"] == "user" else "Iris"
-            role_style = "bold yellow" if msg["role"] == "user" else "bold green"
-            content_render = Markdown(msg["content"]) if msg["role"] == "user" else format_assistant_message(msg["content"])
-            body_table.add_row(Text(role, style=role_style), content_render)
-            
-    sys.stdout.write("\033[2J\033[H")
-    sys.stdout.flush()
-    
-    console.print(status_line)
-    console.print(Text(divider, style="dim cyan"))
-    
-    measure_console = Console(color_system=None, width=cols)
-    with measure_console.capture() as capture:
-        measure_console.print(body_table)
-    body_height_actual = len(capture.get().splitlines())
-    
-    console.print(body_table)
-        
-    padding_needed = body_height - body_height_actual
-    if padding_needed > 0:
-        for _ in range(padding_needed):
-            console.print()
-            
+        # Render the entire chat to lines, then apply scroll window
+        all_lines = _render_body_lines(history, cols)
+        total_lines = len(all_lines)
+
+        # Auto-scroll to bottom whenever new content arrives (offset 0 = bottom)
+        max_offset = max(0, total_lines - body_height)
+
+        # Clamp scroll offset
+        _scroll_offset = max(0, min(_scroll_offset, max_offset))
+
+        # Which lines to show: offset from top (0 = very beginning, max_offset = end visible)
+        start = max_offset - _scroll_offset          # lines from top to start showing
+        end   = start + body_height
+        visible_lines = all_lines[start:end]
+
+        # Print the sliced lines directly (they already have ANSI codes from the capture)
+        for line in visible_lines:
+            sys.stdout.write(line + "\n")
+
+        # Padding to fill the body area if content is shorter
+        for _ in range(body_height - len(visible_lines)):
+            sys.stdout.write("\n")
+
+        # Scroll indicator in the corner when there's more content
+        if total_lines > body_height:
+            pct = int(100 * (start + body_height) / total_lines)
+            scroll_hint = f" ↑↓ scroll ({pct}%) "
+            footer_msg = f"[dim]{scroll_hint}[/dim] │{footer_msg}"
+
     console.print(Text(divider, style="dim cyan"))
     console.print(Text.from_markup(footer_msg, style="dim white"))
+
 
 def get_prompt_text() -> str:
     cwd = os.getcwd()
@@ -2197,6 +2213,118 @@ def show_model_details():
     
     console.print(table)
 
+def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) -> str:
+    """Read a line of input while allowing UP/DOWN arrow keys to scroll the chat.
+
+    Uses termios raw-mode on Unix/macOS to intercept escape sequences before
+    they reach readline, then redraws the layout for each scroll step.
+    Falls back to console.input() if raw mode is unavailable (e.g. Windows).
+    """
+    global _scroll_offset
+
+    import sys, os
+    try:
+        import tty, termios
+    except ImportError:
+        # Windows — fall back to blocking input
+        console.print(prompt_str, end="")
+        return input()
+
+    cols, rows = shutil.get_terminal_size()
+    reserved_height = 5
+    body_height = max(5, rows - reserved_height)
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+
+    buf = []
+    try:
+        tty.setraw(fd)
+        # Print prompt
+        console.print(prompt_str, end="")
+        sys.stdout.flush()
+
+        while True:
+            ch = sys.stdin.read(1)
+
+            if ch == "\r" or ch == "\n":
+                # Enter pressed — submit
+                sys.stdout.write("\r\n")
+                sys.stdout.flush()
+                break
+
+            elif ch == "\x03":
+                # Ctrl-C
+                raise KeyboardInterrupt
+
+            elif ch == "\x04":
+                # Ctrl-D / EOF
+                raise EOFError
+
+            elif ch == "\x7f" or ch == "\x08":
+                # Backspace
+                if buf:
+                    buf.pop()
+                    sys.stdout.write("\b \b")
+                    sys.stdout.flush()
+
+            elif ch == "\x1b":
+                # Escape sequence — read 2 more bytes
+                seq = sys.stdin.read(2)
+                if seq == "[A":
+                    # UP arrow — scroll up (show older content)
+                    _scroll_offset = min(_scroll_offset + (body_height // 3), 9999)
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                    draw_layout(model, tokenizer, retriever, history)
+                    tty.setraw(fd)
+                    console.print(prompt_str, end="")
+                    sys.stdout.write("".join(buf))
+                    sys.stdout.flush()
+                elif seq == "[B":
+                    # DOWN arrow — scroll down (show newer content)
+                    _scroll_offset = max(_scroll_offset - (body_height // 3), 0)
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                    draw_layout(model, tokenizer, retriever, history)
+                    tty.setraw(fd)
+                    console.print(prompt_str, end="")
+                    sys.stdout.write("".join(buf))
+                    sys.stdout.flush()
+                elif seq == "[5":
+                    # Page Up
+                    sys.stdin.read(1)  # consume trailing ~
+                    _scroll_offset = min(_scroll_offset + body_height, 9999)
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                    draw_layout(model, tokenizer, retriever, history)
+                    tty.setraw(fd)
+                    console.print(prompt_str, end="")
+                    sys.stdout.write("".join(buf))
+                    sys.stdout.flush()
+                elif seq == "[6":
+                    # Page Down
+                    sys.stdin.read(1)  # consume trailing ~
+                    _scroll_offset = max(_scroll_offset - body_height, 0)
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                    draw_layout(model, tokenizer, retriever, history)
+                    tty.setraw(fd)
+                    console.print(prompt_str, end="")
+                    sys.stdout.write("".join(buf))
+                    sys.stdout.flush()
+                # Ignore other escape sequences (left/right arrows, fn keys, etc.)
+
+            elif ch >= " ":
+                # Printable character
+                buf.append(ch)
+                sys.stdout.write(ch)
+                sys.stdout.flush()
+
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    # Reset scroll to bottom whenever user submits a message
+    _scroll_offset = 0
+    return "".join(buf)
+
+
 def main():
     import argparse
     from src.iris import ModelRole
@@ -2248,7 +2376,9 @@ def main():
                 draw_layout(model, tokenizer, retriever, history)
                 prompt_str = get_prompt_text()
                 try:
-                    raw = console.input(prompt_str).strip()
+                    raw = _read_input_with_scroll(
+                        prompt_str, model, tokenizer, retriever, history
+                    ).strip()
                 except (EOFError, KeyboardInterrupt):
                     break
             else:

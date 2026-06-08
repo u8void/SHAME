@@ -39,7 +39,8 @@ Iris AI has three configuration layers:
     "clip": "iris_009.gguf"
   },
 
-  "n_ctx": null,
+  "n_ctx_allocation": "auto",
+  "compacting_profile": "medium",
   "n_gpu_layers": -1,
   "n_threads": 8,
   "size": "medium"
@@ -73,7 +74,8 @@ The `models` block maps each role name to the GGUF filename in `models/`. Files 
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `n_ctx` | int or null | null | Context window size (null = model default, usually 2048-8192) |
+| `n_ctx_allocation` | string or int | "auto" | Context window size ("auto" = scales dynamically with system RAM) |
+| `compacting_profile` | string | "medium" | Strategy for truncating history when context is full (`low`, `medium`, `aggressive`) |
 | `n_gpu_layers` | int | -1 | Layers to offload to GPU (-1 = all, 0 = CPU only) |
 | `n_threads` | int | 8 | CPU threads for inference |
 | `size` | string | "medium" | Size tier: `tiny`, `small`, `medium`, `large`, `max` |
@@ -120,12 +122,11 @@ python train.py --size max --download-models
 
 | Tier | Triage | Code | Math | Reasoning | General | Vision | Total Params |
 |------|--------|------|------|-----------|---------|--------|-------|
-| Tiny | 1.7B | 3B | 1.5B | 3B | 4B | 3B | 16B |
-| Small | 4B | 8B | 7B | 7B | 8B | 7B | 38B |
-| Medium | 4B | 14B | 7B | 14B | 14B | 7B | 66B |
-| Large | 8B | 32B | 32B | 32B | 32B | 8B | 193B |
-| Max | 32B | 32B+ | 72B | 70B | 32B | 26B | 328B |
-| Ultra | 35B | 310B | 120B | 236B | 17B-128E | 72B | 945B |
+| Tiny | 1.7B | 3B | 1.5B | 4B | 4B | 3B | 14B |
+| Small | 4B | 8B | 7B | 7B | 7B | 7B | 36B |
+| Medium | 4B | 14B | 7B | 14B | 14B | 7B | 53B |
+| Large | 8B | 32B | 32B | 32B | 32B | 8B | 112B |
+| Max | 32B | 32B+ | 72B | 70B | 70B | 26B | 264B |
 
 ---
 

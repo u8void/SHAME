@@ -18,6 +18,8 @@
         top_p             : document.getElementById('cs_top_p'),
         top_k             : document.getElementById('cs_top_k'),
         repetition_penalty: document.getElementById('cs_repetition_penalty'),
+        n_ctx_allocation  : document.getElementById('cs_n_ctx_allocation'),
+        compacting_profile: document.getElementById('cs_compacting_profile'),
     };
 
     const saveChatSettingsBtn = document.getElementById('saveChatSettingsBtn');
@@ -57,6 +59,26 @@
         if (csFields.top_p)              { csFields.top_p.value              = s.top_p              ?? 0.9; document.getElementById('val_top_p').innerText = csFields.top_p.value; }
         if (csFields.top_k)              { csFields.top_k.value              = s.top_k              ?? 40; document.getElementById('val_top_k').innerText = csFields.top_k.value; }
         if (csFields.repetition_penalty) { csFields.repetition_penalty.value = s.repetition_penalty ?? 1.3; document.getElementById('val_repetition_penalty').innerText = csFields.repetition_penalty.value; }
+
+        if (csFields.n_ctx_allocation) { 
+            const ctx_vals = ['auto','4096','8192','16384','32768'];
+            let idx = ctx_vals.indexOf(String(s.n_ctx_allocation || 'auto').toLowerCase());
+            if (idx === -1) {
+                idx = ctx_vals.indexOf(String(s.n_ctx_allocation));
+                if (idx === -1) idx = 0;
+            }
+            csFields.n_ctx_allocation.value = idx; 
+            const display_vals = ['Auto','4096','8192','16384','32768'];
+            document.getElementById('val_n_ctx_allocation').innerText = display_vals[idx]; 
+        }
+        if (csFields.compacting_profile) { 
+            const cp_vals = ['low','medium','aggressive'];
+            let idx = cp_vals.indexOf(String(s.compacting_profile || 'medium').toLowerCase());
+            if (idx === -1) idx = 1;
+            csFields.compacting_profile.value = idx; 
+            const display_vals = ['Low','Medium','Aggressive'];
+            document.getElementById('val_compacting_profile').innerText = display_vals[idx]; 
+        }
 
         settingsPanel.classList.add('open');
         settingsOverlay.classList.add('visible');
@@ -110,6 +132,8 @@
             top_p             : parseFloat(csFields.top_p?.value)            || 0.9,
             top_k             : parseInt(csFields.top_k?.value)              || 40,
             repetition_penalty: parseFloat(csFields.repetition_penalty?.value) || 1.3,
+            n_ctx_allocation  : ['auto', 4096, 8192, 16384, 32768][parseInt(csFields.n_ctx_allocation?.value)] ?? 'auto',
+            compacting_profile: ['low', 'medium', 'aggressive'][parseInt(csFields.compacting_profile?.value)] ?? 'medium',
         };
         if (window.setChatSettings) window.setChatSettings(newSettings);
         localStorage.setItem('iris_chat_settings', JSON.stringify(newSettings));

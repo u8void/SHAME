@@ -179,6 +179,30 @@
                 <input type="range" id="cs_repetition_penalty" value="1.3" step="0.05" min="1" max="2" oninput="document.getElementById('val_repetition_penalty').innerText = this.value">
             </div>
 
+            <p class="settings-section-label" style="margin-top:20px">Memory &amp; Context</p>
+
+            <div class="settings-field">
+                <label for="cs_n_ctx_allocation">
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Context Length Allocation</span>
+                        <span id="val_n_ctx_allocation" style="color:var(--iris-purple); font-weight:bold;">Auto</span>
+                    </div>
+                    <span class="field-hint">Maximum context size. Auto dynamically scales to your RAM.</span>
+                </label>
+                <input type="range" id="cs_n_ctx_allocation" value="0" min="0" max="4" step="1" oninput="const vals=['Auto','4096','8192','16384','32768']; document.getElementById('val_n_ctx_allocation').innerText = vals[this.value]">
+            </div>
+
+            <div class="settings-field">
+                <label for="cs_compacting_profile">
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Compacting Profile</span>
+                        <span id="val_compacting_profile" style="color:var(--iris-purple); font-weight:bold;">Medium</span>
+                    </div>
+                    <span class="field-hint">How aggressively to forget older messages when context fills up.</span>
+                </label>
+                <input type="range" id="cs_compacting_profile" value="1" min="0" max="2" step="1" oninput="const vals=['Low','Medium','Aggressive']; document.getElementById('val_compacting_profile').innerText = vals[this.value]">
+            </div>
+
             <button class="settings-save-btn" id="saveChatSettingsBtn">Save Chat Settings</button>
         </div>
 

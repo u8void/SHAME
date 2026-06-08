@@ -3,7 +3,7 @@ iris.py — Iris AI Base Model with MRA (Multi-Role Architecture)
 ===============================================================
 """
 
-total_time_spent = 232 #hours (update after working)
+total_time_spent = 248 #hours (update after working)
 
 import os
 import re
@@ -49,9 +49,30 @@ try:
 except ImportError:
     DATASETS_AVAILABLE = False
 
+import llama_cpp
 from llama_cpp import Llama
+
+import ctypes
+def _llama_log_callback(level, text, user_data):
+    pass
+_log_cb = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p)(_llama_log_callback)
+llama_cpp.llama_log_set(_log_cb, ctypes.c_void_p(0))
 from .syntax_checker import check_syntax, extract_code_blocks
-from .harness import apply_code_specific as _apply_harness, apply_math as _apply_math_harness
+from .harness import (
+    apply_code_specific as _apply_harness,
+    apply_math as _apply_math_harness,
+    apply_smart_harness_code,
+    apply_smart_harness_math,
+    build_code_refinement_prompt,
+    build_math_refinement_prompt,
+    SandboxResult,
+    HermesToolRegistry,
+    HermesAgentLoop,
+    HermesResultAnalyzer,
+    HERMES_AGENT_SYSTEM_PROMPT,
+    build_hermes_text_prompt,
+    parse_hermes_tool_call,
+)
 
 
 class ModelRole(str, Enum):
@@ -63,6 +84,7 @@ class ModelRole(str, Enum):
     GENERAL   = "general"
     VISION    = "vision"
     CONTROL   = "control"
+    REVIEWER  = "reviewer"
 
 
 class TaskType(str, Enum):
@@ -78,43 +100,37 @@ CONFIG_PATH = os.path.join(os.path.dirname(_HERE), "config", "iris.conf")
 
 DEFAULT_MODEL_FILES: Dict[str, str] = {
     "triage":    "iris_001.gguf",
-    "router":    "iris_002.gguf",
-    "control":   "iris_003.gguf",
-    "math":      "iris_004.gguf",
-    "code":      "iris_005.gguf",
-    "reasoning": "iris_006.gguf",
-    "general":   "iris_007.gguf",
-    "vision":    "iris_008.gguf",
-    "clip":      "iris_009.gguf",
+    "router":    "iris_001.gguf",
+    "control":   "iris_002.gguf",
+    "math":      "iris_003.gguf",
+    "code":      "iris_004.gguf",
+    "reasoning": "iris_005.gguf",
+    "reviewer":  "iris_005.gguf",
+    "general":   "iris_005.gguf",
+    "vision":    "iris_006.gguf",
+    "clip":      "iris_007.gguf",
 }
 _MODEL_SOURCES: Dict[str, list] = {
     "iris_001.gguf": [
-        ("unsloth/Llama-3.2-3B-GGUF", "Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
+        ("unsloth/Qwen3-4B-GGUF", "Qwen3-4B-Q4_K_M.gguf"),
     ],
     "iris_002.gguf": [
-        ("NousResearch/Hermes-3-Llama-3.1-8B-GGUF", "Hermes-3-Llama-3.1-8B.Q4_K_M.gguf"),
+        ("Qwen/Qwen2.5-Coder-7B-Instruct-GGUF", "qwen2.5-coder-7b-instruct-q4_k_m.gguf"),
     ],
     "iris_003.gguf": [
-        ("NousResearch/Hermes-3-Llama-3.1-8B-GGUF", "Hermes-3-Llama-3.1-8B.Q4_K_M.gguf"),
-    ],
-    "iris_004.gguf": [
-        ("second-state/Qwen2.5-Math-7B-Instruct-GGUF", "Qwen2.5-Math-7B-Instruct-Q4_K_M.gguf"),
         ("Qwen/Qwen2.5-Math-7B-Instruct-GGUF", "qwen2.5-math-7b-instruct-q4_k_m.gguf"),
     ],
-    "iris_005.gguf": [
-        ("Qwen/Qwen2.5-Coder-14B-Instruct-GGUF", "qwen2.5-coder-14b-instruct-q4_k_m.gguf"),
+    "iris_004.gguf": [
+        ("unsloth/Qwen3-Coder-14B-GGUF", "Qwen3-Coder-14B-Q4_K_M.gguf"),
     ],
-    "iris_006.gguf": [
+    "iris_005.gguf": [
         ("unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF", "DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"),
     ],
+    "iris_006.gguf": [
+        ("unsloth/Qwen2.5-VL-7B-Instruct-GGUF", "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"),
+    ],
     "iris_007.gguf": [
-        ("unsloth/Qwen3.5-9B-GGUF", "Qwen3.5-9B-Q4_K_M.gguf"),
-    ],
-    "iris_008.gguf": [
-        ("unsloth/Qwen3-VL-4B-Instruct-GGUF", "Qwen3-VL-4B-Instruct-Q4_K_M.gguf"),
-    ],
-    "iris_009.gguf": [
-        ("unsloth/Qwen3-VL-4B-Instruct-GGUF", "mmproj-F16.gguf"),
+        ("unsloth/Qwen2.5-VL-7B-Instruct-GGUF", "mmproj-F16.gguf"),
     ],
 }
 
@@ -127,7 +143,8 @@ ROLE_CTX: Dict[ModelRole, int] = {
     ModelRole.CONTROL:   2048,
     ModelRole.MATH:      4096,
     ModelRole.CODE:      8192,
-    ModelRole.REASONING: 2048,
+    ModelRole.REASONING: 8192,
+    ModelRole.REVIEWER:  8192,
     ModelRole.GENERAL:   4096,
     ModelRole.VISION:    4096,
 }
@@ -173,7 +190,7 @@ CODE_SYSTEM_PROMPT = (
 
 MATH_SYSTEM_PROMPT = (
     "You are the Iris AI Math Core. Solve mathematical/algorithmic problems step-by-step. "
-    "Use precise notation."
+    "Use precise notation. Please reason step by step, and put your final answer within \\boxed{}."
 )
 
 REASONING_SYSTEM_PROMPT = (
@@ -190,6 +207,7 @@ REVIEWER_SYSTEM_PROMPT = (
 
 _active_role: Optional[ModelRole] = None
 _active_llm: Optional[Llama] = None
+_keep_loaded: bool = False  # Set True during benchmarks to skip unload
 _model_lock = threading.Lock()
 
 
@@ -296,7 +314,7 @@ def _unload_locked() -> None:
     global _active_role, _active_llm
     if _active_llm is not None:
         role_val = _active_role.value if _active_role else "unknown"
-        print(f"[Iris] Unloaded {role_val}.")
+        #print(f"[Iris] Unloaded {role_val}.")
         try:
             _active_llm.reset()
         except Exception:
@@ -333,13 +351,41 @@ def load_model(role: ModelRole) -> Llama:
                 f"Expected: {path}\n"
                 f"Please place the GGUF file in {os.path.join(os.path.dirname(_HERE), 'models')}/"
             )
-
         cfg = load_generation_config()
-        n_ctx = cfg.get("n_ctx", None) or ROLE_CTX.get(role, DEFAULT_CTX)
+        
+        n_ctx_allocation = cfg.get("n_ctx_allocation", "auto")
+        if str(n_ctx_allocation).lower() == "auto":
+            try:
+                import os
+                # Basic cross-platform RAM calc using os.sysconf if posix
+                if os.name == 'posix':
+                    ram_bytes = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
+                    ram_gb = ram_bytes / (1024**3)
+                    if ram_gb < 16:
+                        n_ctx = 4096
+                    elif ram_gb < 32:
+                        n_ctx = 8192
+                    elif ram_gb < 64:
+                        n_ctx = 16384
+                    else:
+                        n_ctx = 32768
+                else:
+                    n_ctx = 8192
+            except Exception:
+                n_ctx = 4096
+        else:
+            try:
+                n_ctx = int(n_ctx_allocation)
+            except ValueError:
+                n_ctx = 4096
+
+        if not n_ctx:
+            n_ctx = ROLE_CTX.get(role, DEFAULT_CTX)
+
         n_gpu_layers = cfg.get("n_gpu_layers", DEFAULT_GPU_LAYERS)
         n_threads = cfg.get("n_threads", DEFAULT_THREADS)
 
-        print(f"[Iris] Loading {role.value} ({filename}) [ctx={n_ctx}]...")
+        #print(f"[Iris] Loading {role.value} ({filename}) [ctx={n_ctx}]...")
 
         _active_llm = Llama(
             model_path=path,
@@ -349,6 +395,8 @@ def load_model(role: ModelRole) -> Llama:
             use_mmap=True,
             use_mlock=False,
             flash_attn=True,
+            type_k=getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
+            type_v=getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
             n_batch=1024,
             verbose=False,
         )
@@ -371,6 +419,7 @@ def _system_prompt_for(role: ModelRole) -> str:
         ModelRole.MATH:      MATH_SYSTEM_PROMPT,
         ModelRole.CODE:      CODE_SYSTEM_PROMPT,
         ModelRole.REASONING: REASONING_SYSTEM_PROMPT,
+        ModelRole.REVIEWER:  REVIEWER_SYSTEM_PROMPT,
         ModelRole.GENERAL:   GENERAL_SYSTEM_PROMPT,
         ModelRole.VISION:    "You are the Iris AI Vision node. Analyze the visual context.",
     }
@@ -483,7 +532,8 @@ def classify_task(
         temperature=0.2,
     )
     answer = res["choices"][0]["message"]["content"].strip()
-    unload_model()
+    if not _keep_loaded:
+        unload_model()
 
     tag_map: Dict[str, TaskType] = {
         "GENERAL":       TaskType.GENERAL,
@@ -534,13 +584,14 @@ def _stream_tokens(
 
     for loop_idx in range(5):
         stream = llm.create_chat_completion(
-            messages=full_messages, stream=True, max_tokens=max_tokens, temperature=temperature,
+            messages=full_messages, stream=True, max_tokens=max_tokens, temperature=temperature, repeat_penalty=load_generation_config().get("repetition_penalty", 1.0),
         )
         loop_content = ""
         finish_reason = "stop"
         in_thinking = False
         thinking_tag = ""
         buffer = ""
+        hidden_buffer = ""
 
         for chunk in stream:
             choices = chunk.get("choices", [])
@@ -603,16 +654,27 @@ def _stream_tokens(
                             in_thinking = False
                             thinking_tag = ""
                             buffer = buffer[idx + len(close_tag):]
+                            hidden_buffer = ""
                             continue
                         partial = False
                         for i in range(1, len(close_tag)):
                             if buffer.endswith(close_tag[:i]):
+                                hidden_buffer += buffer[:-i]
                                 buffer = buffer[-i:]
                                 partial = True
                                 break
                         if partial:
                             break
+                        hidden_buffer += buffer
                         buffer = ""
+
+                        if len(hidden_buffer) > 500:
+                            think_mode = "pass"
+                            yield {"type": "token", "content": hidden_buffer}
+                            loop_content += hidden_buffer
+                            hidden_buffer = ""
+                            in_thinking = False
+                            thinking_tag = ""
                         break
 
             elif think_mode == "show":
@@ -759,6 +821,7 @@ def ask_stream(
     retriever=None,
     force_role: Optional[ModelRole] = None,
     show_thinking: bool = True,
+    keep_loaded: bool = False,
 ) -> Generator[Dict[str, str], None, None]:
     """Generate a response using the multi-model routing pipeline.
 
@@ -766,6 +829,9 @@ def ask_stream(
         show_thinking: When True, DeepSeek R1 thinking tokens stream as
             {"type": "thinking", "content": "..."} events. Set False to strip.
     """
+    global _keep_loaded
+    _keep_loaded = keep_loaded
+
     if force_role is not None:
         if isinstance(force_role, str):
             force_role = ModelRole(force_role)
@@ -781,7 +847,10 @@ def ask_stream(
 
         optimized = [{"role": "user", "content": user_query}]
         if history:
-            recent = history[-4:]
+            cfg = load_generation_config()
+            profile = str(cfg.get("compacting_profile", "medium")).lower()
+            num_history = 2 if profile == "aggressive" else (10 if profile == "low" else 5)
+            recent = history[-num_history:]
             optimized = [{"role": m["role"], "content": m["content"]} for m in recent] + optimized
 
         full = ""
@@ -794,7 +863,35 @@ def ask_stream(
             if ev["type"] == "token":
                 full += ev["content"]
 
-        unload_model()
+        if not _keep_loaded:
+            if not _keep_loaded:
+                unload_model()
+
+        if force_role == ModelRole.MATH:
+            full, mw = _apply_math_harness(full)
+            for w in mw:
+                yield w
+            # SmartHarness: verify math solution
+            _, math_report = apply_smart_harness_math(full)
+            if math_report.final_answer_extracted:
+                yield {"type": "status", "content": f"Answer: {math_report.final_answer_extracted}"}
+            if not math_report.self_consistent:
+                yield {"type": "harness_warning", "content": "Self-consistency check FAILED — steps may not lead to final answer"}
+        elif force_role == ModelRole.CODE:
+            lang = _detect_language(full) or "python"
+            err = check_syntax(full, lang)
+            if err:
+                yield {"type": "syntax_error", "content": f"Syntax error in {lang}: {err}"}
+            full, hw = _apply_and_yield_harness(full, lang)
+            for w in hw:
+                yield w
+            # SmartHarness: sandbox-verify force-routed code
+            _, sandbox = apply_smart_harness_code(full, language=lang)
+            if sandbox.result == SandboxResult.PASS:
+                yield {"type": "status", "content": f"Sandbox verified: {sandbox.tests_passed} tests passed"}
+            elif sandbox.result == SandboxResult.FAIL:
+                yield {"type": "harness_warning", "content": f"Sandbox: {sandbox.tests_failed} test(s) failed"}
+
         cleaned = _quality_guard(full)
         if cleaned != full:
             yield {"type": "clear"}
@@ -831,7 +928,10 @@ def ask_stream(
 
     optimized = [{"role": "user", "content": user_query}]
     if history:
-        recent = history[-4:]
+        cfg = load_generation_config()
+        profile = str(cfg.get("compacting_profile", "medium")).lower()
+        num_history = 2 if profile == "aggressive" else (10 if profile == "low" else 5)
+        recent = history[-num_history:]
         optimized = [{"role": m["role"], "content": m["content"]} for m in recent] + optimized
 
     if task_type == TaskType.GENERAL:
@@ -841,7 +941,9 @@ def ask_stream(
             yield ev
             if ev["type"] == "token":
                 full += ev["content"]
-        unload_model()
+        if not _keep_loaded:
+            if not _keep_loaded:
+                unload_model()
         cleaned = _quality_guard(full)
         if cleaned != full:
             yield {"type": "clear"}
@@ -855,7 +957,9 @@ def ask_stream(
             yield ev
             if ev["type"] == "token":
                 full += ev["content"]
-        unload_model()
+        if not _keep_loaded:
+            if not _keep_loaded:
+                unload_model()
         yield {"type": "raw_response", "content": full}
 
     elif task_type == TaskType.MATH:
@@ -865,11 +969,22 @@ def ask_stream(
             yield ev
             if ev["type"] == "token":
                 full += ev["content"]
-        unload_model()
+        if not _keep_loaded:
+            if not _keep_loaded:
+                unload_model()
 
         full, mw = _apply_math_harness(full)
         for w in mw:
             yield w
+
+        # SmartHarness: verify math numerically & symbolically
+        _, math_report = apply_smart_harness_math(full)
+        if math_report.final_answer_extracted:
+            yield {"type": "status", "content": f"Answer: {math_report.final_answer_extracted}"}
+        if not math_report.numerical_match and math_report.expected_value is not None:
+            yield {"type": "harness_warning", "content": f"Numerical mismatch: computed={math_report.computed_value}, expected={math_report.expected_value}"}
+        if not math_report.self_consistent:
+            yield {"type": "harness_warning", "content": "Self-consistency check FAILED — steps may not lead to final answer"}
 
         lang = _detect_language(full)
         err = check_syntax(full, lang)
@@ -884,7 +999,9 @@ def ask_stream(
             yield ev
             if ev["type"] == "token":
                 full += ev["content"]
-        unload_model()
+        if not _keep_loaded:
+            if not _keep_loaded:
+                unload_model()
 
         lang = _detect_language(full)
         err = check_syntax(full, lang)
@@ -903,7 +1020,8 @@ def ask_stream(
                 yield ev
                 if ev["type"] == "token":
                     corrected += ev["content"]
-            unload_model()
+            if not _keep_loaded:
+                unload_model()
 
             second_err = check_syntax(corrected, lang)
             if second_err:
@@ -915,12 +1033,26 @@ def ask_stream(
         for w in hw:
             yield w
 
+        # SmartHarness: sandbox-verify generated code
+        yield {"type": "status", "content": "Verifying code in sandbox..."}
+        _, sandbox = apply_smart_harness_code(full, problem_description=user_query, language=lang)
+        if sandbox.result == SandboxResult.PASS:
+            yield {"type": "status", "content": f"Sandbox: {sandbox.tests_passed} tests passed"}
+        elif sandbox.result == SandboxResult.FAIL:
+            yield {"type": "harness_warning", "content": f"Sandbox: {sandbox.tests_passed}/{sandbox.tests_passed + sandbox.tests_failed} tests passed — some tests failed"}
+        elif sandbox.syntax_error:
+            yield {"type": "syntax_error", "content": f"Sandbox: {sandbox.syntax_error}"}
+        elif sandbox.runtime_errors:
+            for rerr in sandbox.runtime_errors[:3]:
+                yield {"type": "harness_warning", "content": f"Runtime: {rerr[:200]}"}
+
         yield {"type": "raw_response", "content": full}
 
     elif task_type == TaskType.CODING_COMPLEX:
         yield from _run_complex_coding(user_query, history, optimized, context, retriever)
 
-    unload_model()
+    if not _keep_loaded:
+        unload_model()
 
 
 def _apply_and_yield_harness(text: str, language: str) -> Tuple[str, List[dict]]:
@@ -955,7 +1087,8 @@ def _run_continuation(
         yield ev
         if ev["type"] == "token":
             full += ev["content"]
-    unload_model()
+    if not _keep_loaded:
+        unload_model()
 
     yield {"type": "clear"}
     yield {"type": "status", "content": "Stage 2 \u2014 Reviewing..."}
@@ -963,14 +1096,15 @@ def _run_continuation(
     review_msgs = optimized + [
         {"role": "assistant", "content": full},
         {"role": "user", "content": "Review the above continuation of the code project. "
-         "Fix errors, fill gaps, ensure consistency. Output only the corrected code."}
+         "Fix errors, fill gaps, ensure consistency. Return the final corrected code inside a ```python``` block, followed by a brief explanation."}
     ]
     reviewed = ""
-    for ev in _stream_tokens(ModelRole.REASONING, review_msgs, max_tokens=3072, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+    for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=3072, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
         yield ev
         if ev["type"] == "token":
             reviewed += ev["content"]
-    unload_model()
+    if not _keep_loaded:
+        unload_model()
 
     lang = _detect_language(reviewed)
     err = check_syntax(reviewed, lang)
@@ -985,6 +1119,106 @@ def _run_continuation(
     yield {"type": "raw_response", "content": reviewed}
 
 
+
+
+def _run_hermes_agent(
+    user_query: str,
+    history: List[Dict[str, str]],
+    optimized: List[Dict[str, str]],
+) -> Generator[Dict[str, str], None, None]:
+    """Hermes agent mode: text-based tool-calling loop for local models.
+
+    Uses build_hermes_text_prompt + parse_hermes_tool_call for models
+    that don't support native OpenAI function calling.
+    """
+    yield {"type": "status", "content": "Initializing Hermes Agent..."}
+
+    agent = HermesAgentLoop(
+        workspace_root=os.getcwd(),
+        max_tool_calls=30,
+        max_consecutive_errors=5,
+        max_turns=10,
+    )
+
+    prompt = build_hermes_text_prompt(user_query, history, os.getcwd())
+    current_prompt = f"{HERMES_AGENT_SYSTEM_PROMPT}\n\nUser query: {user_query}"
+
+    for agent_turn in range(10):
+        llm = load_model(ModelRole.CODE)
+        try:
+            msgs = [{"role": "system", "content": current_prompt}]
+            if history:
+                for m in history[-4:]:
+                    msgs.append({"role": m["role"], "content": m["content"][:1000]})
+            msgs.append({"role": "user", "content": user_query})
+
+            full = ""
+            stream = llm.create_chat_completion(
+                messages=msgs, stream=True,
+                max_tokens=2048, temperature=0.3,
+            )
+            for chunk in stream:
+                choices = chunk.get("choices", [])
+                if not choices:
+                    continue
+                token = choices[0].get("delta", {}).get("content", "")
+                if token:
+                    full += token
+                    yield {"type": "token", "content": token}
+
+            if not _keep_loaded:
+                unload_model()
+
+            # Parse tool call
+            tc = parse_hermes_tool_call(full)
+            if tc:
+                func_name = tc.get("name", "")
+                args = tc.get("args", {})
+
+                yield {"type": "status", "content": f"Running {func_name}..."}
+
+                result = HermesToolRegistry.execute(
+                    func_name, args, os.getcwd(), agent.session
+                )
+                result = HermesResultAnalyzer.analyze(result)
+                agent.session.total_tool_calls += 1
+
+                # Feed result back
+                feedback = (
+                    f"Tool '{func_name}' returned:\n"
+                    f"Status: {result.status.value}\n"
+                    f"Output: {result.output[:2000]}\n"
+                )
+                if result.error:
+                    feedback += f"Error: {result.error[:500]}\n"
+                if result.suggestions:
+                    feedback += f"Suggestions: {'; '.join(result.suggestions)}\n"
+
+                current_prompt = (
+                    f"{HERMES_AGENT_SYSTEM_PROMPT}\n\n"
+                    f"User query: {user_query}\n\n"
+                    f"Last tool result:\n{feedback}\n\n"
+                    f"Continue. If done, provide your final answer WITHOUT a <tool_call>."
+                )
+                user_query = f"Continue based on the tool result above."
+
+                if not agent.should_continue():
+                    yield {"type": "harness_warning",
+                           "content": "Agent budget exhausted."}
+                    break
+                continue
+
+            # No tool call found — assume this is the final answer
+            yield {"type": "raw_response", "content": full}
+            return
+
+        except Exception as e:
+            yield {"type": "harness_warning",
+                   "content": f"Hermes agent error: {e}"}
+            yield {"type": "raw_response", "content": full}
+            return
+
+    yield {"type": "raw_response", "content": "Hermes agent completed."}
 
 def _run_complex_coding(
     user_query: str,
@@ -1011,7 +1245,8 @@ def _run_complex_coding(
         yield ev
         if ev["type"] == "token":
             raw_reasoning += ev["content"]
-    unload_model()
+    if not _keep_loaded:
+        unload_model()
 
     yield {"type": "status", "content": "Stage 2 \u2014 Writing code..."}
     code_msgs = optimized[:-1] + [
@@ -1023,7 +1258,8 @@ def _run_complex_coding(
         yield ev
         if ev["type"] == "token":
             full_code += ev["content"]
-    unload_model()
+    if not _keep_loaded:
+        unload_model()
 
     yield {"type": "clear"}
     yield {"type": "status", "content": "Stage 3 \u2014 Reviewing and optimizing..."}
@@ -1032,14 +1268,15 @@ def _run_complex_coding(
         {"role": "assistant", "content": full_code},
         {"role": "user",
          "content": "Review the above code. Fix all syntax errors, logical bugs, edge cases, "
-         "and ensure it compiles/works correctly. Output the final corrected code."}
+         "and ensure it compiles/works correctly. Return the final corrected code inside a ```python``` block, followed by a brief explanation."}
     ]
     final_output = ""
-    for ev in _stream_tokens(ModelRole.REASONING, review_msgs, max_tokens=3072, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+    for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=3072, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
         yield ev
         if ev["type"] == "token":
             final_output += ev["content"]
-    unload_model()
+    if not _keep_loaded:
+        unload_model()
 
     lang = _detect_language(final_output)
     err = check_syntax(final_output, lang)
@@ -1051,19 +1288,34 @@ def _run_complex_coding(
         correction_msgs = optimized + [
             {"role": "assistant", "content": final_output},
             {"role": "user",
-             "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code."}
+             "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code inside a ```python``` block."}
         ]
         corrected = ""
-        for ev in _stream_tokens(ModelRole.REASONING, correction_msgs, max_tokens=3072, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+        for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=3072, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
             yield ev
             if ev["type"] == "token":
                 corrected += ev["content"]
-        unload_model()
+        if not _keep_loaded:
+            if not _keep_loaded:
+                unload_model()
 
         second_err = check_syntax(corrected, lang)
         if second_err:
             yield {"type": "token", "content": "\n\n> \u26a0\ufe0f Auto-correction attempted but some errors may remain."}
         final_output = corrected
+
+    # SmartHarness: sandbox-verify complex code
+    yield {"type": "status", "content": "Verifying complex code in sandbox..."}
+    _, sandbox = apply_smart_harness_code(final_output, language=lang or "python")
+    if sandbox.result == SandboxResult.PASS:
+        yield {"type": "status", "content": f"Sandbox: {sandbox.tests_passed} tests passed"}
+    elif sandbox.result == SandboxResult.FAIL:
+        yield {"type": "harness_warning", "content": f"Sandbox: {sandbox.tests_passed}/{sandbox.tests_passed + sandbox.tests_failed} tests passed — some tests failed"}
+    elif sandbox.syntax_error:
+        yield {"type": "syntax_error", "content": f"Sandbox: {sandbox.syntax_error}"}
+    elif sandbox.runtime_errors:
+        for rerr in sandbox.runtime_errors[:3]:
+            yield {"type": "harness_warning", "content": f"Runtime: {rerr[:200]}"}
 
     yield {"type": "raw_response", "content": final_output}
 
@@ -1085,7 +1337,9 @@ def generate_internal_code(
         )
         return res["choices"][0]["message"]["content"]
     finally:
-        unload_model()
+        if not _keep_loaded:
+            if not _keep_loaded:
+                unload_model()
 
 
 
@@ -1637,6 +1891,9 @@ def _load_vision_model():
                     n_ctx=ROLE_CTX.get(ModelRole.VISION, 4096),
                     n_gpu_layers=n_gpu_layers,
                     n_threads=n_threads,
+                    flash_attn=True,
+                    type_k=getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
+                    type_v=getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
                     verbose=False,
                 )
                 _vision_cache = {"model": model, "backend": "gguf"}

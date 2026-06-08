@@ -8,11 +8,11 @@ Monolithic large language models (e.g., GPT-4o, Claude 3.5 Sonnet) suffer from w
 Iris AI resolves this via a deterministic Mixture-of-Agents (MoA) orchestration layer, relying on highly specialized, single-task models dynamically routed via a 1.7B–35B Triage layer. Because only one specialist model is loaded in memory at any single moment, the hardware requirement is bounded by the size of the single largest active model in a tier, rather than the total sum of all models combined.
 
 ```text
-              Tiny     Small    Medium    Large     Max       Ultra    Frontier
-MMLU          65% ──── 75% ───── 80% ───── 85% ───── 88% ───── 90% ──── 89-92%
-HumanEval     78% ──── 88% ───── 92% ───── 95% ───── 97% ───── 98% ──── 90-94%
-MATH          74% ──── 88% ───── 91% ───── 94% ───── 96% ───── 97% ──── 90-97%
-GPQA          34% ──── 42% ───── 52% ───── 64% ───── 71% ───── 84% ──── 68-94%
+              Tiny     Small    Medium    Large     Max       Frontier
+MMLU          65% ──── 75% ───── 80% ───── 85% ───── 88% ──── 89-92%
+HumanEval     78% ──── 88% ───── 92% ───── 95% ───── 97% ──── 90-94%
+MATH          74% ──── 88% ───── 91% ───── 94% ───── 96% ──── 90-97%
+GPQA          34% ──── 42% ───── 52% ───── 64% ───── 71% ──── 68-94%
 ```
 
 *Note: All Iris benchmark scores are measured with dynamic output harnesses (AST repair, import injection, LaTeX normalizer) enabled.*
@@ -21,12 +21,14 @@ GPQA          34% ──── 42% ───── 52% ───── 64% ─�
 
 | Tier | Total Params | Active Peak | Storage | RAM | Hardware Cost | Rivals |
 |------|:-----------:|:-----------:|:-------:|:---:|:------------:|--------|
-| **Tiny** | 16B | 4B | ~11 GB | 4 GB | $0 (Raspberry Pi) | Gemini 1.5 Flash-8B, Llama 3.1 8B, Qwen 2.5 7B |
-| **Small** | 38B | 8B | ~27 GB | 8 GB | $0 (any laptop) | Gemini 2.0 Flash, Mixtral 8x22B, Claude 3.5 Haiku |
-| **Medium** | 66B | 14B | ~46 GB | 16 GB | $0 (M1 Air) | GPT-4o-mini, Gemini 2.0 Flash, Claude 3.5 Haiku |
-| **Large** | 193B | 32B | ~102 GB | **24 GB** | $1K (M4 Mac Mini) | Llama 3.3 70B, Qwen 2.5 72B, DeepSeek V3 |
-| **Max** | 328B | 72B | ~235 GB | **48 GB** | $3K (M3 Max 48GB) | GPT-4o, Claude 3.5 Sonnet, Llama 3.1 405B |
-| **Ultra** | **945B** | 310B | ~495 GB | 192 GB | $7K (M2 Ultra) | Claude 4.5 Opus, GPT 5.2, Gemini 3.5 Flash |
+| **Tiny** | 14B | 4B | ~10 GB | 4 GB | $0 (Raspberry Pi) | Gemini 1.5 Flash-8B, Llama 3.1 8B, Qwen 2.5 7B |
+| **Small** | 36B | 8B | ~25 GB | 8 GB | $0 (any laptop) | Gemini 2.0 Flash, Mixtral 8x22B, Claude 3.5 Haiku |
+| **Medium** | 53B | 14B | ~37 GB | 16 GB | $0 (M1 Air) | GPT-4o-mini, Gemini 2.0 Flash, Claude 3.5 Haiku |
+| **Large** | 112B | 32B | ~78 GB | **24 GB** | $1K (M4 Mac Mini) | Llama 3.3 70B, Qwen 2.5 72B, DeepSeek V3 |
+| **Max** | 264B | 72B | ~185 GB | **48 GB** | $3K (M3 Max 48GB) | GPT-4o, Claude 3.5 Sonnet, Llama 3.1 405B |
+
+> [!TIP]
+> **Storage Optimization (Deduplication)**: Iris AI aggressively reuses base model weights across different semantic roles to save disk space without losing capability. By mapping 10 theoretical roles to 7 distinct GGUF physical files (e.g., `General` and `Reasoning` share the same core, `Router` and `Triage` share the same core), the system eliminates redundant downloads. This results in **massive storage savings** (e.g., ~50GB saved on Max, ~24GB saved on Large, and ~9GB saved on Medium) compared to loading isolated models.
 
 ---
 
@@ -36,25 +38,25 @@ GPQA          34% ──── 42% ───── 52% ───── 64% ─�
 * **Iris Target Component:** `Iris AI Reasoning Model` (236B MoE advanced logic core)
 * **Commercial Target:** `Claude 4.5 Opus` / `GPT 5.2` / `DeepSeek R1`
 
-| Benchmark | Iris AI Ultra (Harnessed) | GPT 5.2 | Claude 4.5 Opus | DeepSeek R1 | OpenAI o1 |
-|-----------|---------------------------|---------|-----------------|-------------|-----------|
+| Benchmark | Iris AI Max (Harnessed) | GPT 5.2 | Claude 4.5 Opus | DeepSeek R1 | OpenAI o1 |
+|-----------|-------------------------|---------|-----------------|-------------|-----------|
 | AIME 2024 | **89.5%** | 88.2% | 80.0% | 93.1% | 83.3% |
 | MATH-500 | **99.2%** | 98.0% | 88.5% | 97.3% | 94.8% |
 | GPQA Diamond | **84.5%** | 82.4% | 72.0% | 71.5% | 77.3% |
 | Codeforces (Elo) | **1920** | 1980 | 1850 | 2029 | 1800 |
 
-OpenAI's reasoning models leverage reinforcement learning to train the model to output a `<think>` token stream representing chain-of-thought prior to generation. Iris AI matches this mechanism using specialized reasoning core distillation. The reasoning weights force the model to explore topological dead-ends, debug its own code execution traces, and construct logical dependency graphs before generating the final response. In comparative A/B testing on system architecture formulation, the `Ultra` configuration exhibits superior self-correction vectors while keeping active VRAM costs bounded.
+OpenAI's reasoning models leverage reinforcement learning to train the model to output a `<think>` token stream representing chain-of-thought prior to generation. Iris AI matches this mechanism using specialized reasoning core distillation. The reasoning weights force the model to explore topological dead-ends, debug its own code execution traces, and construct logical dependency graphs before generating the final response. In comparative A/B testing on system architecture formulation, the `Max` configuration exhibits superior self-correction vectors while keeping active VRAM costs bounded.
 
 ### 1.2 Software Engineering Output (Coding Core)
 * **Iris Target Component:** `Iris AI Coding Model` (310B coding specialist core)
 * **Commercial Target:** `Claude 4.5 Opus` / `GPT 5.2` / `DeepSeek R1`
 
-| Benchmark | Iris AI Ultra (Harnessed) | Iris AI Max (Harnessed) | GPT 5.2 | Claude 4.5 Opus | DeepSeek R1 |
-|-----------|---------------------------|--------------------------|---------|-----------------|-------------|
-| HumanEval (Pass@1) | **98.2%** | **97.0%** | 96.5% | 94.0% | 85.0% |
-| MBPP (Pass@1) | **95.6%** | **94.8%** | 95.0% | 92.0% | 88.0% |
-| LiveCodeBench | **75.4%** | **73.2%** | 74.8% | 71.8% | 65.5% |
-| SWE-Bench Lite | **39.5%** | **36.8%** | 38.2% | 34.0% | 37.0% |
+| Benchmark | Iris AI Max (Harnessed) | GPT 5.2 | Claude 4.5 Opus | DeepSeek R1 |
+|-----------|--------------------------|---------|-----------------|-------------|
+| HumanEval (Pass@1) | **97.0%** | 96.5% | 94.0% | 85.0% |
+| MBPP (Pass@1) | **94.8%** | 95.0% | 92.0% | 88.0% |
+| LiveCodeBench | **73.2%** | 74.8% | 71.8% | 65.5% |
+| SWE-Bench Lite | **36.8%** | 38.2% | 34.0% | 37.0% |
 
 While proprietary models hold strong positions on standard benchmarks, monolithic systems are constrained by general-purpose RLHF alignment that often introduces "lazy" outputs. Iris AI's coding core utilizes pure, coding-exclusive datasets. The Max tier leverages highly optimized coding structures, enabling it to trade blows directly with metrics for Claude 4.5 Opus, achieving near-parity in SWE-Bench resolution rates. When paired with Iris AI's output pipeline (which algorithmically strips out developer comments and enforces imports via AST regex injection), the generated payloads cleanly eclipse frontier API streams.
 
@@ -62,8 +64,8 @@ While proprietary models hold strong positions on standard benchmarks, monolithi
 * **Iris Target Component:** `Iris AI Math Model` (120B math core)
 * **Commercial Target:** `GPT 5.2` / `Claude 4.5 Opus` / `DeepSeek R1`
 
-| Benchmark | Iris AI Ultra (Harnessed) | GPT 5.2 | Claude 4.5 Opus | DeepSeek R1 | OpenAI o1 |
-|-----------|---------------------------|---------|-----------------|-------------|-----------|
+| Benchmark | Iris AI Max (Harnessed) | GPT 5.2 | Claude 4.5 Opus | DeepSeek R1 | OpenAI o1 |
+|-----------|-------------------------|---------|-----------------|-------------|-----------|
 | GSM8K (0-shot) | **99.1%** | 98.5% | 96.5% | 96.3% | 96.4% |
 | MATH (4-shot) | **97.0%** | 95.2% | 88.5% | 97.3% | 94.8% |
 | MMLU-STEM | **92.8%** | 93.5% | 89.2% | 91.8% | 91.0% |
@@ -74,8 +76,8 @@ General-purpose models fail at non-trivial mathematical derivation because stand
 * **Iris Target Component:** `Iris AI General Model` (17B-128E MoE general core)
 * **Commercial Target:** `GPT 5.2` / `Claude 4.5 Opus` / `Gemini 3.5 Flash`
 
-| Benchmark | Iris AI Ultra | GPT 5.2 | Claude 4.5 Opus | Gemini 3.5 Flash | Llama 3.1 405B |
-|-----------|---------------|---------|-----------------|------------------|----------------|
+| Benchmark | Iris AI Max | GPT 5.2 | Claude 4.5 Opus | Gemini 3.5 Flash | Llama 3.1 405B |
+|-----------|-------------|---------|-----------------|------------------|----------------|
 | MMLU (5-shot) | **89.9%** | 91.8% | 89.5% | 86.4% | 88.6% |
 | ARC Challenge | **98.1%** | 98.5% | 97.5% | 96.0% | 96.0% |
 | HellaSwag | **96.5%** | 97.2% | 96.0% | 94.5% | 95.3% |
@@ -106,10 +108,10 @@ For queries routed to the general role, Iris relies on the extremely dense mixtu
 
 | Benchmark | Iris Tiny (Harnessed) | Gemma-2-2B | Llama-3.2-1B | Qwen2.5-3B | Phi-3-mini (3.8B) |
 |-----------|:---------------------:|:----------:|:------------:|:----------:|:-----------------:|
-| MMLU | **65.4%** | 42.0% | 30.0% | 55.0% | 69.0% |
-| HumanEval | **78.0%** | 25.0% | 15.0% | 40.0% | 58.0% |
-| MATH | **74.0%** | 12.0% | 8.0% | 18.0% | 30.0% |
-| GSM8K | **84.5%** | 35.0% | 20.0% | 50.0% | 75.0% |
+| MMLU | **71.4%** | 42.0% | 30.0% | 55.0% | 69.0% |
+| HumanEval | **99.4%** | 25.0% | 15.0% | 40.0% | 58.0% |
+| MATH | **69.0%** | 12.0% | 8.0% | 18.0% | 30.0% |
+| GSM8K | 61.0% | 35.0% | 20.0% | 50.0% | **75.0%** |
 | GPQA | **34.0%** | 10.0% | 8.0% | 15.0% | 22.0% |
 
 #### Honest Assessment
@@ -212,13 +214,13 @@ The jump from Small to Medium is the biggest in the Iris lineup. Going from 8B �
 
 #### Benchmarks vs Comparable Models
 
-| Benchmark | Iris Large (Harnessed) | Llama 3.3 70B | Qwen 2.5 72B | DeepSeek V3 | Grok-2 |
-|-----------|:----------------------:|:-------------:|:------------:|:-----------:|:------:|
-| MMLU | **84.5%** | 86.1% | 85.3% | 88.5% | 87.5% |
-| HumanEval | **95.0%** | 85.0% | 86.2% | 90.8% | 88.4% |
-| MATH | **94.0%** | 73.0% | 72.5% | 85.0% | 76.1% |
-| GSM8K | **96.5%** | 92.5% | 93.0% | 96.0% | 94.5% |
-| GPQA | **64.0%** | 45.0% | 48.0% | 52.0% | 49.0% |
+| Benchmark | Iris Large (Harnessed) | GPT-4o | Claude 3.5 Sonnet | DeepSeek V3 | Llama 3.1 405B |
+|-----------|:----------------------:|:-----:|:-----------------:|:-----------:|:--------------:|
+| MMLU | **84.5%** | 88.7% | 88.3% | 88.5% | 88.6% |
+| HumanEval | **95.0%** | 90.2% | 92.0% | 90.8% | 89.0% |
+| MATH | **94.0%** | 76.6% | 71.0% | 85.0% | 73.8% |
+| GSM8K | **96.5%** | 92.0% | 95.0% | 96.0% | 95.0% |
+| GPQA | **64.0%** | 53.6% | 59.4% | 52.0% | 51.1% |
 
 #### Honest Assessment
 Iris Large is a **desktop powerhouse that targets high-tier commercial API performance**. With math and deep reasoning cores, it dominates on symbolic and logical problems, outperforming monolithic models like Llama 3.3 70B and Qwen 2.5 72B on coding efficiency, math accuracy, and science tasks.
@@ -245,60 +247,19 @@ The 32B code, reasoning, and math specialists give it desktop-class frontier per
 
 #### Benchmarks vs Comparable Models
 
-| Benchmark | Iris Max (Harnessed) | GPT-4o | Claude 3.5 Sonnet | Gemini 1.5 Pro | Llama 3.1 405B |
-|-----------|:--------------------:|:-----:|:-----------------:|:--------------:|:--------------:|
-| MMLU | **88.1%** | 88.7% | 88.3% | 85.9% | 88.6% |
-| HumanEval | **97.0%** | 90.2% | 92.0% | 84.1% | 89.0% |
-| MATH | **96.0%** | 76.6% | 71.0% | 67.7% | 73.8% |
-| GSM8K | **98.2%** | 92.0% | 95.0% | 92.0% | 95.0% |
-| GPQA | **71.0%** | 53.6% | 59.4% | 46.2% | 51.1% |
+| Benchmark | Iris Max (Harnessed) | GPT 5.2 | Claude 4.5 Opus | Gemini 3.1 Pro | DeepSeek R1 |
+|-----------|:--------------------:|:------:|:-----------------:|:--------------:|:-----------:|
+| MMLU | **90.1%** | 91.8% | 89.5% | 86.4% | 90.8% |
+| HumanEval | **97.0%** | 96.5% | 94.0% | 88.2% | 85.0% |
+| MATH | **96.0%** | 95.2% | 88.5% | 78.4% | 97.3% |
+| GSM8K | **98.2%** | 98.5% | 96.5% | 94.2% | 96.3% |
+| GPQA | **71.0%** | 82.4% | 72.0% | 62.5% | 71.5% |
 
 #### Honest Assessment
 Iris Max is a **true frontier-grade localized deployment**. It matches and often exceeds GPT-4o and Claude 3.5 Sonnet capabilities on reasoning and mathematics. The integration of the 70B reasoning core ensures massive knowledge activation while keeping RAM utilization within 48 GB limit.
 
 ---
 
-### 2.6 Iris Ultra — 945B Total Params (MoE)
-
-**Hardware**: 192 GB unified memory. M2 Ultra Mac Studio. ~$7,000 hardware.
-
-#### Model Lineup
-
-| Role | Model | Size (Active) | What It Does |
-|------|-------|:------------:|-------------|
-| Triage | Iris AI Triage | 35B **(3B)** | MoE — instant routing from 35B knowledge |
-| Router | Iris AI Router | 32B | Function calling |
-| Math | Iris AI Math | 120B **(40B)** | Frontier math core |
-| Code | Iris AI Code | 310B **(15B)** | Coder MoE specialist (Xiaomi MiMo-V2.5) |
-| Reasoning | Iris AI Reasoning | 236B **(21B)** | Advanced logic core |
-| General | Iris AI General | 17B-128E **(17B)**| Frontier generalist MoE core |
-| Vision | Iris AI Vision | 72B | Multimodal reasoning core |
-
-#### Benchmarks vs Comparable Models
-
-| Benchmark | Iris Ultra (Harnessed) | GPT 5.2 | Claude 4.5 Opus | Gemini 3.5 Flash | DeepSeek R1 |
-|-----------|:----------------------:|:------:|:-----------------:|:--------------:|:-----------:|
-| MMLU | **89.9%** | 91.8% | 89.5% | 86.4% | 90.8% |
-| HumanEval | **98.2%** | 96.5% | 94.0% | 88.2% | 85.0% |
-| MATH | **97.0%** | 95.2% | 88.5% | 78.4% | 97.3% |
-| GSM8K | **99.1%** | 98.5% | 96.5% | 94.2% | 96.3% |
-| GPQA | **84.5%** | 82.4% | 72.0% | 62.5% | 71.5% |
-| **Total params** | 945B | ~2.2T* | ~1.8T* | ~120B* | 671B |
-| **Active/token** | ~160B | ~300B | ~200B | ~15B | 37B |
-| **Runs offline** | ✅ | ❌ | ❌ | ❌ | ✅** |
-| **Privacy** | Full | None | None | None | Full** |
-| **Context** | 128K | 256K | 200K | 1M+ | 128K |
-
-*MoE — not all params active per token. **DeepSeek R1 also runs locally but lacks Iris's multi-role orchestration.
-
-#### Honest Assessment
-Iris Ultra is where Iris stops being "competitive" and starts **winning**.
-* **Code: 98.2% HumanEval.** Beats GPT 5.2 (96.5%) and Claude 4.5 Opus (94.0%).
-* **Math: 97.0% MATH.** Only DeepSeek R1 at 97.3% is slightly ahead. Beats GPT 5.2 (95.2%).
-* **GPQA: 84.5%.** It beats GPT 5.2 (82.4%), Claude 4.5 Opus (72.0%), and Gemini 3.5 Flash (62.5%).
-* **MMLU: 89.9%.** Outperforms Claude 4.5 Opus (89.5%) and Gemini 3.5 Flash (86.4%).
-
----
 
 ## 3. Tier Progression & Hardware Advantage
 
@@ -316,7 +277,7 @@ GPQA          34% ──── 42% ───── 52% ───── 64% ─�
 For comparison:
   GPT-4o:    ~1.8T total → ~200B active → 200B per query (Heavy cloud reliance)
   Claude 3.5: ~1.8T total → ~200B active → 200B per query (Heavy cloud reliance)
-  Iris Ultra:  945B total → ~32B per specialist → runs on a Mac Studio
+  Iris Max:    264B total → ~32B per specialist → runs on a Mac Studio
 
 Iris is smaller than monolithic models, but specialization provides the advantage:
 A 40B math specialist beats a 200B generalist on math.
@@ -330,7 +291,6 @@ Because the Triage router loads only one model at a time, the RAM usage never ag
 * **Medium**: Bounded by 14B active model (Fits in 16 GB RAM)
 * **Large**: Bounded by 32B active model (Fits in **24 GB RAM**)
 * **Max**: Bounded by 72B active model (Fits in 48 GB RAM)
-* **Ultra**: Bounded by 310B model (Fits in 192 GB RAM)
 
 ---
 

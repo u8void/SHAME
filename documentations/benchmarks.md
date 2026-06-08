@@ -22,8 +22,9 @@ python benchmark/test_gpqa.py
 | Benchmark | Type | Description | Dataset |
 |-----------|------|-------------|---------|
 | **GSM8K** | Math | Grade-school math word problems | 1,319 test problems |
-| **MATH** | Math | Competition math (AMC, AIME) | 5,000 problems |
-| **HumanEval** | Code | Python function generation from docstrings | 164 problems |
+| **MATH** | Math | Competition math (AMC, AIME) | 500 test problems (MATH-500) |
+| **HumanEval** | Code | Python function generation from docstrings | 164 problems (unit-test executed) |
+| **SWE-Bench** | Code | Codebase repair and software engineering bugs | 3 local repair tasks with unit tests |
 | **MMLU** | Knowledge | 57 subjects (STEM, humanities, social science) | 14,042 questions |
 | **GPQA Diamond** | Science | Graduate-level physics, chemistry, biology | 198 questions |
 
@@ -41,8 +42,9 @@ MMLU,general,"What is the capital of...",true,12,0.3
 | Benchmark | Scoring Method |
 |-----------|---------------|
 | GSM8K | Exact match of numeric answer |
-| MATH | Symbolic comparison of final answer |
-| HumanEval | `pass@1` — functional correctness via unit tests |
+| MATH | LaTeX \boxed{} answer comparison |
+| HumanEval | `pass@1` — functional correctness via sandbox execution |
+| SWE-Bench | functional correctness of fix via unit-test execution |
 | MMLU | Multiple choice accuracy |
 | GPQA | Multiple choice accuracy |
 
@@ -51,8 +53,10 @@ MMLU,general,"What is the capital of...",true,12,0.3
 ```
 benchmark/
 ├── run_all.py      # Orchestrator — runs all benchmarks, computes summary
-├── test_math.py    # GSM8K + MATH benchmarks
-├── test_coding.py  # HumanEval benchmark
+├── test_gsm8k.py   # GSM8K benchmark (math word problems)
+├── test_math.py    # Hendrycks MATH benchmark (competition math)
+├── test_coding.py  # HumanEval benchmark (real python execution check)
+├── test_swebench.py # Local SWE-Bench benchmark (codebase bug repair)
 ├── test_mmlu.py    # MMLU benchmark (57 subjects)
 ├── test_gpqa.py    # GPQA Diamond benchmark
 ├── utils.py        # Shared utilities (model loading, scoring)
@@ -64,13 +68,13 @@ benchmark/
 
 | Benchmark | Expected Score | Notes |
 |-----------|---------------|-------|
-| GSM8K | 94.2% | 7B math model + 14B R1 reasoning core + output harness |
-| HumanEval | 92.0% | 14B code model (Qwen3-Coder-14B) + syntax/import harness |
-| MMLU | 80.2% | 14B general model across 57 subjects |
-| GPQA Diamond | 52.0% | DeepSeek-R1-Distill-Qwen-14B core + reasoning harness |
+| GSM8K | 94.2% | Iris math model + Iris reasoning core + output harness |
+| HumanEval | 92.0% | Iris code model  + syntax/import harness |
+| MMLU | 80.2% | Iris general model across 57 subjects |
+| GPQA Diamond | 52.0% | Iris core + reasoning harness |
 
 *Note: These benchmarks reflect the upgraded `medium` default tier.*
-**Max/Ultra tiers** push performance even further — Max achieves 97.0% HumanEval and 71.0% GPQA, while Ultra reaches 98.2% HumanEval and 84.5% GPQA.
+**The Max tier** pushes performance even further — achieving 97.0% HumanEval and 71.0% GPQA.
 
 ## Running a Single Test
 

@@ -67,7 +67,6 @@ Choose the tier that fits your hardware:
 | **Medium** | 66B | ~46 GB | 16 GB | 14B | Modern laptops (default) |
 | **Large** | 193B | ~102 GB | 24 GB | 32B | Workstations, Mac Studio |
 | **Max** | 328B | ~235 GB | 48 GB | 72B | Servers, multi-GPU rigs |
-| **Ultra** | 945B | ~495 GB | 192 GB | 310B | Mac Studio / high-end clusters |
 
 ```bash
 # Switch tiers:
@@ -209,8 +208,8 @@ python benchmark/run_all.py
 ```
 
 Results written to `outputs/benchmark_results.csv`. Covers:
-- **Math**: GSM8K, MATH benchmark
-- **Code**: HumanEval, coding exercises
+- **Math**: GSM8K, MATH (competition math)
+- **Code**: HumanEval (execution-based), SWE-Bench (codebase repair)
 - **Knowledge**: MMLU (57 subjects)
 - **Science**: GPQA Diamond
 
@@ -225,7 +224,6 @@ Results written to `outputs/benchmark_results.csv`. Covers:
 | Medium | 16 GB | ~46 GB | Apple M1+ / 6GB VRAM | 66B |
 | Large | 24 GB | ~102 GB | Apple M2 Ultra / 24GB VRAM | 193B |
 | Max | 48 GB | ~220 GB | Apple M3 Max 48GB / 2x RTX 3090 | 328B |
-| Ultra | 192 GB | ~495 GB | Apple M2 Ultra 192GB / Multi-GPU | 945B |
 
 ---
 

@@ -615,52 +615,57 @@ async def ask_stream(
             messages = optimize_messages(history, user_query)
             
             try:
-                from src.tools_harness import TOOLS_SCHEMA, execute_tool
-                import json
+                from src.hermes_harness import (
+                    HermesToolRegistry, HermesAgentLoop, HermesResultAnalyzer,
+                    HERMES_AGENT_SYSTEM_PROMPT
+                )
+                _hermes_available = True
             except ImportError:
-                TOOLS_SCHEMA = None
+                _hermes_available = False
 
-            if TOOLS_SCHEMA:
+            if _hermes_available:
                 yield {"type": "status", "content": "Initializing Agentic IDE Harness..."}
+                yield {"type": "status", "content": "Initializing Hermes Agent..."}
                 t0 = time.perf_counter()
                 selected_model = Model.CODE_COMPLEX.value
-                log.info("Starting Agentic Loop with %s...", selected_model)
-                
-                agent_sys_prompt = GENERAL_SYSTEM_PROMPT + (
-                    "\\n\\n[AGENTIC HARNESS ENABLED]\\n"
-                    "You are now an autonomous IDE agent. You have access to local tools. "
-                    "Use them to list directories, read files, write files, and execute shell commands to solve the user's problem. "
-                    "You must test your code by running it before finalizing your answer. "
-                    "Iterate using tools until you have completely fulfilled the user's request. "
-                )
-                
-                agent_messages = [{"role": "system", "content": agent_sys_prompt}, *messages]
+                log.info("Starting Hermes Agent Loop with %s...", selected_model)
+
+                agent_messages = [{"role": "system", "content": HERMES_AGENT_SYSTEM_PROMPT}, *messages]
                 full_content = ""
                 last_usage = {}
-                
-                for agent_loop in range(15):
+
+                # Create agent session for memory tracking
+                agent_loop_obj = HermesAgentLoop(
+                    workspace_root=(workspace_root or os.getcwd()),
+                    max_tool_calls=40,
+                    max_consecutive_errors=5,
+                    max_turns=15,
+                )
+
+                for agent_turn in range(15):
                     finish_reason = "stop"
                     loop_content = ""
                     tool_calls_dict = {}
-                    
+
                     async for chunk in client.stream_chat(
                         model=selected_model,
                         messages=agent_messages,
                         temperature=0.3,
                         max_tokens=MAX_TOKENS,
-                        tools=TOOLS_SCHEMA
+                        tools=HermesToolRegistry.get_openai_tools()
                     ):
                         try:
                             choice = chunk.get("choices", [{}])[0]
-                            if chunk.get("usage"): last_usage = chunk["usage"]
+                            if chunk.get("usage"):
+                                last_usage = chunk["usage"]
                             delta = choice.get("delta", {})
-                            
+
                             token = delta.get("content", "")
                             if token:
                                 loop_content += token
                                 full_content += token
                                 yield {"type": "token", "content": token}
-                                
+
                             if "tool_calls" in delta and delta["tool_calls"]:
                                 for tc in delta["tool_calls"]:
                                     idx = tc.get("index", 0)
@@ -668,53 +673,75 @@ async def ask_stream(
                                         tool_calls_dict[idx] = {
                                             "id": tc.get("id", ""),
                                             "type": "function",
-                                            "function": {"name": tc["function"].get("name", ""), "arguments": ""}
+                                            "function": {
+                                                "name": tc["function"].get("name", ""),
+                                                "arguments": ""
+                                            }
                                         }
                                     if "function" in tc and "arguments" in tc["function"]:
                                         tool_calls_dict[idx]["function"]["arguments"] += tc["function"]["arguments"]
-                                        
+
                             if "finish_reason" in choice and choice["finish_reason"]:
                                 finish_reason = choice["finish_reason"]
                         except (KeyError, IndexError):
                             pass
-                            
+
                     if tool_calls_dict:
                         tc_list = list(tool_calls_dict.values())
-                        agent_messages.append({"role": "assistant", "content": loop_content, "tool_calls": tc_list})
-                        
-                        for tc in tc_list:
-                            func_name = tc["function"]["name"]
-                            try:
-                                args = json.loads(tc["function"]["arguments"])
-                            except Exception:
-                                args = {}
-                                
-                            yield {"type": "status", "content": f"Running {func_name}..."}
-                            yield {"type": "tool_call", "name": func_name, "args": args}
-                            
-                            result = execute_tool(func_name, args, workspace_root)
-                            
-                            agent_messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc["id"],
-                                "name": func_name,
-                                "content": str(result)
+                        agent_messages.append({
+                            "role": "assistant",
+                            "content": loop_content,
+                            "tool_calls": tc_list
+                        })
+
+                        # Execute via Hermes agent loop (with retry + analysis)
+                        results = agent_loop_obj.execute_tool_calls(tc_list)
+                        agent_loop_obj.session.steps.append(
+                            type('AgentStep', (), {
+                                'step_number': agent_turn,
+                                'model_thought': loop_content[:500],
+                                'tool_results': results,
                             })
+                        )
+
+                        # Build result messages with enrichment
+                        result_msgs = agent_loop_obj.build_tool_result_messages(results, tc_list)
+                        agent_messages.extend(result_msgs)
+
+                        # Yield status for UI
+                        summary = HermesResultAnalyzer.summarize_for_model(results, max_chars=400)
+                        first_line = summary.split('\n')[0] if summary else "Tool executed"
+                        yield {"type": "status", "content": first_line}
+
+                        if not agent_loop_obj.should_continue():
+                            yield {"type": "harness_warning",
+                                   "content": "Agent budget exhausted — finalizing current result."}
+                            break
                         continue
-                        
+
                     if finish_reason == "length":
-                        log.warning("Agent hit max_tokens length. Auto-continuing...")
+                        log.warning("Agent hit max_tokens. Auto-continuing...")
                         agent_messages.append({"role": "assistant", "content": loop_content})
-                        agent_messages.append({"role": "user", "content": "Continue exactly where you left off, from the very next character."})
+                        agent_messages.append({
+                            "role": "user",
+                            "content": "Continue exactly where you left off, from the very next character."
+                        })
                         continue
-                        
+
                     break
-                    
+
                 elapsed = time.perf_counter() - t0
-                synthetic_raw = {"choices": [{"message": {"content": full_content}}], "usage": last_usage}
-                hop = _timed_hop("agentic_loop", selected_model, synthetic_raw, elapsed)
+                synthetic_raw = {
+                    "choices": [{"message": {"content": full_content}}],
+                    "usage": last_usage
+                }
+                hop = _timed_hop("hermes_agent", selected_model, synthetic_raw, elapsed)
                 hops.append(hop)
-                
+
+                # Log agent session summary
+                session_summary = agent_loop_obj.build_summary()
+                log.info("\n%s", session_summary)
+
                 aggregate_usage = TokenUsage()
                 for h in hops:
                     aggregate_usage = aggregate_usage + h.usage

@@ -112,9 +112,10 @@ def parse_args():
                         help="Roles to train: triage, router, math, code, reasoning, general, all")
     parser.add_argument("--quant-type", choices=["q4_k_m", "q8_0", "f16"], default="q4_k_m",
                         help="GGUF quantization level")
-    parser.add_argument("--size", choices=["tiny", "small", "medium", "large", "max", "ultra"], default="medium",
+    parser.add_argument("--size", choices=["tiny", "small", "medium", "large", "max"], default="medium",
                         help="Iris AI model size tier (tiny/small/medium/large/max)")
-    parser.add_argument("--download-models", action="store_true", help="Download all models for the selected tier and exit")
+    parser.add_argument("--download-models", "--download-all", action="store_true", dest="download_models",
+                        help="Download all models for the selected tier and continue automatically")
     parser.add_argument("--skip-gguf", action="store_true", help="Skip merge and GGUF conversion")
     parser.add_argument("--resume", action="store_true", help="Resume training from the last successful checkpoint/model")
     
@@ -704,10 +705,11 @@ def main():
     # Apply size-tier config (overrides ROLE_MODEL_MAP + ROLE_TO_GGUF)
     apply_size_config(args.size)
 
+    has_downloaded = False
     if getattr(args, "download_models", False):
         download_all_models()
-        print("[Pre-Training] Model downloading complete. Exiting as --download-models was set.")
-        sys.exit(0)
+        has_downloaded = True
+        print("[Pre-Training] Model downloading check complete. Continuing automatically...")
 
     ensure_training_subdirs()
 
@@ -728,7 +730,8 @@ def main():
     print(f"[INFO] Target training device: {target.upper()}")
     print(f"[INFO] Roles to train: {roles_to_train}")
 
-    download_all_models()
+    if not has_downloaded:
+        download_all_models()
 
     model_override = getattr(args, "_model_override", None)
     if model_override is None:
@@ -840,15 +843,13 @@ def download_all_models():
     else:
         # Fallback — hardcoded medium tier
         fallback = {
-            "iris_001.gguf": ("https://huggingface.co/unsloth/Llama-3.2-3B-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf", "Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
-            "iris_002.gguf": ("https://huggingface.co/NousResearch/Hermes-3-Llama-3.1-8B-GGUF/resolve/main/Hermes-3-Llama-3.1-8B.Q4_K_M.gguf", "Hermes-3-Llama-3.1-8B.Q4_K_M.gguf"),
-            "iris_003.gguf": ("https://huggingface.co/NousResearch/Hermes-3-Llama-3.1-8B-GGUF/resolve/main/Hermes-3-Llama-3.1-8B.Q4_K_M.gguf", "Hermes-3-Llama-3.1-8B.Q4_K_M.gguf"),
-            "iris_004.gguf": ("https://huggingface.co/Qwen/Qwen2.5-Math-7B-Instruct-GGUF/resolve/main/qwen2.5-math-7b-instruct-q4_k_m.gguf", "qwen2.5-math-7b-instruct-q4_k_m.gguf"),
-            "iris_005.gguf": ("https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF/resolve/main/qwen2.5-coder-14b-instruct-q4_k_m.gguf", "qwen2.5-coder-14b-instruct-q4_k_m.gguf"),
-            "iris_006.gguf": ("https://huggingface.co/TheBloke/deepseek-llm-14b-chat-GGUF/resolve/main/deepseek-llm-14b-chat.Q4_K_M.gguf", "deepseek-llm-14b-chat.Q4_K_M.gguf"),
-            "iris_007.gguf": ("https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf", "Qwen3.5-9B-Q4_K_M.gguf"),
-            "iris_008.gguf": ("https://huggingface.co/unsloth/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3-VL-4B-Instruct-Q4_K_M.gguf", "Qwen3-VL-4B-Instruct-Q4_K_M.gguf"),
-            "iris_009.gguf": ("https://huggingface.co/unsloth/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-F16.gguf", "mmproj-F16.gguf"),
+            "iris_001.gguf": ("https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf", "Qwen3-4B-Q4_K_M.gguf"),
+            "iris_002.gguf": ("https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf", "qwen2.5-coder-7b-instruct-q4_k_m.gguf"),
+            "iris_003.gguf": ("https://huggingface.co/Qwen/Qwen2.5-Math-7B-Instruct-GGUF/resolve/main/qwen2.5-math-7b-instruct-q4_k_m.gguf", "qwen2.5-math-7b-instruct-q4_k_m.gguf"),
+            "iris_004.gguf": ("https://huggingface.co/unsloth/Qwen3-Coder-14B-GGUF/resolve/main/Qwen3-Coder-14B-Q4_K_M.gguf", "Qwen3-Coder-14B-Q4_K_M.gguf"),
+            "iris_005.gguf": ("https://huggingface.co/unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf", "DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"),
+            "iris_006.gguf": ("https://huggingface.co/unsloth/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf", "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"),
+            "iris_007.gguf": ("https://huggingface.co/unsloth/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/mmproj-F16.gguf", "mmproj-F16.gguf"),
         }
         download_map = fallback
 

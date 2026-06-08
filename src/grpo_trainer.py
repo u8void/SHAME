@@ -373,11 +373,13 @@ class GRPOTrainer:
         config: GRPOConfig = None,
         reward_function: Optional[RewardScorer] = None,
         reference_model: Optional[nn.Module] = None,
+        generation_model: Optional[Any] = None,
         device: torch.device = None,
     ):
         self.config = config or GRPOConfig()
         self.policy = policy_model
         self.tokenizer = tokenizer
+        self.generation_model = generation_model or policy_model
         self.scorer = reward_function or RewardScorer()
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else 
                                              "mps" if torch.backends.mps.is_available() else "cpu")
@@ -416,7 +418,7 @@ class GRPOTrainer:
     ) -> List[List[str]]:
         """Generate multiple responses per prompt.
 
-        For GGUF models, use llama-cpp via subprocess.
+        For GGUF models, use llama-cpp.
         For HF models, use model.generate().
         """
         if num_per_prompt is None:
@@ -426,14 +428,15 @@ class GRPOTrainer:
         for prompt in prompts:
             group = []
             for i in range(num_per_prompt):
-                response = self._generate_single(prompt, seed=i)
+                seed = i * 42 + self.step_count
+                response = self._generate_single(prompt, seed=seed)
                 group.append(response)
             all_responses.append(group)
         return all_responses
 
     def _generate_single(self, prompt: str, seed: int = 0) -> str:
         """Generate one response."""
-        if hasattr(self.policy, 'generate') and not hasattr(self.policy, 'create_chat_completion'):
+        if hasattr(self.generation_model, 'generate') and not hasattr(self.generation_model, 'create_chat_completion'):
             # HF-style model
             inputs = self.tokenizer(
                 prompt, return_tensors="pt", truncation=True,
@@ -442,7 +445,7 @@ class GRPOTrainer:
             
             torch.manual_seed(seed)
             with torch.no_grad():
-                outputs = self.policy.generate(
+                outputs = self.generation_model.generate(
                     **inputs,
                     max_new_tokens=self.config.max_new_tokens,
                     temperature=self.config.temperature,
@@ -454,7 +457,7 @@ class GRPOTrainer:
         
         # Fallback: use the model as a callable (llama-cpp style)
         try:
-            response = self.policy.create_chat_completion(
+            response = self.generation_model.create_chat_completion(
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=self.config.max_new_tokens,
                 temperature=self.config.temperature,
@@ -1066,25 +1069,6 @@ def train_with_grpo(
     policy = bridge.get_trainable_model()
     tokenizer = bridge.get_tokenizer()
     
-    # Inject generation capability
-    policy.generate = lambda *a, **kw: bridge.generate.__func__  # won't work directly
-    # Instead, override generate_responses to use GGUF
-    class GRPOTrainerGGUF(GRPOTrainer):
-        def generate_responses(self, prompts, num_per_prompt=None):
-            if num_per_prompt is None:
-                num_per_prompt = self.config.group_size
-            all_responses = []
-            for prompt in prompts:
-                group = []
-                for i in range(num_per_prompt):
-                    response = bridge.generate(prompt, seed=i * 42 + self.step_count,
-                                               max_new_tokens=self.config.max_new_tokens,
-                                               temperature=self.config.temperature,
-                                               top_p=self.config.top_p)
-                    group.append(response)
-                all_responses.append(group)
-            return all_responses
-    
     # Setup GRPO+SFT hybrid config
     config = GRPOConfig(
         group_size=group_size,
@@ -1104,11 +1088,12 @@ def train_with_grpo(
     scorer = RewardScorer(domain=domain_map.get(role, RewardDomain.MIXED))
     
     # Train
-    trainer = GRPOTrainerGGUF(
+    trainer = GRPOTrainer(
         policy_model=policy,
         tokenizer=tokenizer,
         config=config,
         reward_function=scorer,
+        generation_model=bridge.gguf_llm,
         device=device,
     )
     

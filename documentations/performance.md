@@ -48,12 +48,19 @@ Currently models are unloaded after each request. A hot model cache would elimin
 
 ### 3. Context Window Sizing
 ```json
-"n_ctx": 2048     // Smaller = faster prefill, less RAM
-"n_ctx": 8192     // Larger = handles bigger inputs, more RAM
-"n_ctx": null     // Model default (varies by role)
+"n_ctx_allocation": "auto"   // Dynamically scales context (4096-32768) based on available system RAM
+"n_ctx_allocation": 4096     // Smaller = faster prefill, less RAM
+"n_ctx_allocation": 8192     // Larger = handles bigger inputs, more RAM
 ```
 
-**Rule of thumb:** Use the smallest context that fits your typical queries. The triage model only needs 512 tokens — setting it to 2048 wastes RAM and slows prefill.
+**Rule of thumb:** Use `"auto"` to let the system safely maximize context based on your RAM. The triage model only needs 512 tokens, so dynamic scaling prevents wasting RAM and slowing prefill.
+
+### 3.1. Compacting Profile
+```json
+"compacting_profile": "medium"     // Keeps last 5 messages when near context limit
+"compacting_profile": "aggressive" // Keeps last 2 messages (saves most context)
+"compacting_profile": "low"        // Keeps last 10 messages (highest memory use)
+```
 
 ### 4. Thread Count
 ```json
@@ -83,7 +90,7 @@ Future optimization: When multiple users query the same model, batch their promp
 {
   "n_gpu_layers": -1,
   "n_threads": 4,
-  "n_ctx": 4096
+  "n_ctx_allocation": "auto"
 }
 ```
 - Metal backend uses unified memory — no CPU↔GPU transfer overhead
@@ -95,7 +102,7 @@ Future optimization: When multiple users query the same model, batch their promp
 {
   "n_gpu_layers": 99,
   "n_threads": 8,
-  "n_ctx": 4096
+  "n_ctx_allocation": "auto"
 }
 ```
 - CUDA backend is mature and highly optimized
@@ -107,7 +114,7 @@ Future optimization: When multiple users query the same model, batch their promp
 {
   "n_gpu_layers": 0,
   "n_threads": 16,
-  "n_ctx": 4096
+  "n_ctx_allocation": "auto"
 }
 ```
 - AVX2/AVX512 acceleration is automatic in llama.cpp

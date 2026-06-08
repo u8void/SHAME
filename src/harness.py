@@ -1,104 +1,72 @@
-"""
-harness.py - Code Output Quality Harness for Iris AI
-=====================================================
-Post-generation passes that clean, normalize, and repair model code output.
-
-Every pass returns (text, warnings). Warnings are human-readable notes
-yielded as {"type": "harness_warning", "content": "..."}.
-"""
-
+from __future__ import annotations
+'\nharness.py - Code Output Quality Harness for Iris AI\n=====================================================\nPost-generation passes that clean, normalize, and repair model code output.\n\nEvery pass returns (text, warnings). Warnings are human-readable notes\nyielded as {"type": "harness_warning", "content": "..."}.\n'
 import re
 import os
 from typing import Tuple, List, Optional
 
-
-
-def normalize_fences(text: str, language: str = "python") -> Tuple[str, List[str]]:
-    """Fix broken markdown code fences."""
+def normalize_fences(text: str, language: str='python') -> Tuple[str, List[str]]:
     warnings: List[str] = []
     original = text
-
-    text = re.sub(r'````+', '```', text)
-
-    text = re.sub(r'(?<![`\n])``([^`\n]+)``(?![`\n])', r'`\1`', text)
-
-    opening = [m for m in re.finditer(r'^```', text, re.MULTILINE)]
-    closing = [m for m in re.finditer(r'\n```\s*$', text, re.MULTILINE)]
+    text = re.sub('````+', '```', text)
+    text = re.sub('(?<![`\\n])``([^`\\n]+)``(?![`\\n])', '`\\1`', text)
+    opening = [m for m in re.finditer('^```', text, re.MULTILINE)]
+    closing = [m for m in re.finditer('\\n```\\s*$', text, re.MULTILINE)]
     if len(opening) > len(closing):
         text = text.rstrip() + '\n```'
-        warnings.append("Fence: added missing closing ```")
+        warnings.append('Fence: added missing closing ```')
+    if text != original and (not warnings):
+        warnings.append('Fence: normalized malformed code fence(s)')
+    return (text, warnings)
 
-    if text != original and not warnings:
-        warnings.append("Fence: normalized malformed code fence(s)")
-
-    return text, warnings
-
-
-
-def strip_comments(text: str, language: str = "python") -> Tuple[str, List[str]]:
-    """Strip inline and block comments per language.
-
-    Uses simple per-line regex + string-awareness heuristics.
-    """
+def strip_comments(text: str, language: str='python') -> Tuple[str, List[str]]:
     warnings: List[str] = []
     original = text.strip()
     lang = language.lower()
-
-    if lang in ("python", "py"):
-        lines = text.split("\n")
+    if lang in ('python', 'py'):
+        lines = text.split('\n')
         result = []
         for line in lines:
             line_stripped = _strip_py_line(line)
             result.append(line_stripped)
-        stripped = "\n".join(result)
+        stripped = '\n'.join(result)
         if stripped != text:
             text = stripped
-            warnings.append("Comment: stripped Python inline comments")
-
-    elif lang in ("javascript", "js", "typescript", "ts", "c", "cpp", "c++",
-                  "go", "rust", "rs", "java"):
-        if re.search(r'//|/\*', text):
-            text = re.sub(r'/\*[^*]*\*+(?:[^/*][^*]*\*+)*/', '', text)
-            lines = text.split("\n")
+            warnings.append('Comment: stripped Python inline comments')
+    elif lang in ('javascript', 'js', 'typescript', 'ts', 'c', 'cpp', 'c++', 'go', 'rust', 'rs', 'java'):
+        if re.search('//|/\\*', text):
+            text = re.sub('/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*/', '', text)
+            lines = text.split('\n')
             result = []
             for line in lines:
-                idx = line.find("//")
+                idx = line.find('//')
                 if idx < 0:
                     result.append(line)
                 else:
                     before = line[:idx]
-                    if before.rstrip().endswith("http:") or before.rstrip().endswith("https:"):
+                    if before.rstrip().endswith('http:') or before.rstrip().endswith('https:'):
                         result.append(line)
                     else:
                         result.append(line[:idx])
-            text = "\n".join(result)
-            warnings.append("Comment: stripped C-style comments")
-
-    elif lang in ("bash", "sh"):
-        text = re.sub(r'(\s*)#[^\n]*', '', text)
-        warnings.append("Comment: stripped shell comments")
-
-    text = re.sub(r'\n{3,}', '\n\n', text)
-
-    if text.strip() != original and not warnings:
-        warnings.append("Comment: removed developer comments")
-
-    return text, warnings
-
+            text = '\n'.join(result)
+            warnings.append('Comment: stripped C-style comments')
+    elif lang in ('bash', 'sh'):
+        text = re.sub('(\\s*)#[^\\n]*', '', text)
+        warnings.append('Comment: stripped shell comments')
+    text = re.sub('\\n{3,}', '\n\n', text)
+    if text.strip() != original and (not warnings):
+        warnings.append('Comment: removed developer comments')
+    return (text, warnings)
 
 def _strip_py_line(line: str) -> str:
-    """Remove Python inline comment from a line if # is not inside a string."""
     in_string = False
-    string_char = ""
+    string_char = ''
     hash_idx = -1
-
     i = 0
     while i < len(line):
         ch = line[i]
-
         if not in_string:
             if ch in ('"', "'"):
-                if line[i:i+3] == ch * 3:
+                if line[i:i + 3] == ch * 3:
                     in_string = True
                     string_char = ch * 3
                     i += 3
@@ -109,42 +77,34 @@ def _strip_py_line(line: str) -> str:
             elif ch == '#':
                 hash_idx = i
                 break
-        else:
-            if line[i:i+len(string_char)] == string_char:
-                in_string = False
-                i += len(string_char)
-                continue
-            elif ch == '\\' and i + 1 < len(line):
-                i += 2
-                continue
-
+        elif line[i:i + len(string_char)] == string_char:
+            in_string = False
+            i += len(string_char)
+            continue
+        elif ch == '\\' and i + 1 < len(line):
+            i += 2
+            continue
         i += 1
-
     if hash_idx >= 0:
         return line[:hash_idx].rstrip()
     return line
 
-
-
-def repair_truncation(text: str, language: str = "python") -> Tuple[str, List[str]]:
-    """Detect and repair truncated code (unclosed braces, strings)."""
+def repair_truncation(text: str, language: str='python') -> Tuple[str, List[str]]:
     warnings: List[str] = []
     original = text
-
-    pairs = {"{": "}", "(": ")", "[": "]"}
+    pairs = {'{': '}', '(': ')', '[': ']'}
     stack = []
     in_string = False
-    string_char = ""
-    prev = ""
-
+    string_char = ''
+    prev = ''
     for i, ch in enumerate(text):
         if in_string:
-            if ch == string_char and prev != "\\":
+            if ch == string_char and prev != '\\':
                 in_string = False
             prev = ch
             continue
         if ch in ('"', "'"):
-            if text[i:i+3] == ch * 3:
+            if text[i:i + 3] == ch * 3:
                 continue
             in_string = True
             string_char = ch
@@ -156,188 +116,99 @@ def repair_truncation(text: str, language: str = "python") -> Tuple[str, List[st
             if stack and stack[-1] == ch:
                 stack.pop()
         prev = ch
-
     if stack:
-        closing = "".join(reversed(stack))
-        text = text.rstrip() + "\n" + closing
-        warnings.append(f"Truncation: added missing closing: {closing}")
-
+        closing = ''.join(reversed(stack))
+        text = text.rstrip() + '\n' + closing
+        warnings.append(f'Truncation: added missing closing: {closing}')
     if in_string:
         text = text.rstrip() + string_char
-        warnings.append("Truncation: closed unterminated string literal")
+        warnings.append('Truncation: closed unterminated string literal')
+    return (text, warnings)
+_PY_IMPORT_PATTERNS = {'sys': '\\bsys\\.(argv|exit|stdout|stderr|stdin|path|version|platform)\\b', 'os': '\\bos\\.(path|environ|getenv|listdir|makedirs?|remove|rename|chdir|getcwd|walk|stat|urandom|system)\\b', 'json': '\\bjson\\.(dumps?|loads?)\\b', 're': '\\bre\\.(compile|match|search|findall|sub|split|escape|fullmatch)\\b', 'time': '\\btime\\.(time|sleep|perf_counter|monotonic|strftime|gmtime|localtime)\\b', 'datetime': '\\bdatetime\\.(datetime|date|time|timedelta|timezone|now|utcnow)\\b', 'collections': '\\b(collections\\.(defaultdict|Counter|OrderedDict|deque|namedtuple)|from collections import)\\b', 'itertools': '\\bitertools\\.(cycle|islice|chain|product|permutations|combinations|groupby)\\b', 'functools': '\\bfunctools\\.(lru_cache|partial|reduce|wraps|cache)\\b', 'random': '\\brandom\\.(random|randint|choice|shuffle|seed|uniform|sample|choices)\\b', 'math': '\\bmath\\.(sqrt|sin|cos|tan|log|log10|log2|exp|floor|ceil|pi|e|factorial|gcd|pow)\\b', 'pathlib': '\\b(Path\\s*\\(|pathlib\\.)\\b', 'subprocess': '\\b(subprocess\\.(run|call|Popen|check_output|check_call|PIPE|STDOUT|DEVNULL)|from subprocess import)\\b', 'typing': '\\b(typing\\.(List|Dict|Tuple|Set|Optional|Union|Any|Callable|Iterator|Generator)|from typing import)\\b', 'argparse': '\\b(argparse\\.(ArgumentParser|Namespace)|from argparse import)\\b', 'threading': '\\b(threading\\.(Thread|Lock|RLock|Event|Condition|Semaphore|Timer)|from threading import)\\b', 'dataclasses': '\\b(dataclasses\\.(dataclass|field)|from dataclasses import|@dataclass)\\b', 'hashlib': '\\bhashlib\\.(md5|sha1|sha256|sha512|new)\\b', 'base64': '\\bbase64\\.(b64encode|b64decode|standard_b64encode|urlsafe_b64encode)\\b', 'uuid': '\\buuid\\.(uuid4|uuid1|uuid3|uuid5|UUID)\\b', 'tempfile': '\\btempfile\\.(NamedTemporaryFile|TemporaryFile|TemporaryDirectory|mkstemp|mkdtemp|gettempdir)\\b', 'shutil': '\\bshutil\\.(copy|copy2|copytree|rmtree|move|make_archive|disk_usage|which)\\b', 'logging': '\\blogging\\.(getLogger|basicConfig|info|debug|warning|error|critical|exception|log)\\b', 'warnings': '\\bwarnings\\.(warn|filterwarnings|simplefilter|catch_warnings)\\b', 'struct': '\\bstruct\\.(pack|unpack|calcsize|iter_unpack)\\b', 'pickle': '\\bpickle\\.(dump|dumps|load|loads|HIGHEST_PROTOCOL)\\b', 'csv': '\\bcsv\\.(reader|writer|DictReader|DictWriter|writerow|writerows)\\b', 'io': '\\bio\\.(BytesIO|StringIO|open|BufferedWriter|BufferedReader|TextIOWrapper)\\b', 'enum': '\\benum\\.(Enum|IntEnum|StrEnum|auto|unique)\\b', 'abc': '\\b(abc\\.(ABC|abstractmethod|abstractclassmethod|abstractproperty)|from abc import)\\b', 'socket': '\\bsocket\\.(socket|AF_INET|AF_INET6|SOCK_STREAM|SOCK_DGRAM|gethostname|gethostbyname|getaddrinfo|create_connection)\\b', 'html': '\\bhtml\\.(escape|unescape)\\b', 'urllib': '\\b(urllib\\.(request|parse|error|robotparser)|urllib\\.parse\\.(urlencode|quote|unquote|urlparse|urljoin))\\b', 'zipfile': '\\bzipfile\\.(ZipFile|is_zipfile|ZIP_DEFLATED|ZIP_STORED)\\b', 'tarfile': '\\btarfile\\.(open|is_tarfile|TarFile|TarInfo)\\b', 'gzip': '\\bgzip\\.(open|compress|decompress|GzipFile)\\b', 'glob': '\\bglob\\.(glob|iglob|escape)\\b', 'textwrap': '\\btextwrap\\.(fill|wrap|shorten|dedent|indent)\\b', 'pprint': '\\bpprint\\.(pprint|pformat|PrettyPrinter)\\b', 'copy': '\\bcopy\\.(copy|deepcopy)\\b'}
 
-    return text, warnings
-
-
-
-_PY_IMPORT_PATTERNS = {
-    "sys":         r'\bsys\.(argv|exit|stdout|stderr|stdin|path|version|platform)\b',
-    "os":          r'\bos\.(path|environ|getenv|listdir|makedirs?|remove|rename|chdir|getcwd|walk|stat|urandom|system)\b',
-    "json":        r'\bjson\.(dumps?|loads?)\b',
-    "re":          r'\bre\.(compile|match|search|findall|sub|split|escape|fullmatch)\b',
-    "time":        r'\btime\.(time|sleep|perf_counter|monotonic|strftime|gmtime|localtime)\b',
-    "datetime":    r'\bdatetime\.(datetime|date|time|timedelta|timezone|now|utcnow)\b',
-    "collections": r'\b(collections\.(defaultdict|Counter|OrderedDict|deque|namedtuple)|from collections import)\b',
-    "itertools":   r'\bitertools\.(cycle|islice|chain|product|permutations|combinations|groupby)\b',
-    "functools":   r'\bfunctools\.(lru_cache|partial|reduce|wraps|cache)\b',
-    "random":      r'\brandom\.(random|randint|choice|shuffle|seed|uniform|sample|choices)\b',
-    "math":        r'\bmath\.(sqrt|sin|cos|tan|log|log10|log2|exp|floor|ceil|pi|e|factorial|gcd|pow)\b',
-    "pathlib":     r'\b(Path\s*\(|pathlib\.)\b',
-    "subprocess":  r'\b(subprocess\.(run|call|Popen|check_output|check_call|PIPE|STDOUT|DEVNULL)|from subprocess import)\b',
-    "typing":      r'\b(typing\.(List|Dict|Tuple|Set|Optional|Union|Any|Callable|Iterator|Generator)|from typing import)\b',
-    "argparse":    r'\b(argparse\.(ArgumentParser|Namespace)|from argparse import)\b',
-    "threading":   r'\b(threading\.(Thread|Lock|RLock|Event|Condition|Semaphore|Timer)|from threading import)\b',
-    "dataclasses": r'\b(dataclasses\.(dataclass|field)|from dataclasses import|@dataclass)\b',
-    "hashlib":     r'\bhashlib\.(md5|sha1|sha256|sha512|new)\b',
-    "base64":      r'\bbase64\.(b64encode|b64decode|standard_b64encode|urlsafe_b64encode)\b',
-    "uuid":        r'\buuid\.(uuid4|uuid1|uuid3|uuid5|UUID)\b',
-    "tempfile":    r'\btempfile\.(NamedTemporaryFile|TemporaryFile|TemporaryDirectory|mkstemp|mkdtemp|gettempdir)\b',
-    "shutil":      r'\bshutil\.(copy|copy2|copytree|rmtree|move|make_archive|disk_usage|which)\b',
-    "logging":     r'\blogging\.(getLogger|basicConfig|info|debug|warning|error|critical|exception|log)\b',
-    "warnings":    r'\bwarnings\.(warn|filterwarnings|simplefilter|catch_warnings)\b',
-    "struct":      r'\bstruct\.(pack|unpack|calcsize|iter_unpack)\b',
-    "pickle":      r'\bpickle\.(dump|dumps|load|loads|HIGHEST_PROTOCOL)\b',
-    "csv":         r'\bcsv\.(reader|writer|DictReader|DictWriter|writerow|writerows)\b',
-    "io":          r'\bio\.(BytesIO|StringIO|open|BufferedWriter|BufferedReader|TextIOWrapper)\b',
-    "enum":        r'\benum\.(Enum|IntEnum|StrEnum|auto|unique)\b',
-    "abc":         r'\b(abc\.(ABC|abstractmethod|abstractclassmethod|abstractproperty)|from abc import)\b',
-    "socket":      r'\bsocket\.(socket|AF_INET|AF_INET6|SOCK_STREAM|SOCK_DGRAM|gethostname|gethostbyname|getaddrinfo|create_connection)\b',
-    "html":        r'\bhtml\.(escape|unescape)\b',
-    "urllib":      r'\b(urllib\.(request|parse|error|robotparser)|urllib\.parse\.(urlencode|quote|unquote|urlparse|urljoin))\b',
-    "zipfile":     r'\bzipfile\.(ZipFile|is_zipfile|ZIP_DEFLATED|ZIP_STORED)\b',
-    "tarfile":     r'\btarfile\.(open|is_tarfile|TarFile|TarInfo)\b',
-    "gzip":        r'\bgzip\.(open|compress|decompress|GzipFile)\b',
-    "glob":        r'\bglob\.(glob|iglob|escape)\b',
-    "textwrap":    r'\btextwrap\.(fill|wrap|shorten|dedent|indent)\b',
-    "pprint":      r'\bpprint\.(pprint|pformat|PrettyPrinter)\b',
-    "copy":        r'\bcopy\.(copy|deepcopy)\b',
-}
-
-def inject_imports(text: str, language: str = "python") -> Tuple[str, List[str]]:
-    """Detect missing stdlib imports and inject them at the top of Python code."""
+def inject_imports(text: str, language: str='python') -> Tuple[str, List[str]]:
     warnings: List[str] = []
-
-    if language.lower() not in ("python", "py"):
-        return text, warnings
-
-    lines = text.split("\n")
+    if language.lower() not in ('python', 'py'):
+        return (text, warnings)
+    lines = text.split('\n')
     existing_imports = set()
     import_line = -1
     shebang_line = -1
-
     for i, line in enumerate(lines):
         s = line.strip()
-        if i == 0 and (s.startswith("#!") or s.startswith("# -*-")):
+        if i == 0 and (s.startswith('#!') or s.startswith('# -*-')):
             shebang_line = i
             continue
-        m = re.match(r'^(?:from\s+(\w+)|import\s+(\w+))', s)
+        m = re.match('^(?:from\\s+(\\w+)|import\\s+(\\w+))', s)
         if m:
             pkg = m.group(1) or m.group(2)
             existing_imports.add(pkg)
             import_line = i
-        elif import_line >= 0 and (not s or s.startswith("#")):
+        elif import_line >= 0 and (not s or s.startswith('#')):
             continue
         elif import_line >= 0:
             break
-
     insert_at = max(shebang_line, import_line, -1) + 1
     if insert_at > len(lines):
         insert_at = len(lines)
-
     new_imports = []
     for pkg, pattern in _PY_IMPORT_PATTERNS.items():
         if pkg in existing_imports:
             continue
         if re.search(pattern, text):
-            new_imports.append(f"import {pkg}")
+            new_imports.append(f'import {pkg}')
             existing_imports.add(pkg)
-
     if new_imports:
-        insert_line = lines[insert_at] if insert_at < len(lines) else ""
+        insert_line = lines[insert_at] if insert_at < len(lines) else ''
         if insert_line.strip():
-            lines.insert(insert_at, "")
+            lines.insert(insert_at, '')
             insert_at += 1
         for imp in sorted(new_imports):
             lines.insert(insert_at, imp)
             insert_at += 1
         if insert_at < len(lines) and lines[insert_at].strip():
-            lines.insert(insert_at, "")
-        text = "\n".join(lines)
+            lines.insert(insert_at, '')
+        text = '\n'.join(lines)
         warnings.append(f"Imports: injected missing: {', '.join(sorted(new_imports))}")
+    return (text, warnings)
 
-    return text, warnings
-
-
-
-
-def deduplicate_blocks(text: str, language: str = "") -> Tuple[str, List[str]]:
-    """Detect repeated code blocks (common with continuation models)."""
+def deduplicate_blocks(text: str, language: str='') -> Tuple[str, List[str]]:
     warnings: List[str] = []
-
-    blocks = re.split(r'\n\n+', text)
+    blocks = re.split('\\n\\n+', text)
     if len(blocks) < 2:
-        return text, warnings
-
+        return (text, warnings)
     seen = {}
     result = []
     for i, block in enumerate(blocks):
-        key = re.sub(r'\s+', ' ', block.strip().lower())
+        key = re.sub('\\s+', ' ', block.strip().lower())
         if len(key) < 20:
             result.append(block)
             continue
         if key in seen:
-            warnings.append(f"Duplicate: block {i + 1} repeats block {seen[key] + 1}")
+            warnings.append(f'Duplicate: block {i + 1} repeats block {seen[key] + 1}')
             continue
         seen[key] = i
         result.append(block)
-
     if len(result) != len(blocks):
-        text = "\n\n".join(result)
-        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = '\n\n'.join(result)
+        text = re.sub('\\n{3,}', '\n\n', text)
+    return (text, warnings)
+_SECRET_PATTERNS = [('(sk-[a-zA-Z0-9_-]{20,}T3BlbkFJ[a-zA-Z0-9_-]{20,})', '[OPENAI_KEY_REDACTED]'), ('(sk-[a-zA-Z0-9_-]{30,})', '[API_KEY_REDACTED]'), ('(sk-ant-[a-zA-Z0-9_-]{20,})', '[ANTHROPIC_KEY_REDACTED]'), ('(AIza[0-9A-Za-z\\-_]{35})', '[GOOGLE_KEY_REDACTED]'), ('(hf_[a-zA-Z0-9]{34})', '[HF_KEY_REDACTED]'), ('(api[_-]?key\\s*[:=]\\s*["\\\'])([^"\\\'\\s]{16,})(["\\\'])', '\\1[REDACTED]\\3'), ('(secret\\s*[:=]\\s*["\\\'])([^"\\\'\\s]{16,})(["\\\'])', '\\1[REDACTED]\\3'), ('(token\\s*[:=]\\s*["\\\'])([^"\\\'\\s]{16,})(["\\\'])', '\\1[REDACTED]\\3'), ('(password\\s*[:=]\\s*["\\\'])([^"\\\'\\s]{8,})(["\\\'])', '\\1[REDACTED]\\3'), ('(AKIA[0-9A-Z]{16})', '[AWS_KEY_REDACTED]'), ('(ASIA[0-9A-Z]{16})', '[AWS_KEY_REDACTED]'), ('(gh[pousr]_[a-zA-Z0-9]{36,})', '[GITHUB_TOKEN_REDACTED]'), ('(github_pat_[a-zA-Z0-9_]{20,})', '[GITHUB_TOKEN_REDACTED]'), ('(eyJ[a-zA-Z0-9_-]{10,}\\.[a-zA-Z0-9_-]{10,}\\.[a-zA-Z0-9_-]{10,})', '[JWT_REDACTED]')]
 
-    return text, warnings
-
-
-
-_SECRET_PATTERNS = [
-    (r'(sk-[a-zA-Z0-9_-]{20,}T3BlbkFJ[a-zA-Z0-9_-]{20,})', '[OPENAI_KEY_REDACTED]'),
-    (r'(sk-[a-zA-Z0-9_-]{30,})', '[API_KEY_REDACTED]'),
-    (r'(sk-ant-[a-zA-Z0-9_-]{20,})', '[ANTHROPIC_KEY_REDACTED]'),
-    (r'(AIza[0-9A-Za-z\-_]{35})', '[GOOGLE_KEY_REDACTED]'),
-    (r'(hf_[a-zA-Z0-9]{34})', '[HF_KEY_REDACTED]'),
-    (r'(api[_-]?key\s*[:=]\s*["\'])([^"\'\s]{16,})(["\'])', r'\1[REDACTED]\3'),
-    (r'(secret\s*[:=]\s*["\'])([^"\'\s]{16,})(["\'])', r'\1[REDACTED]\3'),
-    (r'(token\s*[:=]\s*["\'])([^"\'\s]{16,})(["\'])', r'\1[REDACTED]\3'),
-    (r'(password\s*[:=]\s*["\'])([^"\'\s]{8,})(["\'])', r'\1[REDACTED]\3'),
-    (r'(AKIA[0-9A-Z]{16})', '[AWS_KEY_REDACTED]'),
-    (r'(ASIA[0-9A-Z]{16})', '[AWS_KEY_REDACTED]'),
-    (r'(gh[pousr]_[a-zA-Z0-9]{36,})', '[GITHUB_TOKEN_REDACTED]'),
-    (r'(github_pat_[a-zA-Z0-9_]{20,})', '[GITHUB_TOKEN_REDACTED]'),
-    (r'(eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,})', '[JWT_REDACTED]'),
-]
-
-def redact_secrets(text: str, language: str = "") -> Tuple[str, List[str]]:
-    """Detect and redact hallucinated API keys / secrets from model output."""
+def redact_secrets(text: str, language: str='') -> Tuple[str, List[str]]:
     warnings: List[str] = []
-
     for pattern, replacement in _SECRET_PATTERNS:
         if re.search(pattern, text):
             count = len(re.findall(pattern, text))
             text = re.sub(pattern, replacement, text)
-            warnings.append(f"Secret: redacted {count} potential secret(s)")
+            warnings.append(f'Secret: redacted {count} potential secret(s)')
+    return (text, warnings)
 
-    return text, warnings
-
-
-
-def clean_whitespace(text: str, language: str = "") -> Tuple[str, List[str]]:
-    """Strip trailing whitespace and collapse excessive blank lines."""
+def clean_whitespace(text: str, language: str='') -> Tuple[str, List[str]]:
     warnings: List[str] = []
     original = text
-
-    lines = text.split("\n")
+    lines = text.split('\n')
     lines = [l.rstrip() for l in lines]
-
     cleaned = []
     blank_count = 0
     for line in lines:
@@ -348,203 +219,112 @@ def clean_whitespace(text: str, language: str = "") -> Tuple[str, List[str]]:
         else:
             blank_count = 0
             cleaned.append(line)
-
-    while cleaned and not cleaned[0].strip():
+    while cleaned and (not cleaned[0].strip()):
         cleaned.pop(0)
-    while cleaned and not cleaned[-1].strip():
+    while cleaned and (not cleaned[-1].strip()):
         cleaned.pop()
-
-    text = "\n".join(cleaned)
-
+    text = '\n'.join(cleaned)
     if text != original:
-        warnings.append("Whitespace: stripped trailing spaces and excess blank lines")
+        warnings.append('Whitespace: stripped trailing spaces and excess blank lines')
+    return (text, warnings)
 
-    return text, warnings
-
-
-
-def normalize_header(text: str, language: str = "python") -> Tuple[str, List[str]]:
-    """Ensure proper shebang and encoding header for scripts."""
+def normalize_header(text: str, language: str='python') -> Tuple[str, List[str]]:
     warnings: List[str] = []
+    if language.lower() not in ('python', 'py', 'bash', 'sh'):
+        return (text, warnings)
+    lines = text.split('\n')
+    has_shebang = lines[0].strip().startswith('#!') if lines else False
+    is_script = bool(re.search('if\\s+__name__\\s*==\\s*["\\\']__main__["\\\']', text))
+    is_cli = bool(re.search('argparse\\.|sys\\.argv|click\\.|typer\\.|fire\\.', text))
+    if language == 'python' and (is_script or is_cli) and (not has_shebang):
+        lines.insert(0, '#!/usr/bin/env python3')
+        warnings.append('Header: added #!/usr/bin/env python3')
+    elif language in ('bash', 'sh') and (not has_shebang):
+        lines.insert(0, '#!/usr/bin/env bash')
+        warnings.append('Header: added #!/usr/bin/env bash')
+    return ('\n'.join(lines), warnings)
+_PASSES = [('normalize_fences', normalize_fences), ('redact_secrets', redact_secrets), ('repair_truncation', repair_truncation), ('strip_comments', strip_comments), ('inject_imports', inject_imports), ('normalize_header', normalize_header), ('deduplicate_blocks', deduplicate_blocks), ('clean_whitespace', clean_whitespace)]
 
-    if language.lower() not in ("python", "py", "bash", "sh"):
-        return text, warnings
-
-    lines = text.split("\n")
-    has_shebang = lines[0].strip().startswith("#!") if lines else False
-
-    is_script = bool(re.search(r'if\s+__name__\s*==\s*["\']__main__["\']', text))
-    is_cli = bool(re.search(r'argparse\.|sys\.argv|click\.|typer\.|fire\.', text))
-
-    if language == "python" and (is_script or is_cli) and not has_shebang:
-        lines.insert(0, "#!/usr/bin/env python3")
-        warnings.append("Header: added #!/usr/bin/env python3")
-
-    elif language in ("bash", "sh") and not has_shebang:
-        lines.insert(0, "#!/usr/bin/env bash")
-        warnings.append("Header: added #!/usr/bin/env bash")
-
-    return "\n".join(lines), warnings
-
-
-
-_PASSES = [
-    ("normalize_fences",   normalize_fences),
-    ("redact_secrets",     redact_secrets),
-    ("repair_truncation",  repair_truncation),
-    ("strip_comments",     strip_comments),
-    ("inject_imports",     inject_imports),
-    ("normalize_header",   normalize_header),
-    ("deduplicate_blocks", deduplicate_blocks),
-    ("clean_whitespace",   clean_whitespace),
-]
-
-
-def apply_all(text: str, language: str = "python",
-              enabled: Optional[List[str]] = None) -> Tuple[str, List[dict]]:
-    """Run all harness passes on code output.
-
-    Returns (cleaned_text, [{"type": "harness_warning", "content": "..."}])
-    """
+def apply_all(text: str, language: str='python', enabled: Optional[List[str]]=None) -> Tuple[str, List[dict]]:
     all_warnings: List[dict] = []
-
     for name, func in _PASSES:
         if enabled and name not in enabled:
             continue
         try:
             text, warns = func(text, language)
             for w in warns:
-                all_warnings.append({"type": "harness_warning", "content": w})
+                all_warnings.append({'type': 'harness_warning', 'content': w})
         except Exception:
             pass
+    return (text, all_warnings)
 
-    return text, all_warnings
-
-
-def apply_code_specific(text: str, language: str = "python") -> Tuple[str, List[dict]]:
-    """Full harness pass — all 8 stages."""
+def apply_code_specific(text: str, language: str='python') -> Tuple[str, List[dict]]:
     return apply_all(text, language)
 
-
 def _is_math_output(text: str) -> bool:
-    """Detect if text is primarily a math solution (not general code)."""
-    math_signals = [
-        r'\$\$.*\$\$', r'\$[^$]+\$', r'\\frac\{', r'\\sum_', r'\\int_',
-        r'\\lim_', r'\\sqrt\{', r'\\cdot\b', r'\\times\b', r'\\alpha\b',
-        r'\\beta\b', r'\\theta\b', r'\\pi\b', r'\\infty\b', r'\\partial\b',
-        r'\\nabla\b', r'\\forall\b', r'\\exists\b', r'\\implies?\b',
-        r'\\mathbb\{', r'\\mathcal\{', r'\\mathbf\{', r'\\longrightarrow\b',
-        r'd/d[xX]\b', r'∫', r'∂', r'∑', r'∏', r'√', r'∞',
-    ]
-    return any(re.search(sig, text) for sig in math_signals)
+    math_signals = ['\\$\\$.*\\$\\$', '\\$[^$]+\\$', '\\\\frac\\{', '\\\\sum_', '\\\\int_', '\\\\lim_', '\\\\sqrt\\{', '\\\\cdot\\b', '\\\\times\\b', '\\\\alpha\\b', '\\\\beta\\b', '\\\\theta\\b', '\\\\pi\\b', '\\\\infty\\b', '\\\\partial\\b', '\\\\nabla\\b', '\\\\forall\\b', '\\\\exists\\b', '\\\\implies?\\b', '\\\\mathbb\\{', '\\\\mathcal\\{', '\\\\mathbf\\{', '\\\\longrightarrow\\b', 'd/d[xX]\\b', '∫', '∂', '∑', '∏', '√', '∞']
+    return any((re.search(sig, text) for sig in math_signals))
 
-
-
-def normalize_math_fences(text: str, language: str = "") -> Tuple[str, List[str]]:
-    """Fix common LaTeX rendering issues in math model output.
-
-    Problems models commonly produce:
-    - Unescaped underscores in non-LaTeX context
-    - Double-dollar fences with whitespace gaps: $$ text $$ -> $$text$$
-    - Single $ used for display math when $$ needed
-    - Stray backslashes from LLM tokenization
-    """
+def normalize_math_fences(text: str, language: str='') -> Tuple[str, List[str]]:
     warnings: List[str] = []
     original = text
-
-    text = re.sub(r'\$\$\s+', '$$', text)
-    text = re.sub(r'\s+\$\$', '$$', text)
-
-    text = re.sub(r'\$\s+([^$]+?)\s+\$', r'$\1$', text)
-
-    text = re.sub(r'\\\\([^\\a-zA-Z{])', r'\\\1', text)
-
+    text = re.sub('\\$\\$\\s+', '$$', text)
+    text = re.sub('\\s+\\$\\$', '$$', text)
+    text = re.sub('\\$\\s+([^$]+?)\\s+\\$', '$\\1$', text)
+    text = re.sub('\\\\\\\\([^\\\\a-zA-Z{])', '\\\\\\1', text)
     if '$' not in text:
-        text = re.sub(r'(?<!\\)_(?!_)(\w+)', r'$_{\1}$', text)
-
-    text = re.sub(r'\\frac(\d)(\d)', r'\\frac{\1}{\2}', text)
-    text = re.sub(r'\\frac(\w)(\w)', r'\\frac{\1}{\2}', text)
-
+        text = re.sub('(?<!\\\\)_(?!_)(\\w+)', '$_{\\1}$', text)
+    text = re.sub('\\\\frac(\\d)(\\d)', '\\\\frac{\\1}{\\2}', text)
+    text = re.sub('\\\\frac(\\w)(\\w)', '\\\\frac{\\1}{\\2}', text)
     if text != original:
-        warnings.append("Math: normalized LaTeX formatting")
+        warnings.append('Math: normalized LaTeX formatting')
+    return (text, warnings)
 
-    return text, warnings
-
-
-
-def normalize_math_steps(text: str, language: str = "") -> Tuple[str, List[str]]:
-    """Ensure step-by-step solutions have consistent numbering."""
+def normalize_math_steps(text: str, language: str='') -> Tuple[str, List[str]]:
     warnings: List[str] = []
-
-    step_indicators = re.findall(
-        r'(?:^|\n)\s*(?:Step|step)\s*(\d+|[ivxlcdm]+)[\s:.\-)]',
-        text, re.IGNORECASE
-    )
+    step_indicators = re.findall('(?:^|\\n)\\s*(?:Step|step)\\s*(\\d+|[ivxlcdm]+)[\\s:.\\-)]', text, re.IGNORECASE)
     if len(step_indicators) <= 1:
-        return text, warnings
-
-    for i, match in enumerate(re.finditer(
-        r'(^|\n)(\s*)(Step|step)\s*(\d+|[ivxlcdm]+)([\s:.\-)]+)',
-        text, re.IGNORECASE
-    ), 1):
-        text = text[:match.start()] + match.group(1) + match.group(2) + \
-               f"**Step {i}:** " + text[match.end():]
+        return (text, warnings)
+    for i, match in enumerate(re.finditer('(^|\\n)(\\s*)(Step|step)\\s*(\\d+|[ivxlcdm]+)([\\s:.\\-)]+)', text, re.IGNORECASE), 1):
+        text = text[:match.start()] + match.group(1) + match.group(2) + f'**Step {i}:** ' + text[match.end():]
         if i != int(match.group(4)) if match.group(4).isdigit() else True:
-            warnings.append("Math: normalized step numbering")
+            warnings.append('Math: normalized step numbering')
+    return (text, warnings)
 
-    return text, warnings
-
-
-
-def extract_math_answer(text: str, language: str = "") -> Tuple[str, List[str]]:
-    """Ensure a clear final answer is present and highlighted.
-
-    If the model buried the answer in a paragraph, pull it out with a box/emphasis.
-    """
+def extract_math_answer(text: str, language: str='') -> Tuple[str, List[str]]:
     warnings: List[str] = []
-
-    if re.search(r'\*\*Answer:?\*\*|\\boxed\{|\\therefore\b|Therefore,|Thus,|Hence,|Final answer:',
-                 text, re.IGNORECASE):
-        return text, warnings
-
+    if re.search('\\*\\*Answer:?\\*\\*|\\\\boxed\\{|\\\\therefore\\b|Therefore,|Thus,|Hence,|Final answer:', text, re.IGNORECASE):
+        return (text, warnings)
     lines = text.strip().split('\n')
     candidate = None
     for line in reversed(lines):
         s = line.strip()
         if not s:
             continue
-        if re.search(r'[=≈]\s*[\d\-.]+', s) and len(s) < 120:
+        if re.search('[=≈]\\s*[\\d\\-.]+', s) and len(s) < 120:
             candidate = s
             break
-        if re.search(r'\\boxed\{', s):
+        if re.search('\\\\boxed\\{', s):
             candidate = s
             break
-        if re.search(r'\b[xXyYzZnNtT]\s*[=≈]\s*[\d\-.a-zA-Z√π]+', s) and len(s) < 120:
+        if re.search('\\b[xXyYzZnNtT]\\s*[=≈]\\s*[\\d\\-.a-zA-Z√π]+', s) and len(s) < 120:
             candidate = s
             break
-
     if candidate:
-        text = text[:text.rfind(candidate)] + f"\n\n**Answer:** {candidate}\n" \
-               + text[text.rfind(candidate) + len(candidate):]
-        warnings.append("Math: extracted final answer for clarity")
+        text = text[:text.rfind(candidate)] + f'\n\n**Answer:** {candidate}\n' + text[text.rfind(candidate) + len(candidate):]
+        warnings.append('Math: extracted final answer for clarity')
+    return (text, warnings)
 
-    return text, warnings
-
-
-
-def deduplicate_math_steps(text: str, language: str = "") -> Tuple[str, List[str]]:
-    """Remove repeated reasoning steps (common with chain-of-thought models)."""
+def deduplicate_math_steps(text: str, language: str='') -> Tuple[str, List[str]]:
     warnings: List[str] = []
-
-    paragraphs = re.split(r'\n\n+', text)
+    paragraphs = re.split('\\n\\n+', text)
     if len(paragraphs) < 2:
-        return text, warnings
-
+        return (text, warnings)
     seen = set()
     result = []
     removed = 0
     for para in paragraphs:
-        normalized = re.sub(r'\s+', ' ', para.strip().lower())
+        normalized = re.sub('\\s+', ' ', para.strip().lower())
         if len(normalized) < 8:
             result.append(para)
             continue
@@ -553,107 +333,1014 @@ def deduplicate_math_steps(text: str, language: str = "") -> Tuple[str, List[str
             continue
         seen.add(normalized)
         result.append(para)
-
     if removed > 0:
         text = '\n\n'.join(result)
-        warnings.append(f"Math: removed {removed} duplicate reasoning step(s)")
+        warnings.append(f'Math: removed {removed} duplicate reasoning step(s)')
+    return (text, warnings)
+_HALLUCINATED_REF_PATTERNS = [('\\b(?:theorem|lemma|corollary|proposition)\\s+(\\d+\\.\\d+\\.\\d+)\\b', '**Theorem \\1**'), ('\\(([A-Z][a-z]+ et al\\.,?\\s*\\d{4}[a-z]?)\\)', '(\\1)'), ('\\\\tag\\{(\\d+\\.\\d+)\\}', '')]
 
-    return text, warnings
-
-
-
-_HALLUCINATED_REF_PATTERNS = [
-    (r'\b(?:theorem|lemma|corollary|proposition)\s+(\d+\.\d+\.\d+)\b',
-     r'**Theorem \1**'),
-    (r'\(([A-Z][a-z]+ et al\.,?\s*\d{4}[a-z]?)\)',
-     r'(\1)'),
-    (r'\\tag\{(\d+\.\d+)\}', r''),
-]
-
-def redact_hallucinated_refs(text: str, language: str = "") -> Tuple[str, List[str]]:
-    """Flag hallucinated theorem/paper references models sometimes invent."""
+def redact_hallucinated_refs(text: str, language: str='') -> Tuple[str, List[str]]:
     warnings: List[str] = []
-
     for pattern, replacement in _HALLUCINATED_REF_PATTERNS:
         matches = re.findall(pattern, text)
         if matches:
-            warnings.append(f"Math: flagged {len(matches)} potentially hallucinated reference(s)")
+            warnings.append(f'Math: flagged {len(matches)} potentially hallucinated reference(s)')
+    return (text, warnings)
 
-    return text, warnings
-
-
-
-def normalize_math_notation(text: str, language: str = "") -> Tuple[str, List[str]]:
-    """Ensure consistent math notation throughout the solution.
-
-    Fixes:
-    - Mixed `*` and `×` for multiplication → use `×` (or `*` in code)
-    - Inconsistent integral bounds formatting
-    - Missing parentheses around negative numbers in substitutions
-    """
+def normalize_math_notation(text: str, language: str='') -> Tuple[str, List[str]]:
     warnings: List[str] = []
     original = text
-
     if '\\cdot' in text or '\\times' in text:
-        text = re.sub(r'(?<!\\)\*(?!\*)', r'\\cdot ', text)
+        text = re.sub('(?<!\\\\)\\*(?!\\*)', '\\\\cdot ', text)
     else:
-        text = re.sub(r'\\cdot\b', '*', text)
-        text = re.sub(r'\\times\b', '*', text)
-
-    text = re.sub(r'(?<=\w)\s*=\s*-(\d+)', r' = (-\1)', text)
-
+        text = re.sub('\\\\cdot\\b', '*', text)
+        text = re.sub('\\\\times\\b', '*', text)
+    text = re.sub('(?<=\\w)\\s*=\\s*-(\\d+)', ' = (-\\1)', text)
     if text != original:
-        warnings.append("Math: normalized notation consistency")
+        warnings.append('Math: normalized notation consistency')
+    return (text, warnings)
 
-    return text, warnings
-
-
-
-def separate_math_code_blocks(text: str, language: str = "") -> Tuple[str, List[str]]:
-    """If the math solution contains code blocks, ensure they're properly fenced."""
+def separate_math_code_blocks(text: str, language: str='') -> Tuple[str, List[str]]:
     warnings: List[str] = []
-
-    code_indicators = re.findall(
-        r'((?:import|def|lambda|for|while)\s+\w+.*?(?:\n|$))',
-        text
-    )
+    code_indicators = re.findall('((?:import|def|lambda|for|while)\\s+\\w+.*?(?:\\n|$))', text)
     if code_indicators and '```' not in text:
-        warnings.append("Math: code snippets detected without fence blocks")
+        warnings.append('Math: code snippets detected without fence blocks')
+    return (text, warnings)
+_MATH_PASSES = [('normalize_math_fences', normalize_math_fences), ('deduplicate_math_steps', deduplicate_math_steps), ('normalize_math_notation', normalize_math_notation), ('normalize_math_steps', normalize_math_steps), ('redact_hallucinated_refs', redact_hallucinated_refs), ('separate_math_code_blocks', separate_math_code_blocks), ('extract_math_answer', extract_math_answer), ('clean_whitespace', clean_whitespace)]
 
-    return text, warnings
-
-
-
-_MATH_PASSES = [
-    ("normalize_math_fences",    normalize_math_fences),
-    ("deduplicate_math_steps",   deduplicate_math_steps),
-    ("normalize_math_notation",  normalize_math_notation),
-    ("normalize_math_steps",     normalize_math_steps),
-    ("redact_hallucinated_refs", redact_hallucinated_refs),
-    ("separate_math_code_blocks",separate_math_code_blocks),
-    ("extract_math_answer",      extract_math_answer),
-    ("clean_whitespace",         clean_whitespace),
-]
-
-
-def apply_math(text: str, language: str = "") -> Tuple[str, List[dict]]:
-    """Run math-specific harness passes on a math solution.
-
-    Args:
-        text: Raw math model output
-        language: Optional language hint (unused for math)
-
-    Returns:
-        (cleaned_text, [{type: harness_warning, content: ...}])
-    """
+def apply_math(text: str, language: str='') -> Tuple[str, List[dict]]:
     all_warnings: List[dict] = []
-
     for name, func in _MATH_PASSES:
         try:
             text, warns = func(text, language)
             for w in warns:
-                all_warnings.append({"type": "harness_warning", "content": w})
+                all_warnings.append({'type': 'harness_warning', 'content': w})
         except Exception:
             pass
+    return (text, all_warnings)
+'\nhermes_harness.py — Hermes-Level Agent Harness for Iris AI\n============================================================\nAutonomous IDE agent infrastructure with 15+ tools, parallel execution,\nsmart result analysis, error recovery, memory tracking, and side-effect\nintrospection. Works with both local (llama-cpp) and remote (OpenAI API) backends.\n\nNamed after the Hermes model family (NousResearch Hermes, OpenHermes) which\nare fine-tuned for tool use and agentic reasoning.\n\nArchitecture:\n  HermesToolRegistry  — 15+ typed tools with schema, validation, execution\n  HermesResultAnalyzer — classifies results, detects failures, suggests fixes\n  HermesAgentLoop      — parallel execution, budget tracking, error recovery\n  HermesMemory         — persistent key-value memory across turns\n  build_hermes_prompt  — text-format tool prompt for non-API backends\n'
+import asyncio
+import hashlib
+import inspect
+import json
+import math
+import os
+import platform
+import re
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import traceback
+import urllib.request
+import urllib.error
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
-    return text, all_warnings
+class ToolCategory(str, Enum):
+    FILE = 'file'
+    SHELL = 'shell'
+    PYTHON = 'python'
+    WEB = 'web'
+    SYSTEM = 'system'
+    MEMORY = 'memory'
+
+class ToolResultStatus(str, Enum):
+    SUCCESS = 'success'
+    PARTIAL = 'partial_success'
+    ERROR_RETRYABLE = 'error_retryable'
+    ERROR_FATAL = 'error_fatal'
+    TIMEOUT = 'timeout'
+    REJECTED = 'rejected'
+
+@dataclass
+class ToolSchema:
+    name: str
+    description: str
+    parameters: Dict[str, Any]
+    category: ToolCategory
+    is_destructive: bool = False
+    max_output_chars: int = 8000
+    timeout_seconds: float = 30.0
+    retry_count: int = 2
+
+@dataclass
+class ToolResult:
+    tool_name: str
+    status: ToolResultStatus
+    output: str
+    error: Optional[str] = None
+    truncated: bool = False
+    original_size: int = 0
+    elapsed_ms: float = 0.0
+    retry_count: int = 0
+    side_effects: List[str] = field(default_factory=list)
+    suggestions: List[str] = field(default_factory=list)
+
+@dataclass
+class AgentStep:
+    step_number: int
+    model_thought: str = ''
+    tool_results: List[ToolResult] = field(default_factory=list)
+    elapsed_ms: float = 0.0
+
+@dataclass
+class AgentSession:
+    steps: List[AgentStep] = field(default_factory=list)
+    total_tool_calls: int = 0
+    tool_call_budget_remaining: int = 50
+    files_created: Set[str] = field(default_factory=set)
+    files_modified: Set[str] = field(default_factory=set)
+    commands_run: List[str] = field(default_factory=list)
+    errors_encountered: List[str] = field(default_factory=list)
+    memory: Dict[str, str] = field(default_factory=dict)
+
+class HermesToolRegistry:
+    TOOLS: Dict[str, ToolSchema] = {}
+    TOOLS['read_file'] = ToolSchema(name='read_file', description='Read the complete contents of a file. Returns the file text.', parameters={'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'Absolute or relative path to the file to read.'}, 'start_line': {'type': 'integer', 'description': 'Optional 1-based starting line. Omit to read entire file.'}, 'end_line': {'type': 'integer', 'description': 'Optional 1-based ending line (inclusive).'}}, 'required': ['path']}, category=ToolCategory.FILE, max_output_chars=12000)
+    TOOLS['write_file'] = ToolSchema(name='write_file', description='Write content to a file, creating directories as needed. OVERWRITES existing files. Use diff_file for targeted edits.', parameters={'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'Path to the file.'}, 'content': {'type': 'string', 'description': 'Full file content.'}}, 'required': ['path', 'content']}, category=ToolCategory.FILE, is_destructive=True, max_output_chars=500)
+    TOOLS['list_dir'] = ToolSchema(name='list_dir', description='List the contents of a directory with sizes and types.', parameters={'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'Directory path.'}, 'recursive': {'type': 'boolean', 'description': 'If true, list recursively (max depth 3).'}}, 'required': ['path']}, category=ToolCategory.FILE, max_output_chars=8000)
+    TOOLS['search_files'] = ToolSchema(name='search_files', description='Search for a pattern (regex or literal) within files. Like grep -rn. Returns matching lines with file paths and line numbers.', parameters={'type': 'object', 'properties': {'pattern': {'type': 'string', 'description': 'Search pattern (regex supported).'}, 'path': {'type': 'string', 'description': 'Directory or file to search in.'}, 'file_pattern': {'type': 'string', 'description': "Optional glob to filter files (e.g. '*.py')."}, 'max_results': {'type': 'integer', 'description': 'Maximum matches to return (default 50).'}}, 'required': ['pattern', 'path']}, category=ToolCategory.FILE, max_output_chars=8000)
+    TOOLS['glob_files'] = ToolSchema(name='glob_files', description="Find files matching a glob pattern (e.g. '**/*.py', 'src/*.ts').", parameters={'type': 'object', 'properties': {'pattern': {'type': 'string', 'description': 'Glob pattern.'}, 'path': {'type': 'string', 'description': 'Base directory.'}}, 'required': ['pattern', 'path']}, category=ToolCategory.FILE, max_output_chars=6000)
+    TOOLS['diff_files'] = ToolSchema(name='diff_files', description='Show the unified diff between two files or against the original content.', parameters={'type': 'object', 'properties': {'file_a': {'type': 'string', 'description': 'First file path.'}, 'file_b': {'type': 'string', 'description': 'Second file path.'}}, 'required': ['file_a', 'file_b']}, category=ToolCategory.FILE, max_output_chars=10000)
+    TOOLS['run_command'] = ToolSchema(name='run_command', description='Execute a shell command. Returns stdout+stderr. Use for build, test, install, git, and file operations. IMPORTANT: never run destructive commands (rm -rf, format, etc.) without user confirmation.', parameters={'type': 'object', 'properties': {'command': {'type': 'string', 'description': 'The shell command to run.'}, 'workdir': {'type': 'string', 'description': 'Working directory. Defaults to project root.'}}, 'required': ['command']}, category=ToolCategory.SHELL, max_output_chars=10000, timeout_seconds=60.0)
+    TOOLS['run_python'] = ToolSchema(name='run_python', description='Execute Python code in a subprocess and return the output. Use this to test generated code or run quick computations.', parameters={'type': 'object', 'properties': {'code': {'type': 'string', 'description': 'Python code to execute.'}}, 'required': ['code']}, category=ToolCategory.PYTHON, max_output_chars=6000, timeout_seconds=15.0)
+    TOOLS['fetch_url'] = ToolSchema(name='fetch_url', description='Fetch the content of a URL. Returns text content. Use for reading documentation, APIs, or package info.', parameters={'type': 'object', 'properties': {'url': {'type': 'string', 'description': 'URL to fetch (http/https).'}, 'max_chars': {'type': 'integer', 'description': 'Max characters to return (default 15000).'}}, 'required': ['url']}, category=ToolCategory.WEB, max_output_chars=15000, timeout_seconds=20.0)
+    TOOLS['get_platform'] = ToolSchema(name='get_platform', description='Get system information: OS, Python version, CPU arch, available tools.', parameters={'type': 'object', 'properties': {}, 'required': []}, category=ToolCategory.SYSTEM, max_output_chars=2000)
+    TOOLS['which_tool'] = ToolSchema(name='which_tool', description="Check if a command-line tool is available. Returns the path or 'not found'.", parameters={'type': 'object', 'properties': {'tool_name': {'type': 'string', 'description': "Name of the tool (e.g. 'node', 'gcc', 'docker')."}}, 'required': ['tool_name']}, category=ToolCategory.SYSTEM, max_output_chars=500)
+    TOOLS['disk_usage'] = ToolSchema(name='disk_usage', description='Check disk usage of a directory or file.', parameters={'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'Path to check.'}}, 'required': ['path']}, category=ToolCategory.SYSTEM, max_output_chars=2000)
+    TOOLS['remember'] = ToolSchema(name='remember', description="Store a piece of information in the agent's memory for later recall.", parameters={'type': 'object', 'properties': {'key': {'type': 'string', 'description': 'Key to store under.'}, 'value': {'type': 'string', 'description': 'Value to store.'}}, 'required': ['key', 'value']}, category=ToolCategory.MEMORY, max_output_chars=200)
+    TOOLS['recall'] = ToolSchema(name='recall', description="Recall information previously stored via 'remember'.", parameters={'type': 'object', 'properties': {'key': {'type': 'string', 'description': 'Key to recall. Omit to list all keys.'}}, 'required': []}, category=ToolCategory.MEMORY, max_output_chars=4000)
+    TOOLS['forget'] = ToolSchema(name='forget', description='Remove a key from memory.', parameters={'type': 'object', 'properties': {'key': {'type': 'string', 'description': 'Key to forget.'}}, 'required': ['key']}, category=ToolCategory.MEMORY, max_output_chars=200)
+
+    @classmethod
+    def get_schema(cls, name: str) -> Optional[ToolSchema]:
+        return cls.TOOLS.get(name)
+
+    @classmethod
+    def get_openai_tools(cls) -> List[Dict[str, Any]]:
+        tools = []
+        for name, schema in cls.TOOLS.items():
+            tools.append({'type': 'function', 'function': {'name': name, 'description': schema.description, 'parameters': schema.parameters}})
+        return tools
+
+    @classmethod
+    def validate_args(cls, name: str, args: Dict[str, Any]) -> Tuple[bool, str]:
+        schema = cls.TOOLS.get(name)
+        if not schema:
+            return (False, f'Unknown tool: {name}')
+        required = schema.parameters.get('required', [])
+        properties = schema.parameters.get('properties', {})
+        for key in required:
+            if key not in args or args[key] is None or args[key] == '':
+                return (False, f"Missing required parameter: '{key}'")
+        for key, val in args.items():
+            if key in properties:
+                expected_type = properties[key].get('type', 'string')
+                if expected_type == 'integer' and isinstance(val, str) and val.isdigit():
+                    pass
+                elif expected_type == 'boolean' and isinstance(val, str):
+                    pass
+        return (True, '')
+
+    @classmethod
+    def execute(cls, name: str, args: Dict[str, Any], workspace_root: str='', session: Optional[AgentSession]=None) -> ToolResult:
+        t0 = time.perf_counter()
+        schema = cls.TOOLS.get(name)
+        if not schema:
+            elapsed = (time.perf_counter() - t0) * 1000
+            return ToolResult(tool_name=name, status=ToolResultStatus.ERROR_FATAL, output='', error=f'Unknown tool: {name}', elapsed_ms=elapsed)
+        if not workspace_root or workspace_root == 'none':
+            workspace_root = os.getcwd()
+        valid, err_msg = cls.validate_args(name, args)
+        if not valid:
+            elapsed = (time.perf_counter() - t0) * 1000
+            return ToolResult(tool_name=name, status=ToolResultStatus.ERROR_FATAL, output='', error=err_msg, elapsed_ms=elapsed)
+        try:
+            handler = _TOOL_HANDLERS.get(name)
+            if handler:
+                raw_output = handler(args, workspace_root, schema, session)
+            else:
+                raw_output = f"Tool '{name}' has no handler."
+            is_error_output = raw_output.startswith('Error:') or raw_output.startswith('[Error]')
+            if is_error_output:
+                elapsed = (time.perf_counter() - t0) * 1000
+                return ToolResult(tool_name=name, status=ToolResultStatus.ERROR_RETRYABLE, output=raw_output, error=raw_output, elapsed_ms=elapsed)
+            original_size = len(raw_output)
+            truncated = False
+            if original_size > schema.max_output_chars:
+                raw_output = raw_output[:schema.max_output_chars]
+                raw_output += f'\n\n... [truncated, {original_size} total chars]'
+                truncated = True
+            elapsed = (time.perf_counter() - t0) * 1000
+            return ToolResult(tool_name=name, status=ToolResultStatus.SUCCESS, output=raw_output, truncated=truncated, original_size=original_size, elapsed_ms=elapsed)
+        except subprocess.TimeoutExpired:
+            elapsed = (time.perf_counter() - t0) * 1000
+            return ToolResult(tool_name=name, status=ToolResultStatus.TIMEOUT, output='', error=f'Tool timed out after {schema.timeout_seconds}s', elapsed_ms=elapsed)
+        except Exception as e:
+            elapsed = (time.perf_counter() - t0) * 1000
+            return ToolResult(tool_name=name, status=ToolResultStatus.ERROR_RETRYABLE, output='', error=f'{type(e).__name__}: {e}', elapsed_ms=elapsed)
+
+def _resolve_path(path: str, workspace_root: str) -> str:
+    if os.path.isabs(path):
+        return path
+    return os.path.join(workspace_root, path)
+
+def _h_read_file(args, ws, schema, session) -> str:
+    path = _resolve_path(args['path'], ws)
+    if not os.path.isfile(path):
+        return f'Error: File not found: {path}'
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            lines = f.readlines()
+        start = max(1, int(args.get('start_line', 1)))
+        end = int(args.get('end_line', len(lines))) if args.get('end_line') else len(lines)
+        start = min(start, len(lines))
+        end = min(end, len(lines))
+        selected = lines[start - 1:end]
+        result = ''.join(selected)
+        if len(selected) < len(lines):
+            result = f'[Lines {start}-{end} of {len(lines)} total]\n{result}'
+        return result
+    except Exception as e:
+        return f'Error reading {path}: {e}'
+
+def _h_write_file(args, ws, schema, session) -> str:
+    path = _resolve_path(args['path'], ws)
+    content = args['content']
+    try:
+        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+        existed = os.path.exists(path)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        action = 'Updated' if existed else 'Created'
+        size = len(content)
+        if session:
+            if existed:
+                session.files_modified.add(path)
+            else:
+                session.files_created.add(path)
+        return f'{action} file: {path} ({size} bytes)'
+    except Exception as e:
+        return f'Error writing {path}: {e}'
+
+def _h_list_dir(args, ws, schema, session) -> str:
+    path = _resolve_path(args['path'], ws)
+    recursive = args.get('recursive', False)
+    if not os.path.isdir(path):
+        return f'Error: Not a directory: {path}'
+    lines = []
+    if recursive:
+        max_depth = 3
+        for root, dirs, files in os.walk(path):
+            depth = root[len(path):].count(os.sep)
+            if depth > max_depth:
+                dirs[:] = []
+                continue
+            indent = '  ' * depth
+            prefix = os.path.relpath(root, path)
+            if prefix == '.':
+                lines.append(f'{path}/')
+            else:
+                lines.append(f'{indent}{prefix}/')
+            for f in sorted(files):
+                fp = os.path.join(root, f)
+                try:
+                    size = os.path.getsize(fp)
+                except OSError:
+                    size = 0
+                lines.append(f'{indent}  {f} ({_fmt_size(size)})')
+            dirs.sort()
+    else:
+        try:
+            items = sorted(os.listdir(path))
+            for item in items:
+                fp = os.path.join(path, item)
+                if os.path.isdir(fp):
+                    lines.append(f'  [DIR]  {item}/')
+                else:
+                    size = os.path.getsize(fp)
+                    lines.append(f'  [FILE] {item} ({_fmt_size(size)})')
+        except PermissionError:
+            return f'Error: Permission denied: {path}'
+    return '\n'.join(lines[:500])
+
+def _h_search_files(args, ws, schema, session) -> str:
+    pattern = args['pattern']
+    search_path = _resolve_path(args['path'], ws)
+    file_pattern = args.get('file_pattern', '')
+    max_results = min(args.get('max_results', 50) or 50, 500)
+    cmd = ['grep', '-rnIE', '--', pattern, search_path]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, cwd=ws)
+        output = result.stdout.strip()
+        if not output:
+            return 'No matches found.'
+        lines = output.split('\n')
+        total = len(lines)
+        lines = lines[:max_results]
+        msg = '\n'.join(lines)
+        if total > max_results:
+            msg += f'\n\n... [{total - max_results} more matches truncated]'
+        return msg
+    except FileNotFoundError:
+        return "Error: 'grep' not found on system."
+    except subprocess.TimeoutExpired:
+        return 'Error: Search timed out.'
+
+def _h_glob_files(args, ws, schema, session) -> str:
+    import glob as glob_module
+    pattern = args['pattern']
+    base_path = _resolve_path(args['path'], ws)
+    full_pattern = os.path.join(base_path, pattern)
+    matches = glob_module.glob(full_pattern, recursive=True)
+    if not matches:
+        return f'No files match pattern: {pattern}'
+    lines = []
+    for m in sorted(matches)[:200]:
+        rel = os.path.relpath(m, ws)
+        try:
+            size = os.path.getsize(m) if os.path.isfile(m) else 0
+        except OSError:
+            size = 0
+        lines.append(f'  {rel} ({_fmt_size(size)})')
+    total = len(matches)
+    result = '\n'.join(lines)
+    if total > 200:
+        result += f'\n... [{total - 200} more files not shown]'
+    return result
+
+def _h_diff_files(args, ws, schema, session) -> str:
+    a = _resolve_path(args['file_a'], ws)
+    b = _resolve_path(args['file_b'], ws)
+    if not os.path.exists(a):
+        return f'Error: File not found: {a}'
+    if not os.path.exists(b):
+        return f'Error: File not found: {b}'
+    try:
+        result = subprocess.run(['diff', '-u', a, b], capture_output=True, text=True, timeout=10)
+        output = result.stdout.strip()
+        return output if output else 'Files are identical.'
+    except FileNotFoundError:
+        return "Error: 'diff' not found on system."
+    except Exception as e:
+        return f'Error diffing files: {e}'
+
+def _h_run_command(args, ws, schema, session) -> str:
+    cmd = args['command']
+    workdir = _resolve_path(args.get('workdir', ws) or ws, ws)
+    if not os.path.isdir(workdir):
+        workdir = ws
+    try:
+        result = subprocess.run(cmd, shell=True, cwd=workdir, capture_output=True, text=True, timeout=schema.timeout_seconds)
+        output = result.stdout.strip()
+        stderr = result.stderr.strip()
+        if session:
+            session.commands_run.append(cmd)
+        parts = []
+        if output:
+            parts.append(output)
+        if stderr:
+            parts.append(f'[stderr]\n{stderr}')
+        if not parts:
+            parts.append(f'Command completed with exit code {result.returncode} (no output).')
+        return '\n'.join(parts)
+    except subprocess.TimeoutExpired:
+        return f'Error: Command timed out after {schema.timeout_seconds}s: {cmd}'
+    except Exception as e:
+        return f'Error running command: {e}'
+
+def _h_run_python(args, ws, schema, session) -> str:
+    code = args['code']
+    try:
+        result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, timeout=schema.timeout_seconds, cwd=ws)
+        output = result.stdout.strip()
+        stderr = result.stderr.strip()
+        parts = []
+        if output:
+            parts.append(output)
+        if stderr:
+            parts.append(f'[stderr]\n{stderr}')
+        if not parts:
+            parts.append('(no output)')
+        return '\n'.join(parts)
+    except subprocess.TimeoutExpired:
+        return f'Error: Python code timed out after {schema.timeout_seconds}s'
+    except Exception as e:
+        return f'Error running Python: {e}'
+
+def _h_fetch_url(args, ws, schema, session) -> str:
+    url = args['url']
+    max_chars = min(args.get('max_chars', 15000) or 15000, 50000)
+    if not url.startswith(('http://', 'https://')):
+        return 'Error: Only http/https URLs are supported.'
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Iris-AI-Hermes/1.0'})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            content = resp.read().decode('utf-8', errors='replace')
+            if len(content) > max_chars:
+                content = content[:max_chars] + f'\n\n... [truncated, {len(content)} total chars]'
+            content = re.sub('<[^>]+>', '', content)
+            content = re.sub('\\n{3,}', '\n\n', content)
+            return content
+    except urllib.error.HTTPError as e:
+        return f'HTTP Error {e.code}: {e.reason}'
+    except urllib.error.URLError as e:
+        return f'URL Error: {e.reason}'
+    except Exception as e:
+        return f'Error fetching URL: {e}'
+
+def _h_get_platform(args, ws, schema, session) -> str:
+    info = [f'OS: {platform.system()} {platform.release()}', f'Arch: {platform.machine()}', f'Python: {sys.version}', f'CWD: {os.getcwd()}', f"Shell: {os.environ.get('SHELL', 'unknown')}"]
+    tools_to_check = ['git', 'node', 'npm', 'gcc', 'g++', 'clang', 'rustc', 'cargo', 'go', 'docker', 'make', 'cmake', 'python3', 'pip3']
+    available = []
+    for t in tools_to_check:
+        if shutil.which(t):
+            available.append(t)
+    info.append(f"Available tools: {', '.join(available)}")
+    return '\n'.join(info)
+
+def _h_which_tool(args, ws, schema, session) -> str:
+    tool = args['tool_name']
+    path = shutil.which(tool)
+    if path:
+        return f'Found: {path}'
+    return f'Not found: {tool}'
+
+def _h_disk_usage(args, ws, schema, session) -> str:
+    path = _resolve_path(args['path'], ws)
+    if not os.path.exists(path):
+        return f'Error: Path not found: {path}'
+    if os.path.isfile(path):
+        size = os.path.getsize(path)
+        return f'File: {path}\nSize: {_fmt_size(size)}'
+    total_size = 0
+    file_count = 0
+    for dirpath, _, filenames in os.walk(path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            try:
+                total_size += os.path.getsize(fp)
+                file_count += 1
+            except OSError:
+                pass
+    return f'Directory: {path}\nFiles: {file_count}\nTotal size: {_fmt_size(total_size)}'
+
+def _h_remember(args, ws, schema, session) -> str:
+    if not session:
+        return 'Error: No agent session active.'
+    key = args['key']
+    value = args['value']
+    session.memory[key] = value
+    return f"Stored: {key} = {value[:200]}{('...' if len(value) > 200 else '')}"
+
+def _h_recall(args, ws, schema, session) -> str:
+    if not session:
+        return 'Error: No agent session active.'
+    key = args.get('key')
+    if key:
+        val = session.memory.get(key)
+        if val is None:
+            return f'No memory found for key: {key}'
+        return f'{key}: {val}'
+    if not session.memory:
+        return 'Memory is empty.'
+    lines = ['Memory contents:']
+    for k, v in sorted(session.memory.items()):
+        lines.append(f'  {k}: {v[:200]}')
+    return '\n'.join(lines)
+
+def _h_forget(args, ws, schema, session) -> str:
+    if not session:
+        return 'Error: No agent session active.'
+    key = args['key']
+    if key in session.memory:
+        del session.memory[key]
+        return f'Forgot: {key}'
+    return f'No memory found for key: {key}'
+_TOOL_HANDLERS: Dict[str, Callable] = {'read_file': _h_read_file, 'write_file': _h_write_file, 'list_dir': _h_list_dir, 'search_files': _h_search_files, 'glob_files': _h_glob_files, 'diff_files': _h_diff_files, 'run_command': _h_run_command, 'run_python': _h_run_python, 'fetch_url': _h_fetch_url, 'get_platform': _h_get_platform, 'which_tool': _h_which_tool, 'disk_usage': _h_disk_usage, 'remember': _h_remember, 'recall': _h_recall, 'forget': _h_forget}
+
+def _fmt_size(size_bytes: int) -> str:
+    if size_bytes < 1024:
+        return f'{size_bytes}B'
+    elif size_bytes < 1024 * 1024:
+        return f'{size_bytes / 1024:.1f}KB'
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f'{size_bytes / (1024 * 1024):.1f}MB'
+    return f'{size_bytes / (1024 * 1024 * 1024):.2f}GB'
+
+class HermesResultAnalyzer:
+    ERROR_PATTERNS = [('command not found|not recognized as an.*command', ToolResultStatus.ERROR_FATAL, "The command is not installed. Use 'which_tool' to check availability."), ('Permission denied|permission denied', ToolResultStatus.ERROR_FATAL, 'Permission denied. Check file/directory permissions.'), ('File not found|No such file|no such file', ToolResultStatus.ERROR_RETRYABLE, "File not found. Check the path with 'list_dir' or 'glob_files'."), ('Not found:', ToolResultStatus.SUCCESS, ''), ('\\bnot found\\b', ToolResultStatus.ERROR_RETRYABLE, 'Resource not found. Verify existence with a listing tool.'), ('timed out|Timeout|TimeoutExpired', ToolResultStatus.TIMEOUT, 'Operation timed out. Try a smaller scope or break into steps.'), ('SyntaxError|syntax error|invalid syntax', ToolResultStatus.ERROR_RETRYABLE, 'Syntax error detected. Review and fix the code.'), ('ModuleNotFoundError|ImportError|No module named', ToolResultStatus.ERROR_RETRYABLE, 'Module not found. Install with pip or check the import path.'), ('KeyboardInterrupt|SIGINT', ToolResultStatus.ERROR_FATAL, 'Operation was interrupted.'), ('Connection refused|Connection reset|Network is unreachable|Name or service not known', ToolResultStatus.ERROR_RETRYABLE, 'Network error. Check connectivity or the URL.'), ('out of memory|MemoryError|Cannot allocate memory', ToolResultStatus.ERROR_FATAL, 'Out of memory. Reduce the scope of the operation.')]
+
+    @classmethod
+    def analyze(cls, result: ToolResult) -> ToolResult:
+        if result.status == ToolResultStatus.SUCCESS:
+            return result
+        error_text = (result.error or '') + ' ' + (result.output or '')
+        for pattern, status, suggestion in cls.ERROR_PATTERNS:
+            if re.search(pattern, error_text, re.IGNORECASE):
+                result.status = status
+                result.suggestions.append(suggestion)
+                break
+        if result.status == ToolResultStatus.SUCCESS:
+            last_lines = result.output.split('\n')[-5:]
+            for line in last_lines:
+                if re.search('\\berror\\b', line, re.IGNORECASE):
+                    result.status = ToolResultStatus.PARTIAL
+                    result.suggestions.append('Command completed but may contain errors. Review the output.')
+                    break
+        return result
+
+    @classmethod
+    def summarize_for_model(cls, results: List[ToolResult], max_chars: int=2000) -> str:
+        if not results:
+            return 'No tools executed.'
+        lines = ['Tool Execution Results:']
+        for r in results:
+            icon = '✓' if r.status == ToolResultStatus.SUCCESS else '⚠' if r.status == ToolResultStatus.PARTIAL else '✗'
+            status_note = ''
+            if r.error:
+                status_note = f' — {r.error[:120]}'
+            elif r.truncated:
+                status_note = f' — truncated ({r.original_size} chars)'
+            lines.append(f'  {icon} {r.tool_name} ({r.elapsed_ms:.0f}ms){status_note}')
+            if r.status != ToolResultStatus.SUCCESS and r.output:
+                lines.append(f'     Output: {r.output[:300]}')
+        summary = '\n'.join(lines)
+        if len(summary) > max_chars:
+            summary = summary[:max_chars] + '\n... [summary truncated]'
+        return summary
+HERMES_AGENT_SYSTEM_PROMPT = "You are an autonomous IDE agent with access to local tools. Your capabilities:\n\nFILE TOOLS:\n- read_file(path, start_line?, end_line?) — read file contents\n- write_file(path, content) — create/overwrite a file\n- list_dir(path, recursive?) — list directory contents\n- search_files(pattern, path, file_pattern?) — grep-like search\n- glob_files(pattern, path) — find files by glob\n- diff_files(file_a, file_b) — compare two files\n\nSHELL TOOLS:\n- run_command(command, workdir?) — execute a shell command\n- run_python(code) — execute Python code and return output\n\nWEB TOOLS:\n- fetch_url(url, max_chars?) — fetch a URL's text content\n\nSYSTEM TOOLS:\n- get_platform() — system info, Python version, available CLI tools\n- which_tool(tool_name) — check if a tool is installed\n- disk_usage(path) — check file/directory size\n\nMEMORY TOOLS:\n- remember(key, value) — store info for later\n- recall(key?) — retrieve stored info\n- forget(key) — remove stored info\n\nRULES:\n1. ALWAYS test code by running it before finalizing\n2. Use tools iteratively — explore, plan, execute, verify\n3. When a tool fails, analyze the error and try an alternative approach\n4. Never run destructive commands (rm -rf, format, etc.) without explicit user request\n5. If you're unsure, use read_file or list_dir to explore first\n6. Write complete, working code — no placeholders\n7. After completing the task, provide a clear summary of what you did"
+
+class HermesAgentLoop:
+
+    def __init__(self, model_callable: Optional[Callable]=None, workspace_root: str='', max_tool_calls: int=50, max_consecutive_errors: int=5, max_turns: int=15):
+        self.model_callable = model_callable
+        self.workspace_root = workspace_root or os.getcwd()
+        self.max_tool_calls = max_tool_calls
+        self.max_consecutive_errors = max_consecutive_errors
+        self.max_turns = max_turns
+        self.session = AgentSession(tool_call_budget_remaining=max_tool_calls)
+        self._consecutive_errors = 0
+
+    def execute_tool_calls(self, tool_calls: List[Dict[str, Any]]) -> List[ToolResult]:
+        results: List[ToolResult] = []
+        for tc in tool_calls:
+            func_name = tc['function']['name']
+            try:
+                args = json.loads(tc['function']['arguments'])
+            except (json.JSONDecodeError, KeyError):
+                args = {}
+            result = HermesToolRegistry.execute(func_name, args, self.workspace_root, self.session)
+            schema = HermesToolRegistry.get_schema(func_name)
+            retries = schema.retry_count if schema else 0
+            attempt = 0
+            while result.status in (ToolResultStatus.ERROR_RETRYABLE, ToolResultStatus.TIMEOUT) and attempt < retries:
+                attempt += 1
+                time.sleep(0.5 * attempt)
+                result.retry_count = attempt
+                result = HermesToolRegistry.execute(func_name, args, self.workspace_root, self.session)
+            result = HermesResultAnalyzer.analyze(result)
+            results.append(result)
+            self.session.total_tool_calls += 1
+            self.session.tool_call_budget_remaining -= 1
+            if result.status in (ToolResultStatus.ERROR_FATAL, ToolResultStatus.ERROR_RETRYABLE, ToolResultStatus.TIMEOUT):
+                self._consecutive_errors += 1
+                self.session.errors_encountered.append(f"{func_name}: {result.error or 'unknown error'}")
+            else:
+                self._consecutive_errors = 0
+        return results
+
+    def should_continue(self) -> bool:
+        if self.session.tool_call_budget_remaining <= 0:
+            return False
+        if self._consecutive_errors >= self.max_consecutive_errors:
+            return False
+        if len(self.session.steps) >= self.max_turns:
+            return False
+        return True
+
+    def build_tool_result_messages(self, results: List[ToolResult], tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        messages = []
+        for tc, result in zip(tool_calls, results):
+            content = result.output
+            if result.error:
+                content = f'[{result.status.value}] {result.error}\n\n{content}'
+            if result.suggestions:
+                content += f"\n\nSuggestions: {'; '.join(result.suggestions)}"
+            messages.append({'role': 'tool', 'tool_call_id': tc.get('id', ''), 'name': result.tool_name, 'content': content[:8000]})
+        return messages
+
+    def build_summary(self) -> str:
+        s = self.session
+        lines = ['=' * 50, '  HERMES AGENT SESSION SUMMARY', '=' * 50, f'  Steps: {len(s.steps)}', f'  Tool calls: {s.total_tool_calls}', f'  Budget remaining: {s.tool_call_budget_remaining}', f'  Files created: {len(s.files_created)}', f'  Files modified: {len(s.files_modified)}', f'  Commands run: {len(s.commands_run)}', f'  Errors: {len(s.errors_encountered)}']
+        if s.files_created:
+            lines.append('\n  Created files:')
+            for f in sorted(s.files_created):
+                lines.append(f'    + {f}')
+        if s.files_modified:
+            lines.append('\n  Modified files:')
+            for f in sorted(s.files_modified):
+                lines.append(f'    ~ {f}')
+        if s.errors_encountered:
+            lines.append('\n  Errors:')
+            for e in s.errors_encountered[-10:]:
+                lines.append(f'    ✗ {e[:120]}')
+        if s.memory:
+            lines.append('\n  Memory:')
+            for k, v in sorted(s.memory.items()):
+                lines.append(f'    {k}: {v[:100]}')
+        return '\n'.join(lines)
+
+def build_hermes_text_prompt(user_query: str, history: Optional[List[Dict[str, str]]]=None, workspace_root: str='') -> str:
+    system = f'{HERMES_AGENT_SYSTEM_PROMPT}\n\nWhen you need to use a tool, output EXACTLY:\n\n<tool_call>\n{{"name": "<tool_name>", "args": {{"arg1": "value1", ...}}}}\n</tool_call>\n\nThe tool result will be provided in the next message. Continue until the task is complete.\nWhen finished, do NOT output a tool call — just provide your final answer.\n\nCurrent workspace: {workspace_root}\n'
+    prompt = f'<|im_start|>system\n{system}<|im_end|>\n'
+    if history:
+        for msg in history[-8:]:
+            role = msg.get('role', 'user')
+            content = msg.get('content', '')
+            prompt += f'<|im_start|>{role}\n{content}<|im_end|>\n'
+    prompt += f'<|im_start|>user\n{user_query}<|im_end|>\n<|im_start|>assistant\n'
+    return prompt
+
+def parse_hermes_tool_call(text: str) -> Optional[Dict[str, Any]]:
+    pattern = '<tool_call>\\s*(.*?)\\s*</tool_call>'
+    match = re.search(pattern, text, re.DOTALL)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+
+def get_hermes_tool_schemas() -> List[Dict[str, Any]]:
+    return HermesToolRegistry.get_openai_tools()
+
+def create_agent_session(workspace_root: str='', max_tool_calls: int=50) -> AgentSession:
+    session = AgentSession(tool_call_budget_remaining=max_tool_calls)
+    return session
+
+
+
+
+
+
+
+
+
+
+
+
+# We assume standard harness functions are available, we will concatenate this file to harness.py
+# so these classes will be at the bottom.
+
+class Domain(str, Enum):
+    MATH = "math"
+    CODE = "code"
+    GENERAL = "general"
+
+class SandboxResult(str, Enum):
+    SUCCESS = "success"
+    TIMEOUT = "timeout"
+    RUNTIME_ERROR = "runtime_error"
+    SYNTAX_ERROR = "syntax_error"
+    TEST_FAILED = "test_failed"
+
+@dataclass
+class TestCase:
+    input_data: str
+    expected_output: str
+    is_hidden: bool = False
+
+@dataclass
+class SandboxReport:
+    status: SandboxResult
+    stdout: str
+    stderr: str
+    exit_code: int
+    elapsed_ms: float
+    failed_test_index: Optional[int] = None
+    error_message: Optional[str] = None
+
+class CodeSandbox:
+    """Isolated subprocess execution for code verification."""
+    
+    @staticmethod
+    def extract_code(text: str) -> str:
+        """Extract Python code from markdown fences."""
+        blocks = re.findall(r'```(?:python|py)?\n(.*?)\n```', text, re.DOTALL)
+        if blocks:
+            # Usually the last code block contains the final solution
+            return blocks[-1].strip()
+        # Fallback: return raw text if no fences but it looks like code
+        if "def " in text or "import " in text:
+            return text.strip()
+        return ""
+
+    @staticmethod
+    def run_python(code: str, test_cases: Optional[List[TestCase]] = None, timeout_seconds: float = 10.0) -> SandboxReport:
+        """Run Python code securely using a subprocess."""
+        start_time = time.time()
+        
+        # If there are test cases, we inject assert statements at the bottom of the code.
+        test_injection = ""
+        if test_cases:
+            test_injection = "\n\n# --- AUTO-GENERATED TESTS ---\n"
+            for i, tc in enumerate(test_cases):
+                test_injection += f"assert repr(str(eval({repr(tc.input_data)}))) == repr(str({repr(tc.expected_output)})), 'Test {i} Failed'\n"
+        
+        full_code = code + test_injection
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(full_code)
+            temp_path = f.name
+            
+        try:
+            result = subprocess.run(
+                [sys.executable, temp_path],
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds
+            )
+            elapsed = (time.time() - start_time) * 1000
+            
+            if result.returncode == 0:
+                return SandboxReport(
+                    status=SandboxResult.SUCCESS,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    exit_code=0,
+                    elapsed_ms=elapsed
+                )
+            
+            # Categorize the error
+            stderr = result.stderr
+            status = SandboxResult.RUNTIME_ERROR
+            error_msg = stderr.split('\n')[-2] if '\n' in stderr else stderr
+            
+            if "SyntaxError" in stderr:
+                status = SandboxResult.SYNTAX_ERROR
+            elif "AssertionError" in stderr and "Test" in stderr:
+                status = SandboxResult.TEST_FAILED
+                # Try to extract the test index
+                m = re.search(r"Test (\d+) Failed", stderr)
+                failed_test_index = int(m.group(1)) if m else None
+                return SandboxReport(
+                    status=status, stdout=result.stdout, stderr=stderr,
+                    exit_code=result.returncode, elapsed_ms=elapsed,
+                    failed_test_index=failed_test_index, error_message="Test assertion failed."
+                )
+            
+            return SandboxReport(
+                status=status, stdout=result.stdout, stderr=stderr,
+                exit_code=result.returncode, elapsed_ms=elapsed,
+                error_message=error_msg
+            )
+            
+        except subprocess.TimeoutExpired:
+            elapsed = (time.time() - start_time) * 1000
+            return SandboxReport(
+                status=SandboxResult.TIMEOUT,
+                stdout="",
+                stderr="Execution timed out.",
+                exit_code=-1,
+                elapsed_ms=elapsed,
+                error_message=f"Timed out after {timeout_seconds}s"
+            )
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+@dataclass
+class MathVerificationReport:
+    is_correct: bool
+    is_equivalent: bool
+    extracted_answer: Optional[str]
+    target_answer: str
+    error_message: Optional[str] = None
+
+class MathVerifier:
+    """Symbolic and Regex-based Math Equivalence Verification."""
+    
+    @staticmethod
+    def _normalize(expr: str) -> str:
+        """Normalize common math formatting for comparison."""
+        expr = expr.replace(" ", "")
+        expr = expr.replace("\\text", "")
+        expr = re.sub(r'\\frac{([^{}]+)}{([^{}]+)}', r'(\1)/(\2)', expr)
+        expr = expr.replace("\\times", "*").replace("\\cdot", "*")
+        expr = expr.replace("\\pi", "pi").replace("\\sqrt", "sqrt")
+        expr = expr.replace("\\left", "").replace("\\right", "")
+        expr = expr.replace("{", "").replace("}", "")
+        return expr.lower()
+
+    @staticmethod
+    def verify(generated_text: str, target_answer: str) -> MathVerificationReport:
+        # We rely on extract_math_answer from harness.py
+        # But we must call it cleanly
+        extracted_match = re.search(r'\*\*Answer:\*\*\s*(.*)', generated_text)
+        extracted = extracted_match.group(1).strip() if extracted_match else None
+        
+        if not extracted:
+            # Fallback to last line boxed logic or similar
+            matches = re.findall(r'\\boxed{([^}]+)}', generated_text)
+            if matches:
+                extracted = matches[-1].strip()
+        
+        if not extracted:
+            return MathVerificationReport(False, False, None, target_answer, "Could not extract final answer.")
+            
+        norm_ext = MathVerifier._normalize(extracted)
+        norm_tgt = MathVerifier._normalize(target_answer)
+        
+        is_exact = (norm_ext == norm_tgt)
+        
+        # Very simple equivalence check without sympy overhead
+        is_equiv = is_exact
+        if not is_exact:
+            # Check numerical equivalence if both are floats
+            try:
+                if abs(float(eval(norm_ext)) - float(eval(norm_tgt))) < 1e-6:
+                    is_equiv = True
+            except:
+                pass
+                
+        return MathVerificationReport(is_equiv, is_equiv, extracted, target_answer)
+
+@dataclass
+class RefinementPass:
+    turn: int
+    prompt: str
+    response: str
+    report: SandboxReport
+    success: bool
+
+class IterativeRefiner:
+    """Multi-pass error-feedback self-correction loop."""
+    
+    def __init__(self, model_callable: Callable, max_turns: int = 3):
+        self.model_callable = model_callable
+        self.max_turns = max_turns
+        
+    def refine_code(self, task_prompt: str, initial_code: str, test_cases: List[TestCase]) -> Tuple[str, List[RefinementPass]]:
+        passes = []
+        current_code = initial_code
+        
+        for turn in range(self.max_turns):
+            report = CodeSandbox.run_python(current_code, test_cases)
+            
+            if report.status == SandboxResult.SUCCESS:
+                passes.append(RefinementPass(turn, "N/A", current_code, report, True))
+                return current_code, passes
+                
+            # If it failed, generate a refinement prompt
+            error_details = report.stderr[-1000:] if report.stderr else report.error_message
+            if report.status == SandboxResult.TEST_FAILED and report.failed_test_index is not None:
+                tc = test_cases[report.failed_test_index]
+                error_details = f"Failed hidden test case. Output did not match expected."
+                if not tc.is_hidden:
+                    error_details = f"Failed on input: {tc.input_data}. Expected: {tc.expected_output}"
+            
+            refinement_prompt = f"""The code you provided failed during execution.
+Here is the execution report:
+- Status: {report.status.value}
+- Error Traceback / Details:
+{error_details}
+
+Please analyze the error in a <critic> block, then provide the fully corrected Python code.
+"""
+            # Call the model
+            history = [
+                {"role": "user", "content": task_prompt},
+                {"role": "assistant", "content": current_code},
+                {"role": "user", "content": refinement_prompt}
+            ]
+            
+            response = self.model_callable(history)
+            current_code = CodeSandbox.extract_code(response)
+            if not current_code:
+                current_code = response # fallback
+                
+            passes.append(RefinementPass(turn, refinement_prompt, current_code, report, False))
+            
+        return current_code, passes
+
+@dataclass
+class SmartHarnessResult:
+    final_answer: str
+    domain: Domain
+    is_verified: bool
+    iterations: int
+    candidates_generated: int
+    execution_reports: List[Any]
+
+class SmartHarness:
+    """Frontier Orchestrator combining verification, sandbox, and Test-Time Compute."""
+    
+    def __init__(self, model_callable: Callable, domain: Domain = Domain.GENERAL):
+        self.model_callable = model_callable
+        self.domain = domain
+        self.refiner = IterativeRefiner(model_callable)
+        
+    def solve(self, prompt: str, candidates: int = 1, test_cases: Optional[List[TestCase]] = None) -> SmartHarnessResult:
+        """Generate and evaluate solutions."""
+        if self.domain == Domain.CODE:
+            return self._solve_code(prompt, candidates, test_cases)
+        elif self.domain == Domain.MATH:
+            return self._solve_math(prompt, candidates)
+        else:
+            # Fallback to standard generation
+            ans = self.model_callable([{"role": "user", "content": prompt}])
+            return SmartHarnessResult(ans, self.domain, False, 1, 1, [])
+            
+    def _solve_code(self, prompt: str, candidates: int, test_cases: Optional[List[TestCase]]) -> SmartHarnessResult:
+        # Test-Time Compute: Generate N candidates
+        reports = []
+        best_code = None
+        
+        for i in range(candidates):
+            ans = self.model_callable([{"role": "user", "content": prompt}])
+            code = CodeSandbox.extract_code(ans)
+            
+            if test_cases:
+                # We can refine it
+                refined_code, passes = self.refiner.refine_code(prompt, code, test_cases)
+                reports.extend(passes)
+                if passes and passes[-1].success:
+                    return SmartHarnessResult(refined_code, self.domain, True, len(passes), i+1, reports)
+            else:
+                # Just sandbox it to see if it syntax checks / runs without crashing
+                rep = CodeSandbox.run_python(code)
+                reports.append(rep)
+                if rep.status == SandboxResult.SUCCESS:
+                    best_code = code
+                    
+        return SmartHarnessResult(best_code or code, self.domain, False, 1, candidates, reports)
+        
+    def _solve_math(self, prompt: str, candidates: int) -> SmartHarnessResult:
+        # Majority voting logic for math
+        answers = []
+        for i in range(candidates):
+            ans = self.model_callable([{"role": "user", "content": prompt}])
+            answers.append(ans)
+            
+        if candidates == 1:
+            return SmartHarnessResult(answers[0], self.domain, False, 1, 1, [])
+            
+        # Extract and cluster (self-consistency)
+        extracted = []
+        for a in answers:
+            match = re.search(r'\*\*Answer:\*\*\s*(.*)', a)
+            if match:
+                extracted.append(MathVerifier._normalize(match.group(1)))
+                
+        if not extracted:
+            return SmartHarnessResult(answers[0], self.domain, False, 1, candidates, [])
+            
+        # Find majority
+        from collections import Counter
+        counts = Counter(extracted)
+        majority, _ = counts.most_common(1)[0]
+        
+        # Find the full text answer that corresponds to the majority
+        best_ans = answers[0]
+        for a in answers:
+            match = re.search(r'\*\*Answer:\*\*\s*(.*)', a)
+            if match and MathVerifier._normalize(match.group(1)) == majority:
+                best_ans = a
+                break
+                
+        return SmartHarnessResult(best_ans, self.domain, True, 1, candidates, [counts])
+
+
+__all__ = [
+    'HermesToolRegistry',
+    'HermesResultAnalyzer',
+    'HermesAgentLoop',
+    'AgentSession',
+    'AgentStep',
+    'ToolResult',
+    'ToolResultStatus',
+    'ToolSchema',
+    'ToolCategory',
+    'HERMES_AGENT_SYSTEM_PROMPT',
+    'build_hermes_text_prompt',
+    'parse_hermes_tool_call',
+    'get_hermes_tool_schemas',
+    'create_agent_session',
+    'Domain',
+    'SandboxResult',
+    'TestCase',
+    'SandboxReport',
+    'CodeSandbox',
+    'MathVerificationReport',
+    'MathVerifier',
+    'RefinementPass',
+    'IterativeRefiner',
+    'SmartHarnessResult',
+    'SmartHarness'
+]
