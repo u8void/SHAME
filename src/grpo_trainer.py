@@ -807,11 +807,6 @@ class GRPOTrainer:
         self.kl_coeff = ckpt["kl_coeff"]
         print(f"[GRPO] Resumed from step {self.step_count}")
 
-
-# ---------------------------------------------------------------------------
-# Bridging: llama-cpp GGUF models for inference + HF/adapter for training
-# ---------------------------------------------------------------------------
-
 class GGUFPolicyBridge:
     """Bridges GGUF inference (via llama-cpp) with a PyTorch trainable adapter.
 

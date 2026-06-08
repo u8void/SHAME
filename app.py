@@ -6,6 +6,9 @@ import subprocess
 
 from flask import Flask, request, jsonify, render_template, Response
 from werkzeug.utils import secure_filename
+from src.logger import get_logger
+
+logger = get_logger("app")
 
 from src.iris import ask_stream, solve_math, BookRetriever, analyze_image
 
@@ -47,12 +50,12 @@ def get_retriever():
     with _retriever_lock:
         if _retriever_ready:
             return retriever
-        print("[INFO] Lazy-loading RAG Knowledge Base...")
+        logger.info("[INFO] Lazy-loading RAG Knowledge Base...")
         try:
             retriever = BookRetriever(raw_data_dir="raw_data")
             retriever.load_and_index()
         except Exception as e:
-            print(f"[WARNING] RAG load failed: {e}")
+            logger.warning(f"[WARNING] RAG load failed: {e}")
             retriever = None
         _retriever_ready = True
         return retriever
@@ -377,7 +380,7 @@ if __name__ == "__main__":
         mode_label = "IRIS PRO (OpenRouter Multi-Agent API)"
     else:
         mode_label = "Local GGUF Multi-Model Routing System"
-    print(f"[INFO] Starting Iris AI — {mode_label}")
+    logger.info(f"[INFO] Starting Iris AI — {mode_label}")
 
     port = int(os.environ.get("PORT", "5050"))
     app.run(debug=False, host="127.0.0.1", port=port)

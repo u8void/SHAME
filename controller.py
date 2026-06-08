@@ -5,6 +5,8 @@ Natural-language control of your computer, powered by Iris.
 """
 
 import os
+from src.logger import get_logger
+logger = get_logger('controller')
 import re
 import sys
 import json
@@ -75,7 +77,7 @@ def route_category(text: str) -> Optional[str]:
     if not scores:
         return None
     best = max(scores, key=scores.__getitem__)
-    print(f"[Router] Category='{best}' (scores={scores})")
+    logger.info(f"[Router] Category='{best}' (scores={scores})")
     return best
 
 import html as _html
@@ -178,15 +180,13 @@ try:
     CLIPBOARD_AVAILABLE = True
 except ImportError:
     CLIPBOARD_AVAILABLE = False
-    print("[INFO] Install 'pyperclip' for clipboard support: pip install pyperclip")
-
+    logger.info("[INFO] Install 'pyperclip' for clipboard support: pip install pyperclip")
 try:
     from src.iris import ask_stream, get_device, solve_math, BookRetriever, analyze_image
     IRIS_AVAILABLE = True
 except ImportError:
     IRIS_AVAILABLE = False
-    print("[WARNING] iris.py not found or dependencies missing. Running in rule-only mode.")
-
+    logger.warning("[WARNING] iris.py not found or dependencies missing. Running in rule-only mode.")
 # Model display name — pulled from environment or iris.conf if available
 MLX_MODEL_ID = os.environ.get("IRIS_MODEL_ID", "")
 if not MLX_MODEL_ID:
@@ -231,8 +231,8 @@ def load_config() -> dict:
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
         with open(CONFIG_FILE, "w") as f:
             json.dump(DEFAULT_CONFIG, f, indent=2)
-        print(f"[INFO] Created config template at {CONFIG_FILE}")
-        print("       Edit it with your email credentials and app paths before sending mail.")
+        logger.info(f"[INFO] Created config template at {CONFIG_FILE}")
+        logger.info("       Edit it with your email credentials and app paths before sending mail.")
     with open(CONFIG_FILE) as f:
         return json.load(f)
 
@@ -331,7 +331,7 @@ try:
         else:
             AI_AGENT_SYSTEM_PROMPT = _content
 except Exception as e:
-    print(f"[WARNING] Failed to load training/control.md: {e}")
+    logger.warning(f"[WARNING] Failed to load training/control.md: {e}")
     AI_AGENT_SYSTEM_PROMPT = "You are an AI PC assistant. Please respond with JSON actions."
 
 MAX_SYS_PROMPT_CHARS = 4096
@@ -360,7 +360,7 @@ def _get_agent_system_prompt() -> str:
             _agent_prompt_cache = {"text": text, "mtime": mtime}
         return _agent_prompt_cache["text"]
     except Exception as e:
-        print(f"[ERROR] Failed to load or truncate system prompt: {e}")
+        logger.warning(f"[ERROR] Failed to load or truncate system prompt: {e}")
         return AI_AGENT_SYSTEM_PROMPT
 
 _reply_prefix_cache: dict = {"key": None, "prompt": None}
@@ -783,7 +783,7 @@ def handle_search_image_web(image_path: str) -> str:
 
         return f"Silently performed reverse image search via Bing.\n\nPage Title: {title}\n\nVisible Page Text Snippet:\n{clean_text[:1000]}"
     except Exception as e:
-        print(f"[Bing Scrape Error] {e}")
+        logger.warning(f"[Bing Scrape Error] {e}")
         pass
 
     return "Silently searched Bing Visual Search, but could not reliably extract the visual match."
@@ -812,7 +812,7 @@ def _launch_app(cmd: str):
             subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
         except Exception as e:
-            print(f"  [ERROR] Could not launch: {e}")
+            logger.warning(f"  [ERROR] Could not launch: {e}")
             return False
 
 def handle_app(match: re.Match, config: dict):
@@ -862,14 +862,14 @@ def _youtube_find_first_video(query: str) -> str | None:
         with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
             html = resp.read().decode("utf-8", errors="replace")
     except (urllib.error.URLError, ssl.SSLError) as e:
-        print(f"  [YouTube] SSL error, retrying without verification: {e}")
+        logger.warning(f"  [YouTube] SSL error, retrying without verification: {e}")
         ctx = ssl._create_unverified_context()
         try:
             req2 = urllib.request.Request(search_url, headers=headers)
             with urllib.request.urlopen(req2, timeout=8, context=ctx) as resp2:
                 html = resp2.read().decode("utf-8", errors="replace")
         except Exception as e2:
-            print(f"  [YouTube search error] {e2}")
+            logger.warning(f"  [YouTube search error] {e2}")
             return None
     video_ids = re.findall(r'"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"', html)
     if video_ids:
@@ -900,14 +900,14 @@ def _youtube_find_channel(query: str) -> str | None:
         with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
             html = resp.read().decode("utf-8", errors="replace")
     except (urllib.error.URLError, ssl.SSLError) as e:
-        print(f"  [YouTube] SSL error, retrying without verification: {e}")
+        logger.warning(f"  [YouTube] SSL error, retrying without verification: {e}")
         ctx = ssl._create_unverified_context()
         try:
             req2 = urllib.request.Request(search_url, headers=headers)
             with urllib.request.urlopen(req2, timeout=8, context=ctx) as resp2:
                 html = resp2.read().decode("utf-8", errors="replace")
         except Exception as e2:
-            print(f"  [YouTube channel search error] {e2}")
+            logger.warning(f"  [YouTube channel search error] {e2}")
             return None
     channel_ids = re.findall(r'"channelId"\s*:\s*"(UC[a-zA-Z0-9_-]{22})"', html)
     if channel_ids:
@@ -970,7 +970,7 @@ def _interactive_email_build(config: dict) -> dict | None:
         console.print("\n[bold cyan]── Compose Email ──────────────────────────────[/bold cyan]")
         raw_to = Prompt.ask("  [bold yellow]To (name or email)[/bold yellow]").strip()
     else:
-        print("\n  ── Compose Email ──────────────────────────────")
+        logger.info("\n  ── Compose Email ──────────────────────────────")
         raw_to = input("  To (name or email): ").strip()
 
     if not raw_to:
@@ -981,7 +981,7 @@ def _interactive_email_build(config: dict) -> dict | None:
             console.print(f"  [red][!] '{raw_to}' not found in contacts and doesn't look like an email.[/red]")
             to_addr = Prompt.ask("  [bold yellow]Enter full email address[/bold yellow]").strip()
         else:
-            print(f"  [!] '{raw_to}' not found in contacts and doesn't look like an email.")
+            logger.info(f"  [!] '{raw_to}' not found in contacts and doesn't look like an email.")
             to_addr = input("  Enter full email address: ").strip()
         if not to_addr:
             return None
@@ -991,8 +991,7 @@ def _interactive_email_build(config: dict) -> dict | None:
         console.print("  [bold yellow]Body[/bold yellow] (type [bold green]END[/bold green] on a new line to finish):")
     else:
         subject = input("  Subject: ").strip() or "(no subject)"
-        print("  Body (type END on a new line to finish):")
-
+        logger.info("  Body (type END on a new line to finish):")
     lines = []
     while True:
         if RICH_AVAILABLE:
@@ -1058,7 +1057,7 @@ def handle_email_from_parts(to_raw: str, subject: str, body: str, config: dict) 
                 if RICH_AVAILABLE:
                     console.print("  [bold yellow]Body[/bold yellow] (type [bold green]END[/bold green] on a new line to finish):")
                 else:
-                    print("  Body (type END on a new line to finish):")
+                    logger.info("  Body (type END on a new line to finish):")
                 lines = []
                 while True:
                     if RICH_AVAILABLE:
@@ -1080,10 +1079,10 @@ def handle_email_from_parts(to_raw: str, subject: str, body: str, config: dict) 
             console.print(f"  [bold yellow]Body:[/bold yellow]\n{body}\n")
             confirm = Prompt.ask("  [bold green]Send?[/bold green]", choices=["y", "n"], default="n").strip().lower()
         else:
-            print(f"\n  ── Preview ─────────────────────────────────")
-            print(f"  To:      {to_addr}")
-            print(f"  Subject: {subject}")
-            print(f"  Body:\n{body}\n")
+            logger.info(f"\n  ── Preview ─────────────────────────────────")
+            logger.info(f"  To:      {to_addr}")
+            logger.info(f"  Subject: {subject}")
+            logger.info(f"  Body:\n{body}\n")
             confirm = input("  Send? [y/N]: ").strip().lower()
         if confirm != "y":
             return "Email cancelled."
@@ -1838,8 +1837,7 @@ def log_action(action_type: str, message: str):
     if RICH_AVAILABLE:
         console.print(f"  [dim]❯[/dim] {prefix}: {message}")
     else:
-        print(f"  [→ {action_type.capitalize()}] {message}")
-
+        logger.info(f"  [→ {action_type.capitalize()}] {message}")
 def print_banner():
     banner_text = r"""
   _____  _____   _____   _____             _____ 
@@ -1855,11 +1853,10 @@ def print_banner():
         console.print(Align.center(Text("Natural-language control of your computer, powered by Iris", style="italic green")))
         console.print()
     else:
-        print("=" * 60)
-        print("  Iris AI PC Agent (RAG Enabled)")
-        print("  Type 'help' for commands, 'quit' to exit.")
-        print("=" * 60)
-
+        logger.info("=" * 60)
+        logger.info("  Iris AI PC Agent (RAG Enabled)")
+        logger.info("  Type 'help' for commands, 'quit' to exit.")
+        logger.info("=" * 60)
 def print_system_status(model=None, retriever=None):
     if not RICH_AVAILABLE:
         return
@@ -2088,7 +2085,7 @@ SLASH_COMMANDS = {
 
 def show_help_menu():
     if not RICH_AVAILABLE:
-        print(HELP_TEXT)
+        logger.info(HELP_TEXT)
         return
     table = Table(title="Iris CLI Commands", box=ROUNDED, border_style="cyan")
     table.add_column("Command", style="bold yellow")
@@ -2163,7 +2160,7 @@ def show_detailed_status(model, tokenizer, retriever):
 
 def show_config():
     if not RICH_AVAILABLE:
-        print(load_config())
+        logger.info(load_config())
         return
     config = load_config()
     config_str = json.dumps(config, indent=2)
@@ -2348,8 +2345,7 @@ def main():
         if RICH_AVAILABLE:
             console.print("[bold yellow]Loading Iris LLM Core...[/bold yellow]")
         else:
-            print("[INFO] Loading Iris LLM Core...")
-            
+            logger.info("[INFO] Loading Iris LLM Core...")
         model, tokenizer, device = load_iris_model()
 
         retriever = None
@@ -2362,13 +2358,12 @@ def main():
                 except Exception as e:
                     console.print(f"[red][WARNING] Failed to load RAG: {e}[/red]")
             else:
-                print("[INFO] Initializing RAG Knowledge Base...")
+                logger.info("[INFO] Initializing RAG Knowledge Base...")
                 try:
                     retriever = BookRetriever(raw_data_dir="raw_data")
                     retriever.load_and_index()
                 except Exception as e:
-                    print(f"[WARNING] Failed to load RAG: {e}")
-
+                    logger.warning(f"[WARNING] Failed to load RAG: {e}")
         history: list = []
 
         while True:
@@ -2429,7 +2424,7 @@ def main():
                         console.print(f"[red]Unknown command: {cmd}. Type /help for assistance.[/red]")
                         console.input("\nPress Enter to return to chat...")
                     else:
-                        print(f"Unknown command: {cmd}")
+                        logger.info(f"Unknown command: {cmd}")
                     continue
 
             try:
@@ -2452,23 +2447,20 @@ def main():
                         if RICH_AVAILABLE:
                             draw_layout(model, tokenizer, retriever, display_history, status_text=status_text)
                         else:
-                            print(f"[{status_text}]")
-                            
+                            logger.info(f"[{status_text}]")
                     elif ev_type == "token":
                         reply_parts.append(content)
                         display_history[-1]["content"] = "".join(reply_parts)
                         if RICH_AVAILABLE:
                             draw_layout(model, tokenizer, retriever, display_history, status_text="Responding...")
                         else:
-                            print(content, end="", flush=True)
-                            
+                            logger.info(content, end="", flush=True)
                     elif ev_type == "action_result":
                         display_history.insert(-1, {"role": "assistant", "content": f"Running action returned:\n{content.strip()}"})
                         if RICH_AVAILABLE:
                             draw_layout(model, tokenizer, retriever, display_history, status_text="Executing action...")
                         else:
-                            print(f"\n[Action Output]\n{content}")
-                            
+                            logger.info(f"\n[Action Output]\n{content}")
                     elif ev_type == "raw_response":
                         final_reply = content
                             
@@ -2482,13 +2474,12 @@ def main():
                     console.print(f"[red]Error: {e}[/red]")
                     console.input("\nPress Enter to return to chat...")
                 else:
-                    print(f"Error: {e}")
+                    logger.warning(f"Error: {e}")
     finally:
         if RICH_AVAILABLE:
             sys.stdout.write("\033[?1049l")
             sys.stdout.flush()
-        print("Goodbye!")
-
+        logger.info("Goodbye!")
 def _resolve(path: str):
     """Expand ~ and environment variables, return a Path object."""
     from pathlib import Path

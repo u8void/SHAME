@@ -30,6 +30,7 @@ from src.iris import (
     load_openhermes_reasoning,
     load_math_qa,
     load_code_feedback,
+    load_oasst1_dataset,
 )
 
 SYSTEM_PROMPT = "You are Iris, an intelligent and helpful AI assistant trained to assist the user with their tasks."
@@ -116,6 +117,7 @@ def parse_args():
                         help="Iris AI model size tier (tiny/small/medium/large/max)")
     parser.add_argument("--download-models", "--download-all", action="store_true", dest="download_models",
                         help="Download all models for the selected tier and continue automatically")
+    parser.add_argument("--download-only", action="store_true", help="Download all models for the selected tier and exit without training")
     parser.add_argument("--skip-gguf", action="store_true", help="Skip merge and GGUF conversion")
     parser.add_argument("--resume", action="store_true", help="Resume training from the last successful checkpoint/model")
     
@@ -161,6 +163,7 @@ LOADER_FUNCTIONS = {
     "teknium/OpenHermes-2.5": load_openhermes_reasoning,
     "MBZUAI-Paris/Egyptian-SFT-Mixture": load_mbzuai_egyptian_mixture,
     "islamic-datasets/Istilah_Maliki_Dataset": load_hf_maliki_dataset,
+    "OpenAssistant/oasst1": load_oasst1_dataset,
 }
 
 def load_generic_hf_dataset(path: str, limit: int = None) -> List[Tuple[str, str]]:
@@ -173,7 +176,16 @@ def load_generic_hf_dataset(path: str, limit: int = None) -> List[Tuple[str, str
     import re
     print(f"[DATA] Attempting to load dataset {path} with generic loader...")
     try:
-        ds = load_dataset(path, split="train", streaming=True)
+        try:
+            ds = load_dataset(path, split="train", streaming=True)
+        except Exception as e:
+            if "Bad split" in str(e) or "Unknown split" in str(e):
+                try:
+                    ds = load_dataset(path, split="train_sft", streaming=True)
+                except Exception:
+                    ds = load_dataset(path, split="train_gen", streaming=True)
+            else:
+                raise e
         if limit:
             try:
                 ds = ds.shuffle(buffer_size=10000, seed=42)
@@ -704,6 +716,11 @@ def main():
 
     # Apply size-tier config (overrides ROLE_MODEL_MAP + ROLE_TO_GGUF)
     apply_size_config(args.size)
+
+    if getattr(args, "download_only", False):
+        download_all_models()
+        print("[Pre-Training] Models downloaded successfully. Exiting due to --download-only.")
+        sys.exit(0)
 
     has_downloaded = False
     if getattr(args, "download_models", False):

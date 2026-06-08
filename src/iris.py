@@ -6,6 +6,8 @@ iris.py — Iris AI Base Model with MRA (Multi-Role Architecture)
 total_time_spent = 248 #hours (update after working)
 
 import os
+from .logger import get_logger
+logger = get_logger('iris')
 import re
 import json
 import glob
@@ -26,7 +28,7 @@ try:
     from sentence_transformers import SentenceTransformer, util
     RAG_AVAILABLE = True
 except Exception as e:
-    print(f"[WARNING] RAG disabled due to library error: {e}")
+    logger.warning(f"[WARNING] RAG disabled due to library error: {e}")
     RAG_AVAILABLE = False
 
 try:
@@ -229,7 +231,7 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
     """
     if filename not in _MODEL_SOURCES:
         if not quiet:
-            print(f"[Iris] No download sources known for {filename}")
+            logger.info(f"[Iris] No download sources known for {filename}")
         return False
 
     dest_path = os.path.join(os.path.dirname(_HERE), "models", filename)
@@ -237,12 +239,11 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
 
     if os.path.exists(dest_path) and os.path.getsize(dest_path) > 1024:
         if not quiet:
-            print(f"[Iris] {filename} already present, skipping download")
+            logger.info(f"[Iris] {filename} already present, skipping download")
         return True
 
     if not quiet:
-        print(f"[Iris] Downloading {filename} ...")
-
+        logger.info(f"[Iris] Downloading {filename} ...")
     sources = _MODEL_SOURCES[filename]
     last_error = None
 
@@ -253,18 +254,20 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
         for repo_id, remote_name in sources:
             try:
                 if not quiet:
-                    print(f"  Trying {repo_id}/{remote_name} ...")
+                    logger.info(f"  Trying {repo_id}/{remote_name} ...")
                 start = _time.time()
-                hf_hub_download(
+                downloaded_path = hf_hub_download(
                     repo_id=repo_id,
                     filename=remote_name,
                     local_dir=os.path.join(os.path.dirname(_HERE), "models"),
                     local_dir_use_symlinks=False,
                 )
+                if downloaded_path and os.path.exists(downloaded_path) and os.path.abspath(downloaded_path) != os.path.abspath(dest_path):
+                    os.rename(downloaded_path, dest_path)
                 elapsed = _time.time() - start
                 size_mb = os.path.getsize(dest_path) / (1024 * 1024)
                 if not quiet:
-                    print(f"  Done: {filename} — {size_mb:.0f} MB in {elapsed:.0f}s")
+                    logger.info(f"  Done: {filename} — {size_mb:.0f} MB in {elapsed:.0f}s")
                 return True
             except Exception as e:
                 last_error = str(e)
@@ -273,7 +276,7 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
                 if 'already exists' in last_error.lower():
                     return True
                 if not quiet:
-                    print(f"  Failed: {last_error[:60]}...")
+                    logger.warning(f"  Failed: {last_error[:60]}...")
     except ImportError:
         pass
 
@@ -285,7 +288,7 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
             url = f"https://huggingface.co/{repo_id}/resolve/main/{remote_name}"
             try:
                 if not quiet:
-                    print(f"  Trying direct: {url[:80]}...")
+                    logger.info(f"  Trying direct: {url[:80]}...")
                 start = _time.time()
                 tmp = dest_path + ".part"
                 urllib.request.urlretrieve(url, tmp)
@@ -295,17 +298,17 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
                 elapsed = _time.time() - start
                 size_mb = os.path.getsize(dest_path) / (1024 * 1024)
                 if not quiet:
-                    print(f"  Done: {filename} — {size_mb:.0f} MB in {elapsed:.0f}s")
+                    logger.info(f"  Done: {filename} — {size_mb:.0f} MB in {elapsed:.0f}s")
                 return True
             except Exception as e:
                 last_error = str(e)
                 if not quiet:
-                    print(f"  Failed: {last_error[:60]}...")
+                    logger.warning(f"  Failed: {last_error[:60]}...")
     except Exception:
         pass
 
     if not quiet:
-        print(f"[Iris] Failed to download {filename}: {last_error}")
+        logger.warning(f"[Iris] Failed to download {filename}: {last_error}")
     return False
 
 
@@ -356,7 +359,6 @@ def load_model(role: ModelRole) -> Llama:
         n_ctx_allocation = cfg.get("n_ctx_allocation", "auto")
         if str(n_ctx_allocation).lower() == "auto":
             try:
-                import os
                 # Basic cross-platform RAM calc using os.sysconf if posix
                 if os.name == 'posix':
                     ram_bytes = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
@@ -579,8 +581,12 @@ def _stream_tokens(
     sys_prompt = system_prompt_override if system_prompt_override is not None else _system_prompt_for(role)
     full_messages = [{"role": "system", "content": sys_prompt}] + messages
 
-    R1_OPEN  = "<think>"
-    R1_CLOSE = "</think>"
+    THINK_PAIRS = [
+        ("<think>", "</think>"),
+        ("<|thought_start|>", "<|thought_end|>"),
+        ("<thought>", "</thought>")
+    ]
+    CLOSE_TAG_MAP = {open_tag: close_tag for open_tag, close_tag in THINK_PAIRS}
 
     for loop_idx in range(5):
         stream = llm.create_chat_completion(
@@ -615,7 +621,7 @@ def _stream_tokens(
                 while True:
                     if not in_thinking:
                         found = False
-                        for tag, close in [("<think>", "</think>"), (R1_OPEN, R1_CLOSE)]:
+                        for tag, close in THINK_PAIRS:
                             if tag in buffer:
                                 idx = buffer.index(tag)
                                 if idx > 0:
@@ -629,7 +635,7 @@ def _stream_tokens(
                         if found:
                             continue
                         partial = False
-                        for tag, close in [("<think>", "</think>"), (R1_OPEN, R1_CLOSE)]:
+                        for tag, close in THINK_PAIRS:
                             for i in range(1, len(tag)):
                                 if buffer.endswith(tag[:i]):
                                     before = buffer[:-i]
@@ -648,7 +654,7 @@ def _stream_tokens(
                         buffer = ""
                         break
                     else:
-                        close_tag = "</think>" if thinking_tag == "<think>" else R1_CLOSE
+                        close_tag = CLOSE_TAG_MAP.get(thinking_tag, "</think>")
                         if close_tag in buffer:
                             idx = buffer.index(close_tag)
                             in_thinking = False
@@ -681,7 +687,7 @@ def _stream_tokens(
                 while True:
                     if not in_thinking:
                         found = False
-                        for tag, close in [("<think>", "</think>"), (R1_OPEN, R1_CLOSE)]:
+                        for tag, close in THINK_PAIRS:
                             if tag in buffer:
                                 idx = buffer.index(tag)
                                 if idx > 0:
@@ -695,7 +701,7 @@ def _stream_tokens(
                         if found:
                             continue
                         partial = False
-                        for tag, close in [("<think>", "</think>"), (R1_OPEN, R1_CLOSE)]:
+                        for tag, close in THINK_PAIRS:
                             for i in range(1, len(tag)):
                                 if buffer.endswith(tag[:i]):
                                     before = buffer[:-i]
@@ -714,7 +720,7 @@ def _stream_tokens(
                         buffer = ""
                         break
                     else:
-                        close_tag = "</think>" if thinking_tag == "<think>" else R1_CLOSE
+                        close_tag = CLOSE_TAG_MAP.get(thinking_tag, "</think>")
                         if close_tag in buffer:
                             idx = buffer.index(close_tag)
                             thinking_text = buffer[:idx]
@@ -727,6 +733,10 @@ def _stream_tokens(
                         partial = False
                         for i in range(1, len(close_tag)):
                             if buffer.endswith(close_tag[:i]):
+                                before = buffer[:-i]
+                                if before.strip():
+                                    yield {"type": "thinking", "content": before}
+                                loop_content += before
                                 buffer = buffer[-i:]
                                 partial = True
                                 break
@@ -734,6 +744,7 @@ def _stream_tokens(
                             break
                         if buffer.strip():
                             yield {"type": "thinking", "content": buffer}
+                        loop_content += buffer
                         buffer = ""
                         break
 
@@ -741,7 +752,7 @@ def _stream_tokens(
                 while True:
                     if not in_thinking:
                         found = False
-                        for tag, close in [("<think>", "</think>"), (R1_OPEN, R1_CLOSE)]:
+                        for tag, close in THINK_PAIRS:
                             if tag in buffer:
                                 idx = buffer.index(tag)
                                 if idx > 0:
@@ -756,7 +767,7 @@ def _stream_tokens(
                         if found:
                             continue
                         partial = False
-                        for tag, close in [("<think>", "</think>"), (R1_OPEN, R1_CLOSE)]:
+                        for tag, close in THINK_PAIRS:
                             for i in range(1, len(tag)):
                                 if buffer.endswith(tag[:i]):
                                     before = buffer[:-i]
@@ -775,7 +786,7 @@ def _stream_tokens(
                         buffer = ""
                         break
                     else:
-                        close_tag = "</think>" if thinking_tag == "<think>" else R1_CLOSE
+                        close_tag = CLOSE_TAG_MAP.get(thinking_tag, "</think>")
                         if close_tag in buffer:
                             idx = buffer.index(close_tag)
                             in_thinking = False
@@ -797,12 +808,19 @@ def _stream_tokens(
                 finish_reason = choice["finish_reason"]
 
         if buffer:
-            if in_thinking and think_mode == "show":
+            if think_mode == "hidden" and in_thinking:
+                pass
+            elif think_mode == "status" and in_thinking:
+                pass
+            elif think_mode == "show" and in_thinking:
                 if buffer.strip():
                     yield {"type": "thinking", "content": buffer}
+                loop_content += buffer
             else:
                 yield {"type": "token", "content": buffer}
-            loop_content += buffer
+                loop_content += buffer
+
+        yield {"type": "finish", "reason": finish_reason}
 
         if finish_reason == "length":
             full_messages.append({"role": "assistant", "content": loop_content})
@@ -831,6 +849,27 @@ def ask_stream(
     """
     global _keep_loaded
     _keep_loaded = keep_loaded
+
+    img_match = re.match(r'^\[IMAGE_UPLOADED:\s*(.+?)\]\s*(.*)$', user_query, flags=re.DOTALL)
+    if img_match:
+        image_path = img_match.group(1).strip()
+        prompt = img_match.group(2).strip()
+        if not prompt:
+            prompt = "Describe this image in detail."
+        
+        yield {"type": "status", "content": "Analyzing image with Vision model..."}
+        try:
+            res = analyze_image(image_path, prompt)
+            yield {"type": "token", "content": res}
+            yield {"type": "raw_response", "content": res}
+        except Exception as e:
+            yield {"type": "token", "content": f"Vision analysis failed: {e}"}
+        
+        try:
+            os.unlink(image_path)
+        except Exception:
+            pass
+        return
 
     if force_role is not None:
         if isinstance(force_role, str):
@@ -1233,7 +1272,9 @@ def _run_complex_coding(
     reasoning_prompt = (
         "You are the Iris AI Reasoning Specialist. Analyze the user's coding request "
         "and produce a detailed architecture plan. Consider file structure, algorithms, "
-        "edge cases, and dependencies. Do NOT write code \u2014 only the plan."
+        "edge cases, and dependencies. Do NOT write code \u2014 only the plan. "
+        "Your ENTIRE response MUST be wrapped in <think>...</think> tags. "
+        "Do NOT output any final answer outside of the <think> tags."
     )
     if context:
         reasoning_prompt = f"REFERENCE EXCERPT:\n{context}\n\n{reasoning_prompt}"
@@ -1241,9 +1282,9 @@ def _run_complex_coding(
     reasoning_msgs = [{"role": "system", "content": reasoning_prompt}] + optimized
 
     raw_reasoning = ""
-    for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=3072, temperature=0.6, think_mode="show"):
+    for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="pass"):
         yield ev
-        if ev["type"] == "token":
+        if ev["type"] in ("token", "thinking"):
             raw_reasoning += ev["content"]
     if not _keep_loaded:
         unload_model()
@@ -1251,10 +1292,11 @@ def _run_complex_coding(
     yield {"type": "status", "content": "Stage 2 \u2014 Writing code..."}
     code_msgs = optimized[:-1] + [
         {"role": "user",
-         "content": f"User Query: {user_query}\n\nArchitecture/Plan:\n{raw_reasoning[-8000:]}\n\nWrite the complete code."}
+         "content": f"User Query: {user_query}\n\nArchitecture/Plan:\n{raw_reasoning[-8000:]}\n\nWrite the complete code based on the plan. You MUST wrap your internal thought process inside <think>...</think> tags. After thinking, enclose all final code inside proper ``` language blocks."}
     ]
-    full_code = ""
-    for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=3072, temperature=0.2, think_mode="hide"):
+    yield {"type": "token", "content": "<coding>\n"}
+    full_code = "<coding>\n"
+    for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.2, think_mode="pass"):
         yield ev
         if ev["type"] == "token":
             full_code += ev["content"]
@@ -1268,10 +1310,10 @@ def _run_complex_coding(
         {"role": "assistant", "content": full_code},
         {"role": "user",
          "content": "Review the above code. Fix all syntax errors, logical bugs, edge cases, "
-         "and ensure it compiles/works correctly. Return the final corrected code inside a ```python``` block, followed by a brief explanation."}
+         "and ensure it compiles/works correctly. You MUST wrap your internal code review thought process inside <think>...</think> tags. Return the final corrected code inside a ```python``` block, followed by a brief explanation."}
     ]
     final_output = ""
-    for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=3072, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+    for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=3072, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
         yield ev
         if ev["type"] == "token":
             final_output += ev["content"]
@@ -1291,7 +1333,7 @@ def _run_complex_coding(
              "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code inside a ```python``` block."}
         ]
         corrected = ""
-        for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=3072, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+        for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=3072, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
             yield ev
             if ev["type"] == "token":
                 corrected += ev["content"]
@@ -1360,15 +1402,15 @@ class BookRetriever:
 
     def load_and_index(self):
         if not RAG_AVAILABLE:
-            print("[RAG] sentence-transformers not installed. RAG disabled.")
+            logger.info("[RAG] sentence-transformers not installed. RAG disabled.")
             return
 
         if not os.path.exists(self.raw_data_dir):
             os.makedirs(self.raw_data_dir, exist_ok=True)
-            print(f"[RAG] Created {self.raw_data_dir}/. Drop markdown/txt files here.")
+            logger.info(f"[RAG] Created {self.raw_data_dir}/. Drop markdown/txt files here.")
             return
 
-        print("[RAG] Loading embedding model (all-MiniLM-L6-v2)...")
+        logger.info("[RAG] Loading embedding model (all-MiniLM-L6-v2)...")
         self.embedder = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
 
         file_entries: list = []
@@ -1392,12 +1434,11 @@ class BookRetriever:
         file_entries = unique_entries
 
         if not file_entries:
-            print("[RAG] No text found in raw_data/. Skipping index creation.")
+            logger.info("[RAG] No text found in raw_data/. Skipping index creation.")
             return
 
         categories_found = sorted({c for _, c in file_entries})
-        print(f"[RAG] Found {len(file_entries)} files across categories: {categories_found}")
-
+        logger.info(f"[RAG] Found {len(file_entries)} files across categories: {categories_found}")
         cache_key = self._cache_key(file_entries)
         cache_file = self._cache_path()
         if os.path.exists(cache_file):
@@ -1408,13 +1449,12 @@ class BookRetriever:
                     self.chunks = cached["chunks"]
                     self.embeddings = cached["embeddings"]
                     self._cat_index = cached["cat_index"]
-                    print(f"[RAG] Loaded {len(self.chunks)} chunks from disk cache (skipped re-encode).")
+                    logger.info(f"[RAG] Loaded {len(self.chunks)} chunks from disk cache (skipped re-encode).")
                     return
                 else:
-                    print("[RAG] Cache stale (files changed) \u2014 rebuilding index.")
+                    logger.info("[RAG] Cache stale (files changed) \u2014 rebuilding index.")
             except Exception as e:
-                print(f"[RAG] Cache load failed ({e}) \u2014 rebuilding index.")
-
+                logger.info(f"[RAG] Cache load failed ({e}) \u2014 rebuilding index.")
         self.chunks = []
         self._cat_index = {}
 
@@ -1423,7 +1463,7 @@ class BookRetriever:
                 with open(path, "r", encoding="utf-8") as f:
                     raw_text = f.read()
             except Exception as e:
-                print(f"[RAG] Could not read {path}: {e}")
+                logger.warning(f"[RAG] Could not read {path}: {e}")
                 continue
 
             paragraphs = re.split(r'\n\s*\n', raw_text)
@@ -1441,7 +1481,7 @@ class BookRetriever:
                 self._add_chunk(current_chunk.strip(), path, category)
 
         if not self.chunks:
-            print("[RAG] No chunks created. Check that files contain text.")
+            logger.info("[RAG] No chunks created. Check that files contain text.")
             return
 
         for idx, chunk in enumerate(self.chunks):
@@ -1449,12 +1489,10 @@ class BookRetriever:
             self._cat_index.setdefault(cat, []).append(idx)
 
         cat_summary = {c: len(v) for c, v in self._cat_index.items()}
-        print(f"[RAG] {len(self.chunks)} chunks indexed. Distribution: {cat_summary}")
-
+        logger.info(f"[RAG] {len(self.chunks)} chunks indexed. Distribution: {cat_summary}")
         chunk_texts = [c["text"] for c in self.chunks]
         self.embeddings = self.embedder.encode(chunk_texts, convert_to_tensor=True)
-        print("[RAG] Indexing complete!")
-
+        logger.info("[RAG] Indexing complete!")
         try:
             with open(cache_file, "wb") as f:
                 pickle.dump({
@@ -1463,10 +1501,9 @@ class BookRetriever:
                     "embeddings": self.embeddings,
                     "cat_index":  self._cat_index,
                 }, f)
-            print(f"[RAG] Index cached to {cache_file} \u2014 future startups will be instant.")
+            logger.info(f"[RAG] Index cached to {cache_file} \u2014 future startups will be instant.")
         except Exception as e:
-            print(f"[RAG] Could not save cache ({e}) \u2014 index will rebuild next time.")
-
+            logger.warning(f"[RAG] Could not save cache ({e}) \u2014 index will rebuild next time.")
     def _add_chunk(self, text: str, source_file: str, category: str) -> None:
         self.chunks.append({"text": text, "source_file": source_file, "category": category})
 
@@ -1484,7 +1521,7 @@ class BookRetriever:
                 pool = pool + [i for i in fallback if i not in set(pool)]
             if len(pool) < max(1, top_k):
                 pool = list(range(len(self.chunks)))
-                print(f"[RAG] Category '{category}' sparse; using full index.")
+                logger.info(f"[RAG] Category '{category}' sparse; using full index.")
             candidate_indices = pool
 
         if candidate_indices is not None:
@@ -1560,7 +1597,7 @@ def solve_math(user_text: str) -> Optional[str]:
 def load_blended_skill_talk(subset_size=None):
     if not DATASETS_AVAILABLE: return []
     try:
-        ds = load_dataset("blended_skill_talk", split="train", trust_remote_code=True, streaming=True)
+        ds = load_dataset("blended_skill_talk", split="train", streaming=True)
         if subset_size:
             try: ds = ds.shuffle(buffer_size=10000, seed=42)
             except Exception: pass
@@ -1580,7 +1617,7 @@ def load_blended_skill_talk(subset_size=None):
 def load_daily_dialog(subset_size=None):
     if not DATASETS_AVAILABLE: return []
     try:
-        ds = load_dataset("daily_dialog", split="train", trust_remote_code=True, streaming=True)
+        ds = load_dataset("daily_dialog", split="train", streaming=True)
         if subset_size:
             try: ds = ds.shuffle(buffer_size=10000, seed=42)
             except Exception: pass
@@ -1635,7 +1672,7 @@ def load_markdown_files(md_dir="md", pattern="*.md"):
 def load_mbzuai_egyptian_mixture(subset_size=None):
     if not DATASETS_AVAILABLE: return []
     try:
-        ds = load_dataset("MBZUAI-Paris/Egyptian-SFT-Mixture", split="train", streaming=True, trust_remote_code=True)
+        ds = load_dataset("MBZUAI-Paris/Egyptian-SFT-Mixture", split="train", streaming=True)
         if subset_size:
             try: ds = ds.shuffle(buffer_size=10000, seed=42)
             except Exception: pass
@@ -1649,10 +1686,35 @@ def load_mbzuai_egyptian_mixture(subset_size=None):
     except Exception: return []
 
 
+def load_oasst1_dataset(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        ds = load_dataset("OpenAssistant/oasst1", split="train", streaming=False)
+        pairs = []
+        messages = {}
+        for row in ds:
+            messages[row["message_id"]] = row
+            
+        for row in ds:
+            if row["role"] == "assistant" and row.get("parent_id") in messages:
+                parent = messages[row["parent_id"]]
+                if parent["role"] == "prompter":
+                    pairs.append((parent["text"].strip(), row["text"].strip()))
+                    
+        import random
+        random.shuffle(pairs)
+        if subset_size:
+            pairs = pairs[:subset_size]
+        return pairs
+    except Exception as e: 
+        print(f"[WARNING] OASST1 load error: {e}")
+        return []
+
+
 def load_hf_maliki_dataset(subset_size=None):
     if not DATASETS_AVAILABLE: return []
     try:
-        ds = load_dataset("islamic-datasets/Istilah_Maliki_Dataset", split="train", streaming=True, trust_remote_code=True)
+        ds = load_dataset("islamic-datasets/Istilah_Maliki_Dataset", split="train", streaming=True)
         if subset_size:
             try: ds = ds.shuffle(buffer_size=10000, seed=42)
             except Exception: pass
@@ -1878,41 +1940,66 @@ def _load_vision_model():
         vision_path = os.path.join(models_dir, vision_file)
         clip_path = os.path.join(models_dir, clip_file)
 
-        if os.path.exists(vision_path) and os.path.exists(clip_path):
-            print(f"[Vision] Loading GGUF vision model: {vision_file} with {clip_file}...")
+        if os.path.exists(vision_path):
+            logger.info(f"[Vision] Loading GGUF vision model: {vision_file}...")
             try:
-                from llama_cpp.llama_chat_format import Llava15ChatHandler
                 n_gpu_layers = cfg.get("n_gpu_layers", -1)
                 n_threads = cfg.get("n_threads", 8)
-                chat_handler = Llava15ChatHandler(clip_model_path=clip_path, verbose=False)
-                model = Llama(
-                    model_path=vision_path,
-                    chat_handler=chat_handler,
-                    n_ctx=ROLE_CTX.get(ModelRole.VISION, 4096),
-                    n_gpu_layers=n_gpu_layers,
-                    n_threads=n_threads,
-                    flash_attn=True,
-                    type_k=getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
-                    type_v=getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
-                    verbose=False,
-                )
+                
+                chat_handler = None
+                if clip_file and os.path.exists(clip_path):
+                    logger.info(f"[Vision] Found clip projector: {clip_file}")
+                    from llama_cpp.llama_chat_format import Llava15ChatHandler
+                    chat_handler = Llava15ChatHandler(clip_model_path=clip_path, verbose=False)
+                
+                # If no chat_handler is provided, llama.cpp handles native architectures like qwen2vl automatically
+                model_kwargs = {
+                    "model_path": vision_path,
+                    "n_ctx": ROLE_CTX.get(ModelRole.VISION, 4096),
+                    "n_gpu_layers": n_gpu_layers,
+                    "n_threads": n_threads,
+                    "flash_attn": True,
+                    "type_k": getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
+                    "type_v": getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
+                    "verbose": False,
+                }
+                if chat_handler:
+                    model_kwargs["chat_handler"] = chat_handler
+                    
+                model = Llama(**model_kwargs)
                 _vision_cache = {"model": model, "backend": "gguf"}
-                print("[Vision] GGUF vision model ready.")
+                logger.info("[Vision] GGUF vision model ready.")
                 return _vision_cache
             except Exception as e:
-                print(f"[Vision] GGUF VLM load failed: {e}. Falling back to MLX...")
-
+                logger.info(f"[Vision] GGUF VLM load failed: {e}. Falling back to MLX...")
         try:
             from mlx_vlm import load as vlm_load
             from mlx_vlm.utils import load_config as vlm_load_config
-            print(f"[Vision] Loading MLX vision model: {_MLX_VISION_ID}...")
-            model, processor = vlm_load(_MLX_VISION_ID)
-            config = vlm_load_config(_MLX_VISION_ID)
+            
+            mlx_repo = "mlx-community/Qwen2-VL-7B-Instruct-4bit"
+            try:
+                active_size = cfg.get("size", "tiny")
+                size_path = os.path.join(os.path.dirname(CONFIG_PATH), "sizes", f"{active_size}.json")
+                if os.path.exists(size_path):
+                    with open(size_path) as f:
+                        size_cfg = json.load(f)
+                    size_vision = size_cfg.get("models", {}).get("vision")
+                    if size_vision:
+                        mlx_repo = size_vision
+            except Exception:
+                pass
+
+            if os.path.exists(_MLX_VISION_ID):
+                mlx_repo = _MLX_VISION_ID
+                
+            logger.info(f"[Vision] Loading MLX vision model: {mlx_repo}...")
+            model, processor = vlm_load(mlx_repo)
+            config = vlm_load_config(mlx_repo)
             _vision_cache = {"model": model, "processor": processor, "config": config, "backend": "mlx"}
-            print("[Vision] MLX vision model ready.")
+            logger.info("[Vision] MLX vision model ready.")
             return _vision_cache
         except Exception as e:
-            print(f"[Vision] MLX VLM load failed: {e}")
+            logger.info(f"[Vision] MLX VLM load failed: {e}")
             return {}
 
 
@@ -1933,9 +2020,7 @@ def unload_vision_model() -> None:
                 pass
         gc.collect()
         if backend:
-            print(f"[Vision] Vision model ({backend}) unloaded \u2014 unified memory reclaimed.")
-
-
+            logger.info(f"[Vision] Vision model ({backend}) unloaded \u2014 unified memory reclaimed.")
 def analyze_image(
     image_path: str,
     prompt: str = "Describe this image in detail.",

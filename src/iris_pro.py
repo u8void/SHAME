@@ -608,6 +608,33 @@ async def ask_stream(
     workspace_root: str = ""
 ) -> AsyncGenerator[dict[str, Any], None]:
     hops: list[HopResult] = []
+    
+    img_match = re.match(r'^\[IMAGE_UPLOADED:\s*(.+?)\]\s*(.*)$', user_query, flags=re.DOTALL)
+    if img_match:
+        from src.iris import analyze_image
+        import os
+        
+        image_path = img_match.group(1).strip()
+        prompt = img_match.group(2).strip()
+        if not prompt:
+            prompt = "Describe this image in detail."
+        
+        yield {"type": "status", "content": "Analyzing image with local Vision model..."}
+        try:
+            # Note: Because this is async context, we run the blocking analyze_image directly 
+            # since it's an isolated operation, or we could run it in a thread. 
+            # For simplicity, running it directly is fine as the vision model runs fast.
+            res = analyze_image(image_path, prompt)
+            yield {"type": "token", "content": res}
+        except Exception as e:
+            yield {"type": "token", "content": f"Vision analysis failed: {e}"}
+            
+        try:
+            os.unlink(image_path)
+        except Exception:
+            pass
+        return
+
     is_continuation = is_continuation_query(user_query, history)
     
     async with OpenRouterClient() as client:

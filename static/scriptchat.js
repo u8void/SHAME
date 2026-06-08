@@ -218,16 +218,16 @@ document.addEventListener("DOMContentLoaded", () => {
         if (el) el.remove();
     }
 
-    function formatMessage(text) {
+    function formatMessage(text, isStreaming = false) {
         if (!text) return '';
 
         // Strip leading special tokens/headers that sometimes leak from certain models
         let formatted = text.replace(/^(\s|<\|endoftext\|>|<\|im_start\|>assistant<\|im_sep\|>|<\|im_end\|>)+/gi, '');
 
-        return _formatRefined(formatted);
+        return _formatRefined(formatted, isStreaming);
     }
 
-    function _formatRefined(text) {
+    function _formatRefined(text, isStreaming = false) {
         if (!text) return '';
         const blocks = [];
 
@@ -235,6 +235,18 @@ document.addEventListener("DOMContentLoaded", () => {
         let work = text.replace(/<think>([\s\S]*?)(?:<\/think>|$)/gi, (match, p1) => {
             const id = `@@@THOUGHT_${blocks.length}@@@`;
             blocks.push({ type: 'thought', content: p1.trim() });
+            return id;
+        });
+
+        work = work.replace(/<coding>([\s\S]*?)(?:<\/coding>|$)/gi, (match, p1) => {
+            const id = `@@@CODING_${blocks.length}@@@`;
+            blocks.push({ type: 'coding', content: p1.trim() });
+            return id;
+        });
+
+        work = work.replace(/<review>([\s\S]*?)(?:<\/review>|$)/gi, (match, p1) => {
+            const id = `@@@REVIEW_${blocks.length}@@@`;
+            blocks.push({ type: 'review', content: p1.trim() });
             return id;
         });
 
@@ -328,8 +340,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (codeIndex !== -1) {
                     blocks[codeIndex].claimed  = true;
                     blocks[codeIndex].hidden   = true;
-                    blocks[codeIndex].autoCard = false; // explicit tag takes over
-                    fileCardId = 'fc_' + Math.random().toString(36).substr(2, 9);
+                    if (isStreaming) {
+                        fileCardId = 'fc_stream_' + codeIndex;
+                    } else {
+                        let hash = 0;
+                        const c = blocks[codeIndex].content;
+                        for (let i = 0; i < c.length; i++) hash = Math.imul(31, hash) + c.charCodeAt(i) | 0;
+                        fileCardId = 'fc_static_' + hash;
+                    }
                     window.fileCardCache = window.fileCardCache || {};
                     window.fileCardCache[fileCardId] = blocks[codeIndex].content;
                 }
@@ -352,19 +370,53 @@ document.addEventListener("DOMContentLoaded", () => {
             work = work.replace(/\n/g, '<br>');
         }
 
-        // 5. Re-inject blocks
+        // 5. Re-inject blocks recursively
+        const blockHtmlMap = {};
         blocks.forEach((block, index) => {
             let id, html;
             if (block.type === 'thought') {
                 id = `@@@THOUGHT_${index}@@@`;
                 html = `
-                    <div class="thought-wrapper">
+                    <div class="thought-wrapper expanded">
                         <div class="thought-header" onclick="this.parentElement.classList.toggle('expanded')">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                            <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
                             <span>Thought Process</span>
-                            <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
                         </div>
                         <div class="thought-content">${escapeHtml(block.content).replace(/\n/g, '<br>')}</div>
+                    </div>
+                `;
+            } else if (block.type === 'coding') {
+                id = `@@@CODING_${index}@@@`;
+                let inner = '';
+                if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+                    inner = DOMPurify.sanitize(marked.parse(block.content, { breaks: true, gfm: true })).replace(/<p>(@@@[A-Z_0-9]+@@@)<\/p>/g, '$1');
+                } else {
+                    inner = escapeHtml(block.content).replace(/\n/g, '<br>');
+                }
+                html = `
+                    <div class="thought-wrapper expanded">
+                        <div class="thought-header" onclick="this.parentElement.classList.toggle('expanded')">
+                            <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                            <span>Writing Code</span>
+                        </div>
+                        <div class="thought-content">${inner}</div>
+                    </div>
+                `;
+            } else if (block.type === 'review') {
+                id = `@@@REVIEW_${index}@@@`;
+                let inner = '';
+                if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+                    inner = DOMPurify.sanitize(marked.parse(block.content, { breaks: true, gfm: true })).replace(/<p>(@@@[A-Z_0-9]+@@@)<\/p>/g, '$1');
+                } else {
+                    inner = escapeHtml(block.content).replace(/\n/g, '<br>');
+                }
+                html = `
+                    <div class="thought-wrapper expanded">
+                        <div class="thought-header" onclick="this.parentElement.classList.toggle('expanded')">
+                            <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                            <span>Code Review</span>
+                        </div>
+                        <div class="thought-content">${inner}</div>
                     </div>
                 `;
             } else if (block.type === 'action') {
@@ -432,7 +484,15 @@ document.addEventListener("DOMContentLoaded", () => {
                         const autoLang = block.lang || 'code';
                         const ext      = normaliseExt(autoLang);
                         const autoFilename = `generated_code.${ext}`;
-                        const fcId     = 'fc_' + Math.random().toString(36).substr(2, 9);
+                        let fcId;
+                        if (isStreaming) {
+                            fcId = 'fc_stream_' + index;
+                        } else {
+                            let hash = 0;
+                            const c = block.content;
+                            for (let i = 0; i < c.length; i++) hash = Math.imul(31, hash) + c.charCodeAt(i) | 0;
+                            fcId = 'fc_static_' + hash;
+                        }
                         window.fileCardCache = window.fileCardCache || {};
                         window.fileCardCache[fcId] = block.content;
                         const safeFilename = escapeHtml(autoFilename);
@@ -501,8 +561,20 @@ document.addEventListener("DOMContentLoaded", () => {
                 id = `@@@${block.type.toUpperCase()}_${index}@@@`;
                 html = '';
             }
-            work = work.replace(id, html);
+            blockHtmlMap[id] = html;
         });
+
+        let previousWork = '';
+        let passCount = 0;
+        while (work !== previousWork && passCount < 10) {
+            previousWork = work;
+            for (const [id, html] of Object.entries(blockHtmlMap)) {
+                if (work.includes(id)) {
+                    work = work.replace(id, html);
+                }
+            }
+            passCount++;
+        }
 
         return work;
     }
@@ -708,8 +780,40 @@ window.downloadCode = (btn, ext) => {
                             aiMessageDiv.style.display = "";
                             firstTokenReceived = true;
                         }
-                        aiContentDiv.innerHTML = formatMessage(currentResponseText);
-                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                        const isAtBottom = chatMessages.scrollHeight - chatMessages.scrollTop <= chatMessages.clientHeight + 50;
+                        aiContentDiv.innerHTML = formatMessage(currentResponseText, true);
+                        if (isAtBottom) {
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        }
+
+                        // Update code viewer if open and streaming
+                        if (window.currentCardEl) {
+                            const activeFcId = window.currentCardEl.dataset.filecardId;
+                            if (activeFcId && activeFcId.startsWith('fc_stream_') && window.fileCardCache && window.fileCardCache[activeFcId]) {
+                                const newCode = window.fileCardCache[activeFcId];
+                                const cvCode = document.getElementById('cvCode');
+                                if (cvCode && cvCode.textContent !== newCode) {
+                                    const escaped = newCode.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                                    cvCode.innerHTML = escaped;
+                                    const lines = newCode.split('\n');
+                                    const gutters = document.getElementById('cvGutters');
+                                    if (gutters && gutters.children.length !== lines.length) {
+                                        gutters.innerHTML = lines.map((_, i) => `<div class="code-viewer-gutter-line">${i + 1}</div>`).join('');
+                                        document.getElementById('cvLineCount').textContent = lines.length;
+                                    }
+                                    document.getElementById('cvCharCount').textContent = newCode.length.toLocaleString();
+                                    
+                                    // Auto-scroll the code viewer body if it was at the bottom
+                                    const cvBody = document.getElementById('cvBody');
+                                    if (cvBody) {
+                                        const isCvAtBottom = cvBody.scrollHeight - cvBody.scrollTop <= cvBody.clientHeight + 50;
+                                        if (isCvAtBottom) {
+                                            cvBody.scrollTop = cvBody.scrollHeight;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     } catch (e) {
                         console.error("Render error:", e);
                     } finally {
