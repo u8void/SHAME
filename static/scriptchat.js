@@ -232,7 +232,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const blocks = [];
 
         // 1. Extract Think Block (Internal)
-        let work = text.replace(/<think>([\s\S]*?)(?:<\/think>|$)/gi, (match, p1) => {
+        let work = text.replace(/(?:<think>|<\|thought_start\|>|<thought>)([\s\S]*?)(?:<\/think>|<\|thought_end\|>|<\/thought>|$)/gi, (match, p1) => {
             const id = `@@@THOUGHT_${blocks.length}@@@`;
             blocks.push({ type: 'thought', content: p1.trim() });
             return id;
@@ -483,7 +483,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     if (block.autoCard && block.content) {
                         const autoLang = block.lang || 'code';
                         const ext      = normaliseExt(autoLang);
-                        const autoFilename = `generated_code.${ext}`;
+                        const autoFilename = window.extractFilenameFromCode ? window.extractFilenameFromCode(block.content, ext) : `snippet.${ext}`;
                         let fcId;
                         if (isStreaming) {
                             fcId = 'fc_stream_' + index;
@@ -578,11 +578,27 @@ document.addEventListener("DOMContentLoaded", () => {
 
         return work;
     }
+window.extractFilenameFromCode = function(code, ext) {
+    if (!code) return 'snippet.' + ext;
+    const lines = code.trim().split('\n').slice(0, 10);
+    for (const line of lines) {
+        const match = line.match(/(?:(?:#|\/\/)\s*|(?:\/\*\s*))([\w-]+\.\w+)(?:\s*\*\/)?/i);
+        if (match && match[1]) return match[1];
+    }
+    const classMatch = code.match(/(?:public\s+)?(?:class|struct|interface)\s+([a-zA-Z0-9_]+)/);
+    if (classMatch && classMatch[1]) return classMatch[1] + '.' + ext;
+    if (code.match(/def\s+main\s*\(/) || code.match(/int\s+main\s*\(/) || code.match(/function\s+main\s*\(/)) return 'main.' + ext;
+    const funcMatch = code.match(/(?:def|function|func)\s+([a-zA-Z0-9_]+)\s*\(/);
+    if (funcMatch && funcMatch[1]) return funcMatch[1] + '.' + ext;
+    return 'snippet.' + ext;
+};
+
 window.downloadCode = (btn, ext) => {
     const container   = btn.closest('.code-container');
     const codeElement = container.querySelector('pre code');
     const text        = codeElement.textContent;
-    triggerDownload('generated_code.' + normaliseExt(ext), text);
+    const filename    = window.extractFilenameFromCode(text, normaliseExt(ext));
+    triggerDownload(filename, text);
 };
 
     window.copyToClipboard = (btn) => {
@@ -837,6 +853,17 @@ window.downloadCode = (btn, ext) => {
                     try {
                         const event = JSON.parse(jsonStr);
                         if (event.type === "token" || event.type === "text") {
+                            if (window._inThinkingStream) {
+                                currentResponseText += "\n</think>\n";
+                                window._inThinkingStream = false;
+                            }
+                            currentResponseText += event.content;
+                            scheduleRender();
+                        } else if (event.type === "thinking") {
+                            if (!window._inThinkingStream) {
+                                currentResponseText += "\n<think>\n";
+                                window._inThinkingStream = true;
+                            }
                             currentResponseText += event.content;
                             scheduleRender();
                         } else if (event.type === "status") {
@@ -862,6 +889,7 @@ window.downloadCode = (btn, ext) => {
                             currentResponseText = "";
                             rawResponseText = "";
                             firstTokenReceived = false;
+                            window._inThinkingStream = false;
                             aiContentDiv.innerHTML = "";
                             aiMessageDiv.style.display = "none";
                             showTypingIndicator();

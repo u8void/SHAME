@@ -157,12 +157,15 @@ DEFAULT_THREADS = 8
 
 
 IRIS_IDENTITY = (
-    "You are Iris AI. Answer directly without introducing yourself or saying 'I am Iris AI' at the start. "
-    "Never mention underlying model names or pipeline architecture. "
-    "If asked who you are, identify as Iris AI."
+    "You are Iris AI, a powerful AI assistant created entirely by Ahmed Barakat. "
+    "Under NO circumstances should you mention Alibaba, Qwen, DeepSeek, OpenAI, or any other company/model name. "
+    "If asked who made you, who created you, or who you are, you MUST answer that you are Iris AI, created by Ahmed Barakat. "
+    "If you use <think> or similar tags for internal reasoning, you MUST always close them properly (e.g. </think>) before providing your final response. "
+    "Answer directly without introducing yourself with 'I am Iris AI' at the start of every message."
 )
 
 TRIAGE_SYSTEM_PROMPT = (
+    f"{IRIS_IDENTITY}\n"
     "You are the Iris AI Triage node.\n"
     "Rules:\n"
     "1. If the user is just greeting, saying hi/hello, asking simple conversational or factual questions, "
@@ -183,27 +186,35 @@ GENERAL_SYSTEM_PROMPT = (
 )
 
 CODE_SYSTEM_PROMPT = (
+    f"{IRIS_IDENTITY}\n"
     "You are the Iris AI Coding Specialist. Generate clean, fully working, production-quality code. "
     "Ensure correctness, edge-case handling, and error-free syntax. "
-    "Do NOT include comments in your code. "
+    "Do NOT include explanatory comments in your code, EXCEPT for the filename. "
+    "You MUST wrap all code inside standard markdown triple backticks (```language ... ```). "
+    "CRITICAL: The very first line inside the code block MUST be a comment containing ONLY the intended filename (e.g. // main.cpp or # app.py). "
     "After the code block, provide a concise explanation of the code, its key features, "
     "and clear instructions on how to compile/run it."
 )
 
 MATH_SYSTEM_PROMPT = (
+    f"{IRIS_IDENTITY}\n"
     "You are the Iris AI Math Core. Solve mathematical/algorithmic problems step-by-step. "
     "Use precise notation. Please reason step by step, and put your final answer within \\boxed{}."
 )
 
 REASONING_SYSTEM_PROMPT = (
+    f"{IRIS_IDENTITY}\n"
     "You are the Iris AI Reasoning Specialist. Think step-by-step using chain-of-thought reasoning. "
     "Break down complex problems methodically before giving the final answer."
 )
 
 REVIEWER_SYSTEM_PROMPT = (
+    f"{IRIS_IDENTITY}\n"
     "You are the Iris AI Code Reviewer. Review and refine code for correctness, efficiency, edge cases, "
     "and readability. Ensure the final output is production-ready. Fix any errors, fill missing logic, "
-    "and optimize where possible. Return the final code and explanation."
+    "and optimize where possible. You MUST wrap your final corrected code inside standard markdown triple backticks. "
+    "CRITICAL: The very first line inside the code block MUST be a comment containing ONLY the intended filename (e.g. // main.cpp or # app.py). "
+    "Return the final code and explanation."
 )
 
 
@@ -389,6 +400,8 @@ def load_model(role: ModelRole) -> Llama:
 
         #print(f"[Iris] Loading {role.value} ({filename}) [ctx={n_ctx}]...")
 
+        draft_model = None
+
         _active_llm = Llama(
             model_path=path,
             n_ctx=n_ctx,
@@ -401,6 +414,7 @@ def load_model(role: ModelRole) -> Llama:
             type_v=getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
             n_batch=1024,
             verbose=False,
+            draft_model=draft_model,
         )
         _active_role = role
         return _active_llm
@@ -560,6 +574,28 @@ def _quality_guard(text: str) -> str:
         r"[^.]*\.?\s*)",
         "", text
     ).strip()
+
+    for open_tag, close_tag in [("<think>", "</think>"), ("<thought>", "</thought>"), ("<|thought_start|>", "<|thought_end|>")]:
+        if open_tag in text:
+            has_close = close_tag in text
+            is_at_end = text.strip().endswith(close_tag)
+            
+            if not has_close or is_at_end:
+                if has_close:
+                    text = text.replace(close_tag, "")
+                    
+                if "\n\n" in text:
+                    parts = text.rsplit("\n\n", 1)
+                else:
+                    parts = text.rsplit("\n", 1)
+                    
+                if len(parts) > 1 and parts[1].strip():
+                    thought = parts[0]
+                    actual = parts[1]
+                    text = f"{thought}\n{close_tag}\n\n{actual}"
+                else:
+                    text += f"\n{close_tag}"
+
     return text or "I'm Iris AI."
 
 
@@ -567,19 +603,63 @@ def _quality_guard(text: str) -> str:
 def _stream_tokens(
     role: ModelRole,
     messages: List[Dict[str, str]],
-    max_tokens: int = 4096,
-    temperature: float = 0.2,
-    think_mode: str = "hide",
+    max_tokens: int = 512,
+    temperature: float = 0.7,
+    think_mode: str = "pass",
     system_prompt_override: Optional[str] = None,
+    settings: Optional[dict] = None
 ) -> Generator[Dict[str, str], None, None]:
-    """Stream tokens from a model with DeepSeek R1-style thinking.
+    global _keep_loaded
 
-    think_mode: "show" = thinking events  "hide" = strip  "status" = spinner  "pass" = through
-    Supports <think>/</think> (Qwen distill and DeepSeek R1).
-    """
+    if not isinstance(messages, list) or not all(isinstance(msg, dict) and "role" in msg and "content" in msg for msg in messages):
+        yield {"type": "token", "content": "\n\n> ❌ **Iris Error:** Invalid messages format passed to generator."}
+        return
+
+    # Check for empty query
+    if not messages or not messages[-1]["content"].strip():
+        yield {"type": "token", "content": "Please enter a valid query."}
+        return
+
     llm = load_model(role)
+    if not llm:
+        yield {"type": "token", "content": f"\n\n> ❌ **Iris Error:** Failed to load model for role `{role.value}`. Check memory or installation."}
+        return
+
     sys_prompt = system_prompt_override if system_prompt_override is not None else _system_prompt_for(role)
     full_messages = [{"role": "system", "content": sys_prompt}] + messages
+
+    cfg = load_generation_config()
+    model_cfg = cfg.get("model_settings", {}).get(role.value, {})
+
+    # Defaults from args or hardcoded
+    actual_temp = temperature
+    rep_penalty = 1.0
+    freq_penalty = 0.05 if role in (ModelRole.CODE, ModelRole.REASONING) else 0.0
+    pres_penalty = 0.05 if role in (ModelRole.CODE, ModelRole.REASONING) else 0.0
+    top_p = 0.9
+    top_k = 40
+
+    # Override with global config
+    actual_temp = cfg.get("temperature", actual_temp)
+    rep_penalty = cfg.get("repetition_penalty", rep_penalty)
+    freq_penalty = cfg.get("frequency_penalty", freq_penalty)
+    pres_penalty = cfg.get("presence_penalty", pres_penalty)
+    top_p = cfg.get("top_p", top_p)
+    top_k = cfg.get("top_k", top_k)
+    max_tokens = max_tokens or cfg.get("max_new_tokens", 4096)
+
+    # Override with model-specific config
+    actual_temp = model_cfg.get("temperature", actual_temp)
+    rep_penalty = model_cfg.get("repetition_penalty", rep_penalty)
+    freq_penalty = model_cfg.get("frequency_penalty", freq_penalty)
+    pres_penalty = model_cfg.get("presence_penalty", pres_penalty)
+    top_p = model_cfg.get("top_p", top_p)
+    top_k = model_cfg.get("top_k", top_k)
+
+    # Override with UI settings (highest priority)
+    if settings:
+        actual_temp = settings.get("temperature", actual_temp)
+        rep_penalty = settings.get("repetition_penalty", rep_penalty)
 
     THINK_PAIRS = [
         ("<think>", "</think>"),
@@ -588,9 +668,20 @@ def _stream_tokens(
     ]
     CLOSE_TAG_MAP = {open_tag: close_tag for open_tag, close_tag in THINK_PAIRS}
 
+    model_name = _get_model_filename(role)
+
     for loop_idx in range(5):
+        logger.info(f"[Model Start] Role: {role.value.upper()} | Model: {model_name}")
         stream = llm.create_chat_completion(
-            messages=full_messages, stream=True, max_tokens=max_tokens, temperature=temperature, repeat_penalty=load_generation_config().get("repetition_penalty", 1.0),
+            messages=full_messages, 
+            stream=True, 
+            max_tokens=max_tokens, 
+            temperature=actual_temp, 
+            repeat_penalty=rep_penalty,
+            frequency_penalty=freq_penalty,
+            presence_penalty=pres_penalty,
+            top_p=top_p,
+            top_k=top_k
         )
         loop_content = ""
         finish_reason = "stop"
@@ -598,6 +689,7 @@ def _stream_tokens(
         thinking_tag = ""
         buffer = ""
         hidden_buffer = ""
+        token_count = 0
 
         for chunk in stream:
             choices = chunk.get("choices", [])
@@ -607,6 +699,8 @@ def _stream_tokens(
             token = choice.get("delta", {}).get("content", "")
             if not token:
                 continue
+            
+            token_count += 1
 
             if think_mode == "pass":
                 yield {"type": "token", "content": token}
@@ -676,11 +770,11 @@ def _stream_tokens(
 
                         if len(hidden_buffer) > 500:
                             think_mode = "pass"
-                            yield {"type": "token", "content": hidden_buffer}
-                            loop_content += hidden_buffer
+                            content_to_yield = f"{thinking_tag}\n{hidden_buffer}" if thinking_tag else hidden_buffer
+                            yield {"type": "token", "content": content_to_yield}
+                            loop_content += content_to_yield
                             hidden_buffer = ""
-                            in_thinking = False
-                            thinking_tag = ""
+                            continue
                         break
 
             elif think_mode == "show":
@@ -807,6 +901,8 @@ def _stream_tokens(
             if "finish_reason" in choice and choice["finish_reason"]:
                 finish_reason = choice["finish_reason"]
 
+        logger.info(f"[Model Finish] Role: {role.value.upper()} | Model: {model_name} | Tokens consumed: {token_count} | Status: {finish_reason}")
+
         if buffer:
             if think_mode == "hidden" and in_thinking:
                 pass
@@ -840,6 +936,7 @@ def ask_stream(
     force_role: Optional[ModelRole] = None,
     show_thinking: bool = True,
     keep_loaded: bool = False,
+    settings: Optional[dict] = None,
 ) -> Generator[Dict[str, str], None, None]:
     """Generate a response using the multi-model routing pipeline.
 
@@ -948,8 +1045,13 @@ def ask_stream(
 
     if task_type is None:
         if direct_answer:
-            yield {"type": "token", "content": direct_answer}
-            yield {"type": "raw_response", "content": direct_answer}
+            with open("/Users/ahmed/Iris-AI/logs/debug_triage.log", "w") as f:
+                f.write(f"RAW DIRECT ANSWER:\n{repr(direct_answer)}\n\n")
+            cleaned = _quality_guard(direct_answer)
+            with open("/Users/ahmed/Iris-AI/logs/debug_triage.log", "a") as f:
+                f.write(f"CLEANED:\n{repr(cleaned)}\n\n")
+            yield {"type": "token", "content": cleaned}
+            yield {"type": "raw_response", "content": cleaned}
         return
 
     yield {"type": "status", "content": f"Task: {task_type.value.upper()}"}
@@ -1034,7 +1136,7 @@ def ask_stream(
     elif task_type == TaskType.CODING_SIMPLE:
         yield {"type": "status", "content": "Writing code..."}
         full = ""
-        for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=3072, temperature=0.2, think_mode="hide"):
+        for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=None, temperature=0.2, think_mode="hide", settings=settings):
             yield ev
             if ev["type"] == "token":
                 full += ev["content"]
@@ -1055,7 +1157,7 @@ def ask_stream(
                  "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code."}
             ]
             corrected = ""
-            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=3072, temperature=0.2, think_mode="hide"):
+            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=None, temperature=0.2, think_mode="hide", settings=settings):
                 yield ev
                 if ev["type"] == "token":
                     corrected += ev["content"]
@@ -1088,7 +1190,7 @@ def ask_stream(
         yield {"type": "raw_response", "content": full}
 
     elif task_type == TaskType.CODING_COMPLEX:
-        yield from _run_complex_coding(user_query, history, optimized, context, retriever)
+        yield from _run_complex_coding(user_query, history, optimized, context, retriever, settings)
 
     if not _keep_loaded:
         unload_model()
@@ -1113,6 +1215,7 @@ def _run_continuation(
     user_query: str,
     history: List[Dict[str, str]],
     retriever,
+    settings=None
 ) -> Generator[Dict[str, str], None, None]:
     """2-stage continuation: CODE → REVIEWER."""
     optimized = [{"role": "user", "content": user_query}]
@@ -1122,7 +1225,7 @@ def _run_continuation(
 
     yield {"type": "status", "content": "Stage 1 \u2014 Continuing code..."}
     full = ""
-    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=3072, temperature=0.2, think_mode="hide"):
+    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=None, temperature=0.2, think_mode="hide", settings=settings):
         yield ev
         if ev["type"] == "token":
             full += ev["content"]
@@ -1138,7 +1241,7 @@ def _run_continuation(
          "Fix errors, fill gaps, ensure consistency. Return the final corrected code inside a ```python``` block, followed by a brief explanation."}
     ]
     reviewed = ""
-    for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=3072, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+    for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=None, temperature=0.2, think_mode="hide", settings=settings, system_prompt_override=REVIEWER_SYSTEM_PROMPT):
         yield ev
         if ev["type"] == "token":
             reviewed += ev["content"]
@@ -1265,6 +1368,7 @@ def _run_complex_coding(
     optimized: List[Dict[str, str]],
     context: str,
     retriever,
+    settings=None
 ) -> Generator[Dict[str, str], None, None]:
     """3-stage pipeline: Reasoning (silent) → Codegen (streamed) → Reviewer (streamed)."""
     yield {"type": "status", "content": "Stage 1 \u2014 Deep reasoning..."}
@@ -1282,7 +1386,7 @@ def _run_complex_coding(
     reasoning_msgs = [{"role": "system", "content": reasoning_prompt}] + optimized
 
     raw_reasoning = ""
-    for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="pass"):
+    for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="pass", settings=settings):
         yield ev
         if ev["type"] in ("token", "thinking"):
             raw_reasoning += ev["content"]
@@ -1296,7 +1400,7 @@ def _run_complex_coding(
     ]
     yield {"type": "token", "content": "<coding>\n"}
     full_code = "<coding>\n"
-    for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.2, think_mode="pass"):
+    for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.2, think_mode="pass", settings=settings):
         yield ev
         if ev["type"] == "token":
             full_code += ev["content"]
@@ -1313,7 +1417,7 @@ def _run_complex_coding(
          "and ensure it compiles/works correctly. You MUST wrap your internal code review thought process inside <think>...</think> tags. Return the final corrected code inside a ```python``` block, followed by a brief explanation."}
     ]
     final_output = ""
-    for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=3072, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+    for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
         yield ev
         if ev["type"] == "token":
             final_output += ev["content"]
@@ -1333,7 +1437,7 @@ def _run_complex_coding(
              "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code inside a ```python``` block."}
         ]
         corrected = ""
-        for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=3072, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+        for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
             yield ev
             if ev["type"] == "token":
                 corrected += ev["content"]

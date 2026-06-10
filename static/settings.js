@@ -9,8 +9,18 @@
     const stabBtns           = document.querySelectorAll('.stab-btn');
     const tabContents        = document.querySelectorAll('.settings-tab-content');
 
-    const trainingSubtabs    = document.querySelectorAll('.training-subtab');
-    const tsubContents       = document.querySelectorAll('.tsub-content');
+    const msFields = {
+        roleSelect        : document.getElementById('modelRoleSelect'),
+        temperature       : document.getElementById('ms_temperature'),
+        top_p             : document.getElementById('ms_top_p'),
+        top_k             : document.getElementById('ms_top_k'),
+        repetition_penalty: document.getElementById('ms_repetition_penalty'),
+        frequency_penalty : document.getElementById('ms_frequency_penalty'),
+        presence_penalty  : document.getElementById('ms_presence_penalty')
+    };
+
+    const saveModelSettingsBtn = document.getElementById('saveModelSettingsBtn');
+    let currentServerConfig = {};
 
     const csFields = {
         max_new_tokens    : document.getElementById('cs_max_new_tokens'),
@@ -24,33 +34,7 @@
 
     const saveChatSettingsBtn = document.getElementById('saveChatSettingsBtn');
 
-    const trFields = {
-        modelNameInput          : document.getElementById('modelNameInput'),
-        checkpointInput         : document.getElementById('checkpointInput'),
-        epochsInput             : document.getElementById('epochsInput'),
-        lrInput                 : document.getElementById('lrInput'),
-        bstSizeInput            : document.getElementById('bstSizeInput'),
-        ddSizeInput             : document.getElementById('ddSizeInput'),
-        mdDirInput              : document.getElementById('mdDirInput'),
-        maxLengthInput          : document.getElementById('maxLengthInput'),
-        batchSizeInput          : document.getElementById('batchSizeInput'),
-        accumInput              : document.getElementById('accumInput'),
-        weightDecayInput        : document.getElementById('weightDecayInput'),
-        warmupRatioInput        : document.getElementById('warmupRatioInput'),
-        sampleMaxNewTokensInput : document.getElementById('sampleMaxNewTokensInput'),
-        deviceInput             : document.getElementById('deviceInput'),
-        resumeInput             : document.getElementById('resumeInput'),
-        keepBestOnlyInput       : document.getElementById('keepBestOnlyInput'),
-        noBstInput              : document.getElementById('noBstInput'),
-        noDdInput               : document.getElementById('noDdInput'),
-        noMdInput               : document.getElementById('noMdInput'),
-    };
 
-    const startTrainingBtn = document.getElementById('startTrainingBtn');
-    const stopTrainingBtn  = document.getElementById('stopTrainingBtn');
-    const trainLogs        = document.getElementById('trainLogs');
-
-    let logInterval = null;
 
     function openSettings() {
         const s = window.getChatSettings ? window.getChatSettings() : {};
@@ -82,16 +66,13 @@
 
         settingsPanel.classList.add('open');
         settingsOverlay.classList.add('visible');
-        refreshTrainingStatus();
+        
+        fetchServerConfig();
     }
 
     function closeSettings() {
         settingsPanel.classList.remove('open');
         settingsOverlay.classList.remove('visible');
-        if (logInterval) {
-            clearInterval(logInterval);
-            logInterval = null;
-        }
     }
 
     settingsBtn?.addEventListener('click', openSettings);
@@ -106,168 +87,76 @@
             btn.classList.add('active');
             document.getElementById(`stab-content-${tab}`)?.classList.add('active');
 
-            if (tab === 'training') {
-                refreshTrainingStatus();
-                fetchLogs();
+            if (tab === 'models') {
+                fetchServerConfig();
             }
         });
     });
 
-    trainingSubtabs.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const tsub = btn.dataset.tsub;
-            trainingSubtabs.forEach(b => b.classList.remove('active'));
-            tsubContents.forEach(c => c.classList.remove('active'));
-            btn.classList.add('active');
-            document.getElementById(`tsub-content-${tsub}`)?.classList.add('active');
-
-            if (tsub === 'logs') fetchLogs();
-        });
-    });
-
-    saveChatSettingsBtn?.addEventListener('click', async () => {
-        const newSettings = {
-            max_new_tokens    : parseInt(csFields.max_new_tokens?.value)     || 200,
-            temperature       : parseFloat(csFields.temperature?.value)      || 0.6,
-            top_p             : parseFloat(csFields.top_p?.value)            || 0.9,
-            top_k             : parseInt(csFields.top_k?.value)              || 40,
-            repetition_penalty: parseFloat(csFields.repetition_penalty?.value) || 1.3,
-            n_ctx_allocation  : ['auto', 4096, 8192, 16384, 32768][parseInt(csFields.n_ctx_allocation?.value)] ?? 'auto',
-            compacting_profile: ['low', 'medium', 'aggressive'][parseInt(csFields.compacting_profile?.value)] ?? 'medium',
-        };
-        if (window.setChatSettings) window.setChatSettings(newSettings);
-        localStorage.setItem('iris_chat_settings', JSON.stringify(newSettings));
-        
+    async function fetchServerConfig() {
         try {
-            await fetch('/save_settings', {
+            const res = await fetch('/get_config');
+            if (!res.ok) return;
+            currentServerConfig = await res.json();
+            populateModelSettings();
+        } catch (e) {
+            console.error("Failed to fetch server config", e);
+        }
+    }
+
+    function populateModelSettings() {
+        const role = msFields.roleSelect?.value;
+        if (!role || !currentServerConfig.model_settings) return;
+
+        const roleSettings = currentServerConfig.model_settings[role] || {};
+
+        msFields.temperature.value = roleSettings.temperature !== undefined ? roleSettings.temperature : -0.01;
+        document.getElementById('val_ms_temperature').innerText = msFields.temperature.value < 0 ? 'Global' : msFields.temperature.value;
+
+        msFields.top_p.value = roleSettings.top_p !== undefined ? roleSettings.top_p : -0.05;
+        document.getElementById('val_ms_top_p').innerText = msFields.top_p.value < 0 ? 'Global' : msFields.top_p.value;
+
+        msFields.top_k.value = roleSettings.top_k !== undefined ? roleSettings.top_k : 0;
+        document.getElementById('val_ms_top_k').innerText = msFields.top_k.value == 0 ? 'Global' : msFields.top_k.value;
+
+        msFields.repetition_penalty.value = roleSettings.repetition_penalty !== undefined ? roleSettings.repetition_penalty : 0.95;
+        document.getElementById('val_ms_repetition_penalty').innerText = msFields.repetition_penalty.value < 1.0 ? 'Global' : msFields.repetition_penalty.value;
+
+        msFields.frequency_penalty.value = roleSettings.frequency_penalty !== undefined ? roleSettings.frequency_penalty : -0.05;
+        document.getElementById('val_ms_frequency_penalty').innerText = msFields.frequency_penalty.value < 0 ? 'Global' : msFields.frequency_penalty.value;
+
+        msFields.presence_penalty.value = roleSettings.presence_penalty !== undefined ? roleSettings.presence_penalty : -0.05;
+        document.getElementById('val_ms_presence_penalty').innerText = msFields.presence_penalty.value < 0 ? 'Global' : msFields.presence_penalty.value;
+    }
+
+    msFields.roleSelect?.addEventListener('change', populateModelSettings);
+
+    saveModelSettingsBtn?.addEventListener('click', async () => {
+        const role = msFields.roleSelect?.value;
+        if (!role) return;
+
+        const newSettings = {};
+        if (parseFloat(msFields.temperature.value) >= 0) newSettings.temperature = parseFloat(msFields.temperature.value);
+        if (parseFloat(msFields.top_p.value) >= 0) newSettings.top_p = parseFloat(msFields.top_p.value);
+        if (parseInt(msFields.top_k.value) > 0) newSettings.top_k = parseInt(msFields.top_k.value);
+        if (parseFloat(msFields.repetition_penalty.value) >= 1.0) newSettings.repetition_penalty = parseFloat(msFields.repetition_penalty.value);
+        if (parseFloat(msFields.frequency_penalty.value) >= 0) newSettings.frequency_penalty = parseFloat(msFields.frequency_penalty.value);
+        if (parseFloat(msFields.presence_penalty.value) >= 0) newSettings.presence_penalty = parseFloat(msFields.presence_penalty.value);
+
+        try {
+            await fetch('/save_model_settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newSettings)
+                body: JSON.stringify({ role: role, settings: newSettings })
             });
+            // Update local config cache
+            if (!currentServerConfig.model_settings) currentServerConfig.model_settings = {};
+            currentServerConfig.model_settings[role] = newSettings;
+            showToast('Model settings saved');
         } catch (e) {
-            console.error("Failed to save settings to server:", e);
+            console.error("Failed to save model settings to server:", e);
         }
-        
-        showToast('Chat settings saved');
     });
-
-    startTrainingBtn?.addEventListener('click', startTraining);
-    stopTrainingBtn?.addEventListener('click', stopTraining);
-
-    async function startTraining() {
-        const params = {
-            model_name             : trFields.modelNameInput?.value          ?? 'microsoft/DialoGPT-medium',
-            checkpoint             : trFields.checkpointInput?.value         ?? 'checkpoints/iris_ai_2b.pt',
-            epochs                 : trFields.epochsInput?.value             ?? 5,
-            lr                     : trFields.lrInput?.value                 ?? '3e-5',
-            bst_size               : trFields.bstSizeInput?.value            ?? 10000,
-            dd_size                : trFields.ddSizeInput?.value             ?? 30000,
-            md_dir                 : trFields.mdDirInput?.value              ?? 'training',
-            max_length             : trFields.maxLengthInput?.value          ?? 128,
-            batch_size             : trFields.batchSizeInput?.value          ?? 4,
-            accum                  : trFields.accumInput?.value              ?? 4,
-            weight_decay           : trFields.weightDecayInput?.value        ?? 0.01,
-            warmup_ratio           : trFields.warmupRatioInput?.value        ?? 0.05,
-            sample_max_new_tokens  : trFields.sampleMaxNewTokensInput?.value ?? 50,
-            device                 : trFields.deviceInput?.value             ?? 'auto',
-            resume                 : trFields.resumeInput?.checked           ?? false,
-            keep_best_only         : trFields.keepBestOnlyInput?.checked     ?? true,
-            no_bst                 : trFields.noBstInput?.checked            ?? false,
-            no_dd                  : trFields.noDdInput?.checked             ?? false,
-            no_md                  : trFields.noMdInput?.checked             ?? false,
-            chat_after_train       : false,
-
-            claude_reasoning       : parseInt(document.getElementById('claudeReasoningInput')?.value) || 0,
-            dolci_think            : parseInt(document.getElementById('dolciThinkInput')?.value) || 0,
-            deepthink              : parseInt(document.getElementById('deepthinkInput')?.value) || 0,
-            openhermes             : parseInt(document.getElementById('openhermesInput')?.value) || 0,
-            orca_math              : parseInt(document.getElementById('orcaMathInput')?.value) || 0,
-            strip_reasoning        : document.getElementById('stripReasoningInput')?.checked || false,
-        };
-
-        if (trainLogs) trainLogs.textContent = 'Starting training…\n';
-        setTrainingRunning(true);
-
-        switchToLogsTab();
-
-        try {
-            const res  = await fetch('/train', {
-                method : 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body   : JSON.stringify(params),
-            });
-            const data = await res.json();
-
-            if (data.status === 'already_running' && trainLogs) {
-                trainLogs.textContent = 'Training already running. Reconnecting to live logs…\n';
-            }
-
-            if (logInterval) clearInterval(logInterval);
-            logInterval = setInterval(fetchLogs, 2000);
-            await fetchLogs();
-            await refreshTrainingStatus();
-        } catch (e) {
-            if (trainLogs) trainLogs.textContent += '\n[ERROR] Could not start training.\n';
-            setTrainingRunning(false);
-        }
-    }
-
-    async function stopTraining() {
-        try {
-            const res  = await fetch('/stop_train', { method: 'POST' });
-            const data = await res.json();
-            if (trainLogs) {
-                trainLogs.textContent += data.status === 'stopped'
-                    ? '\n[INFO] Training stopped by user.\n'
-                    : '\n[INFO] No active training process.\n';
-                trainLogs.scrollTop = trainLogs.scrollHeight;
-            }
-            if (logInterval) { clearInterval(logInterval); logInterval = null; }
-            setTrainingRunning(false);
-        } catch (e) {
-            if (trainLogs) {
-                trainLogs.textContent += '\n[ERROR] Failed to stop training.\n';
-                trainLogs.scrollTop = trainLogs.scrollHeight;
-            }
-        }
-    }
-
-    async function fetchLogs() {
-        try {
-            const res  = await fetch('/train_logs');
-            const data = await res.json();
-            if (trainLogs && typeof data.logs === 'string' && data.logs !== trainLogs.textContent) {
-                trainLogs.textContent = data.logs;
-                trainLogs.scrollTop   = trainLogs.scrollHeight;
-            }
-        } catch (_) {}
-    }
-
-    async function refreshTrainingStatus() {
-        try {
-            const res  = await fetch('/train_status');
-            const data = await res.json();
-            if (data.running) {
-                setTrainingRunning(true);
-                if (!logInterval) logInterval = setInterval(fetchLogs, 2000);
-            } else {
-                setTrainingRunning(false);
-                if (logInterval) { clearInterval(logInterval); logInterval = null; }
-            }
-        } catch (_) {}
-    }
-
-    function setTrainingRunning(running) {
-        if (startTrainingBtn) startTrainingBtn.disabled = running;
-        if (stopTrainingBtn)  stopTrainingBtn.disabled  = !running;
-    }
-
-    function switchToLogsTab() {
-        trainingSubtabs.forEach(b => b.classList.remove('active'));
-        tsubContents.forEach(c => c.classList.remove('active'));
-        document.getElementById('tsub-logs')?.classList.add('active');
-        document.getElementById('tsub-content-logs')?.classList.add('active');
-    }
 
     function showToast(message) {
         const existing = document.getElementById('saveToast');

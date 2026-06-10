@@ -420,6 +420,7 @@ def ai_agent_handle(user_input: str, *args, **kwargs):
         history = kwargs.get("history") or []
 
     force_role = kwargs.get("force_role") or getattr(ai_agent_handle, "force_role", None)
+    settings = kwargs.get("settings", {})
 
     if not force_role:
         math_res = solve_math(user_input)
@@ -428,7 +429,7 @@ def ai_agent_handle(user_input: str, *args, **kwargs):
             return
 
     from src.iris import ask_stream
-    yield from ask_stream(user_input, history, retriever=retriever, force_role=force_role)
+    yield from ask_stream(user_input, history, retriever=retriever, force_role=force_role, settings=settings)
 
 def execute_action_by_dict(action_dict: dict) -> str:
     action = action_dict.get("action", "chat")
@@ -1924,7 +1925,8 @@ def format_assistant_message(content: str):
     
     renderables = []
     if think_content:
-        renderables.append(Text.from_markup(f"[dim]Thinking: {think_content}[/dim]"))
+        from rich.panel import Panel
+        renderables.append(Panel(Text.from_markup(f"[dim]{think_content}[/dim]"), title="[dim]Thinking[/dim]", title_align="left", border_style="dim", style="on #333333"))
         
     main_text = chat_response if chat_response else remaining
     if main_text:
@@ -1945,7 +1947,7 @@ def _render_body_lines(history, cols: int) -> list[str]:
     Returns plain text lines (with ANSI codes stripped for measurement).
     Returns rich-rendered lines for actual printing via a secondary capture.
     """
-    measure_console = Console(color_system=None, width=cols, highlight=False)
+    measure_console = Console(color_system="truecolor", width=cols, highlight=False)
     table = Table(box=None, show_header=False, expand=True)
     table.add_column("Role", style="bold", width=10)
     table.add_column("Message")
@@ -2468,6 +2470,35 @@ def main():
                     final_reply = "".join(reply_parts)
                 history.append({"role": "user", "content": raw})
                 history.append({"role": "assistant", "content": final_reply})
+                
+                # Auto-save code blocks
+                try:
+                    import re, os
+                    code_blocks = re.findall(r'```(\w*)\n([\s\S]*?)```', final_reply)
+                    for i, (lang, code) in enumerate(code_blocks):
+                        filename = None
+                        for line in code.splitlines()[:3]:
+                            m = re.search(r'^\s*(?://|#|/\*|<!--)\s*([a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9]+)', line)
+                            if m:
+                                filename = m.group(1).strip()
+                                break
+                        if not filename:
+                            ext = lang.strip().lower() or "txt"
+                            ext_map = {"python": "py", "javascript": "js", "typescript": "ts", "cpp": "cpp", "c": "c", "java": "java", "html": "html", "css": "css", "bash": "sh", "sh": "sh"}
+                            ext = ext_map.get(ext, ext)
+                            filename = f"generated_code_{i+1}.{ext}"
+                        
+                        file_path = os.path.join(os.getcwd(), os.path.basename(filename))
+                        with open(file_path, "w", encoding="utf-8") as f:
+                            f.write(code.strip() + "\n")
+                        
+                        if RICH_AVAILABLE:
+                            console.print(f"[dim green]Auto-saved code block to: {file_path}[/dim green]")
+                        else:
+                            logger.info(f"Auto-saved code to: {file_path}")
+                except Exception as save_err:
+                    if not RICH_AVAILABLE:
+                        logger.warning(f"Failed to auto-save code block: {save_err}")
                 
             except Exception as e:
                 if RICH_AVAILABLE:

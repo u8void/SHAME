@@ -116,8 +116,8 @@
         </div>
 
         <div class="settings-tabs">
-            <button class="stab-btn active" id="stab-chat" data-tab="chat">Chat</button>
-            <button class="stab-btn" id="stab-training" data-tab="training">Training</button>
+            <button class="stab-btn active" id="stab-chat" data-tab="chat">Global Settings</button>
+            <button class="stab-btn" id="stab-models" data-tab="models">Models</button>
         </div>
 
         <!-- CHAT SETTINGS TAB -->
@@ -203,146 +203,92 @@
                 <input type="range" id="cs_compacting_profile" value="1" min="0" max="2" step="1" oninput="const vals=['Low','Medium','Aggressive']; document.getElementById('val_compacting_profile').innerText = vals[this.value]">
             </div>
 
-            <button class="settings-save-btn" id="saveChatSettingsBtn">Save Chat Settings</button>
+            <button class="settings-save-btn" id="saveChatSettingsBtn">Save Global Settings</button>
         </div>
 
-        <!-- TRAINING SETTINGS TAB -->
-        <div class="settings-tab-content" id="stab-content-training">
-            <div class="training-subtabs">
-                <button class="training-subtab active" id="tsub-params" data-tsub="params">Parameters</button>
-                <button class="training-subtab" id="tsub-logs" data-tsub="logs">Live Logs</button>
+        <!-- MODELS SETTINGS TAB -->
+        <div class="settings-tab-content" id="stab-content-models">
+            <p class="settings-section-label">Select Model Role</p>
+            <div class="settings-field">
+                <select id="modelRoleSelect">
+                    <option value="code">Code</option>
+                    <option value="reasoning">Reasoning</option>
+                    <option value="triage">Triage</option>
+                    <option value="router">Router</option>
+                    <option value="control">Control</option>
+                    <option value="math">Math</option>
+                    <option value="reviewer">Reviewer</option>
+                    <option value="general">General</option>
+                    <option value="vision">Vision</option>
+                </select>
             </div>
 
-            <!-- PARAMETERS -->
-            <div class="tsub-content active" id="tsub-content-params">
-                <p class="settings-section-label">Model</p>
+            <p class="settings-section-label" style="margin-top:20px">Overrides</p>
+            <span class="field-hint" style="display:block; margin-bottom: 15px;">These override the global generation settings. Leave as "Global" to inherit from the main config.</span>
 
-                <div class="settings-field">
-                    <label for="modelNameInput">Model Name</label>
-                    <input type="text" id="modelNameInput" value="microsoft/phi-4" disabled>
-                </div>
-
-                <p class="settings-section-label" style="margin-top:20px">Hyperparameters</p>
-
-                <div class="settings-field-row">
-                    <div class="settings-field">
-                        <label for="epochsInput">Epochs</label>
-                        <input type="number" id="epochsInput" value="3">
+            <div class="settings-field">
+                <label for="ms_temperature">
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Temperature</span>
+                        <span id="val_ms_temperature" style="color:var(--iris-purple); font-weight:bold;">Global</span>
                     </div>
-                    <div class="settings-field">
-                        <label for="lrInput">Learning Rate</label>
-                        <input type="text" id="lrInput" value="2e-4">
-                    </div>
-                </div>
-
-                <div class="settings-field-row">
-                    <div class="settings-field">
-                        <label for="batchSizeInput">Batch Size</label>
-                        <input type="number" id="batchSizeInput" value="1">
-                    </div>
-                    <div class="settings-field">
-                        <label for="accumInput">Accum Steps</label>
-                        <input type="number" id="accumInput" value="8">
-                    </div>
-                </div>
-
-                <div class="settings-field-row">
-                    <div class="settings-field">
-                        <label for="maxLengthInput">Max Length</label>
-                        <input type="number" id="maxLengthInput" value="64">
-                    </div>
-                    <div class="settings-field">
-                        <label for="maxPairsInput">Max Pairs</label>
-                        <input type="number" id="maxPairsInput" value="5000">
-                    </div>
-                </div>
-
-                <p class="settings-section-label" style="margin-top:20px">Dataset</p>
-
-                <div class="settings-field">
-                    <label for="mdDirInput">Markdown Dir</label>
-                    <input type="text" id="mdDirInput" value="training">
-                </div>
-
-                <p class="settings-section-label" style="margin-top:20px">Device &amp; Flags</p>
-
-                <div class="settings-field">
-                    <label for="deviceInput">Device</label>
-                    <select id="deviceInput">
-                        <option value="">Auto (CUDA / MPS)</option>
-                        <option value="cpu">Force CPU</option>
-                        <option value="mps">Force MPS</option>
-                        <option value="cuda">Force CUDA</option>
-                    </select>
-                </div>
-
-                <div class="toggle-group">
-                    <label class="toggle-label">
-                        <input type="checkbox" id="noBstInput">
-                        <span class="toggle-track"></span>
-                        Disable BST
-                    </label>
-                    <label class="toggle-label">
-                        <input type="checkbox" id="noDdInput">
-                        <span class="toggle-track"></span>
-                        Disable DailyDialog
-                    </label>
-                    <label class="toggle-label">
-                        <input type="checkbox" id="noMdInput">
-                        <span class="toggle-track"></span>
-                        Disable Markdown Data
-                    </label>
-                    <label class="toggle-label">
-                        <input type="checkbox" id="useChatTemplateInput">
-                        <span class="toggle-track"></span>
-                        Use Chat Template
-                    </label>
-                </div>
-
-                <p class="settings-section-label" style="margin-top:20px">Reasoning Datasets</p>
-                <div class="settings-field-row">
-                    <div class="settings-field">
-                        <label for="claudeReasoningInput">Claude Reasoning (Pairs)</label>
-                        <input type="number" id="claudeReasoningInput" value="0">
-                    </div>
-                    <div class="settings-field">
-                        <label for="dolciThinkInput">Dolci Think (Pairs)</label>
-                        <input type="number" id="dolciThinkInput" value="0">
-                    </div>
-                </div>
-                <div class="settings-field-row">
-                    <div class="settings-field">
-                        <label for="deepthinkInput">Deepthink Reasoning (Pairs)</label>
-                        <input type="number" id="deepthinkInput" value="0">
-                    </div>
-                    <div class="settings-field">
-                        <label for="openhermesInput">OpenHermes 2.5 (Pairs)</label>
-                        <input type="number" id="openhermesInput" value="0">
-                    </div>
-                </div>
-                <div class="settings-field">
-                    <label for="orcaMathInput">Orca-Math Reasoning (Pairs)</label>
-                    <input type="number" id="orcaMathInput" value="0">
-                </div>
-                <div class="toggle-group">
-                    <label class="toggle-label">
-                        <input type="checkbox" id="stripReasoningInput">
-                        <span class="toggle-track"></span>
-                        Strip Reasoning (<think> blocks)
-                    </label>
-                </div>
-
-                <div class="training-actions">
-                    <button class="settings-save-btn" id="startTrainingBtn">Start Training</button>
-                    <button class="stop-training-btn" id="stopTrainingBtn" disabled>Stop Training</button>
-                </div>
+                </label>
+                <input type="range" id="ms_temperature" value="-0.01" step="0.01" min="-0.01" max="2" oninput="document.getElementById('val_ms_temperature').innerText = this.value < 0 ? 'Global' : this.value">
             </div>
 
-            <!-- LIVE LOGS -->
-            <div class="tsub-content" id="tsub-content-logs">
-                <div class="log-area" id="trainLogs">Ready to train...</div>
+            <div class="settings-field">
+                <label for="ms_top_p">
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Top P</span>
+                        <span id="val_ms_top_p" style="color:var(--iris-purple); font-weight:bold;">Global</span>
+                    </div>
+                </label>
+                <input type="range" id="ms_top_p" value="-0.05" step="0.05" min="-0.05" max="1" oninput="document.getElementById('val_ms_top_p').innerText = this.value < 0 ? 'Global' : this.value">
             </div>
+
+            <div class="settings-field">
+                <label for="ms_top_k">
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Top K</span>
+                        <span id="val_ms_top_k" style="color:var(--iris-purple); font-weight:bold;">Global</span>
+                    </div>
+                </label>
+                <input type="range" id="ms_top_k" value="0" min="0" max="200" oninput="document.getElementById('val_ms_top_k').innerText = this.value == 0 ? 'Global' : this.value">
+            </div>
+
+            <div class="settings-field">
+                <label for="ms_repetition_penalty">
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Repetition Penalty</span>
+                        <span id="val_ms_repetition_penalty" style="color:var(--iris-purple); font-weight:bold;">Global</span>
+                    </div>
+                </label>
+                <input type="range" id="ms_repetition_penalty" value="0.95" step="0.05" min="0.95" max="2" oninput="document.getElementById('val_ms_repetition_penalty').innerText = this.value < 1.0 ? 'Global' : this.value">
+            </div>
+
+            <div class="settings-field">
+                <label for="ms_frequency_penalty">
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Frequency Penalty</span>
+                        <span id="val_ms_frequency_penalty" style="color:var(--iris-purple); font-weight:bold;">Global</span>
+                    </div>
+                </label>
+                <input type="range" id="ms_frequency_penalty" value="-0.05" step="0.05" min="-0.05" max="2" oninput="document.getElementById('val_ms_frequency_penalty').innerText = this.value < 0 ? 'Global' : this.value">
+            </div>
+
+            <div class="settings-field">
+                <label for="ms_presence_penalty">
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Presence Penalty</span>
+                        <span id="val_ms_presence_penalty" style="color:var(--iris-purple); font-weight:bold;">Global</span>
+                    </div>
+                </label>
+                <input type="range" id="ms_presence_penalty" value="-0.05" step="0.05" min="-0.05" max="2" oninput="document.getElementById('val_ms_presence_penalty').innerText = this.value < 0 ? 'Global' : this.value">
+            </div>
+
+            <button class="settings-save-btn" id="saveModelSettingsBtn" style="margin-top: 20px;">Save Model Settings</button>
         </div>
+
     </aside>
 
     <script src="/static/vendor/marked.min.js"></script>

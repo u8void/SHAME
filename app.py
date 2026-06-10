@@ -166,7 +166,8 @@ def chat():
             for event in ai_agent_handle(
                 user_message,
                 get_retriever(),
-                agent_history
+                agent_history,
+                settings=settings
             ):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
@@ -224,6 +225,49 @@ def analyze_image_route():
         f.write(f"User [image]: {filename} | Prompt: {prompt}\nBot: {reply}\n\n")
 
     return jsonify({"reply": reply})
+
+@app.route("/get_config", methods=["GET"])
+def get_config_endpoint():
+    try:
+        with open("config/iris.conf", "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/save_model_settings", methods=["POST"])
+def save_model_settings():
+    try:
+        payload = request.json or {}
+        role = payload.get("role")
+        settings = payload.get("settings", {})
+        
+        if not role:
+            return jsonify({"error": "Role is required"}), 400
+            
+        with open("config/iris.conf", "r", encoding="utf-8") as f:
+            data = json.load(f)
+            
+        if "model_settings" not in data:
+            data["model_settings"] = {}
+            
+        if role not in data["model_settings"]:
+            data["model_settings"][role] = {}
+            
+        # Update or delete keys based on the incoming settings dict
+        for k in ["temperature", "top_p", "top_k", "repetition_penalty", "frequency_penalty", "presence_penalty"]:
+            if k in settings:
+                data["model_settings"][role][k] = settings[k]
+            elif k in data["model_settings"][role]:
+                del data["model_settings"][role][k]
+                
+        with open("config/iris.conf", "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/train", methods=["POST"])
 def train():
