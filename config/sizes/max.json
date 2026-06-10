@@ -1,5 +1,5 @@
 {
-  "_description": "Iris AI — Max (264B total params). 32B–72B models. Fits 48 GB RAM. Beats DeepSeek-R1 671B (Q2 quant), Llama-4-Scout 109B at same RAM.",
+  "_description": "Iris AI \u2014 Max (264B total params). 32B\u201372B models. Fits 48 GB RAM. Beats DeepSeek-R1 671B (Q2 quant), Llama-4-Scout 109B at same RAM.",
   "models": {
     "triage": "Qwen/Qwen3-32B",
     "router": "Qwen/Qwen3-Coder-32B",
@@ -8,7 +8,9 @@
     "code": "Qwen/Qwen3-Coder-Next",
     "reasoning": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
     "general": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
-    "vision": "Qwen/Qwen2.5-VL-26B-Instruct"
+    "vision": "Qwen/Qwen2.5-VL-26B-Instruct",
+    "stt": "UsefulSensors/moonshine-base",
+    "tts": "hexgrad/Kokoro-82M"
   },
   "gguf": {
     "triage": "iris_001.gguf",

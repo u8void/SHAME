@@ -109,7 +109,7 @@ def apply_size_config(size: str):
 def parse_args():
     parser = argparse.ArgumentParser(description="Unified GGUF Training for Iris AI")
 
-    parser.add_argument("--train-role", nargs="+", default=["all"],
+    parser.add_argument("--role", nargs="+", default=["all"],
                         help="Roles to train: triage, router, math, code, reasoning, general, all")
     parser.add_argument("--quant-type", choices=["q4_k_m", "q8_0", "f16"], default="q4_k_m",
                         help="GGUF quantization level")
@@ -139,7 +139,7 @@ def parse_args():
     parser.add_argument("--claude-reasoning", type=int, default=600)
     parser.add_argument("--dolci-think", type=int, default=600)
     parser.add_argument("--deepthink", type=int, default=600)
-    parser.add_argument("--strip-reasoning", action="store_true")
+    parser.add_argument("--strip-reasoning")
 
     parser.add_argument("--openhermes", type=int, default=0)
     parser.add_argument("--math-qa", type=int, default=0)

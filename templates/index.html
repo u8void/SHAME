@@ -5,7 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Iris AI Dashboard</title>
     <meta name="description" content="Iris AI: Your intelligent fine-tuned assistant, trained on your data.">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=12">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=14">
+    <link rel="stylesheet" href="{{ url_for('static', filename='voice_style.css') }}">
+
+    <style>
+    </style>
 </head>
 <body>
     <aside class="sidebar" id="sidebar">
@@ -26,6 +30,14 @@
             <div class="nav-item" id="newChatBtn" aria-label="New chat">
                 <svg class="main-icon pen-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                 <span class="nav-text">New chat</span>
+            </div>
+            <div class="nav-item" id="voiceChatBtn" aria-label="Voice chat">
+                <svg class="main-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                    <line x1="12" x2="12" y1="19" y2="22"></line>
+                </svg>
+                <span class="nav-text">Voice chat</span>
             </div>
         </div>
 
@@ -73,13 +85,19 @@
                 <p class="sub-text">What's on your mind today?</p>
             </div>
 
-            <div class="input-area">
+            <div class="input-area" id="inputArea">
+                <div id="inputDragOverlay" class="input-drag-overlay">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                    </svg>
+                    <span>Drop files here</span>
+                </div>
                 <div id="imagePreviewContainer" class="image-preview-container"></div>
                 <div class="input-wrapper">
                     <label for="imageInput" class="action-btn" title="Add file or image">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
                     </label>
-                    <input type="file" id="imageInput" style="display:none;">
+                    <input type="file" id="imageInput" style="display:none;" multiple>
                     
                     <textarea id="chatInput" placeholder="Ask anything" autocomplete="off" rows="1"></textarea>
                     
@@ -203,6 +221,20 @@
                 <input type="range" id="cs_compacting_profile" value="1" min="0" max="2" step="1" oninput="const vals=['Low','Medium','Aggressive']; document.getElementById('val_compacting_profile').innerText = vals[this.value]">
             </div>
 
+            <p class="settings-section-label" style="margin-top:20px">Code Quality</p>
+            <div class="settings-field" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding:12px 0; gap: 16px;">
+                <label for="cs_code_review" style="margin:0; cursor:pointer; flex: 1; display: flex; flex-direction: column; gap: 4px;">
+                    <span style="color:#e8e8e8;">Code Review</span>
+                    <span class="field-hint">When enabled, automatically reviews written code and suggests improvements.</span>
+                </label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <label class="toggle-label" style="margin:0;">
+                        <input type="checkbox" id="cs_code_review" onchange="document.getElementById('val_code_review').innerText = this.checked ? 'On' : 'Off'">
+                        <div class="toggle-track"></div>
+                    </label>
+                </div>
+            </div>
+
             <button class="settings-save-btn" id="saveChatSettingsBtn">Save Global Settings</button>
         </div>
 
@@ -291,10 +323,45 @@
 
     </aside>
 
+    <div id="voiceModal" class="voice-modal">
+        <div class="voice-modal-content">
+            <h2 id="voiceStatusText">Connecting...</h2>
+            
+            <div class="voice-visualizer-container">
+                <div id="voiceOrb" class="voice-orb"></div>
+            </div>
+            
+            <div id="voiceTranscription" class="voice-transcription"></div>
+            
+            <div class="voice-toolbar">
+                <button id="voiceMuteBtn" class="voice-tool-btn" aria-label="Mute microphone">
+                    <svg id="icon-mic-on" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" x2="12" y1="19" y2="22"></line>
+                    </svg>
+                    <svg id="icon-mic-off" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                        <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                        <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                        <line x1="12" y1="19" x2="12" y2="22"></line>
+                    </svg>
+                </button>
+                <button id="closeVoiceBtn" class="voice-tool-btn hangup-btn" aria-label="End call">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-7-7 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"></path>
+                        <line x1="23" y1="1" x2="1" y2="23"></line>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/vendor/marked.min.js"></script>
     <script src="/static/vendor/purify.min.js"></script>
-    <script src="/static/script.js?v=12"></script>
-    <script src="/static/scriptchat.js?v=12"></script>
+    <script src="/static/script.js?v=14"></script>
+    <script src="/static/scriptchat.js?v=14"></script>
+    <script src="/static/voice.js"></script>
     <script src="{{ url_for('static', filename='settings.js') }}"></script>
 </body>
 </html>

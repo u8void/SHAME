@@ -489,7 +489,7 @@ async def stage_talking(
         if finish_reason == "length":
             log.warning("Orchestrator hit max_tokens length. Auto-continuing (loop %d)...", i+1)
             messages.append({"role": "assistant", "content": chunk_content})
-            messages.append({"role": "user", "content": "Continue exactly where you left off, from the very next character. Do not repeat anything, do not write intro text or markdown blocks, just the raw continuation."})
+            messages.append({"role": "user", "content": "Continue exactly where you left off, from the very next character. Do not repeat anything."})
         else:
             break
             
@@ -530,6 +530,11 @@ def optimize_messages(history_messages: list[dict[str, str]] | None, user_query:
 def fallback_classify(query: str) -> TaskType | None:
     q = query.lower()
     
+    analysis_keywords = {"analyze", "analyse", "explain", "summarize", "what does this", "how does this", "walkthrough", "break down", "what is this", "what's this"}
+    for kw in analysis_keywords:
+        if re.search(rf"\b{re.escape(kw)}\b", q):
+            return TaskType.REASONING
+
     if re.search(r'\b\w+\.(c|cpp|h|py|js|ts|html|css|sh|java|go|rs|json|yml|yaml|asm|s|md)\b', q):
         return TaskType.CODING_COMPLEX
         

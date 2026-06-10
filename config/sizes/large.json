@@ -1,5 +1,5 @@
 {
-  "_description": "Iris AI — Large (112B total params). 8B–32B models. Fits 24 GB RAM. Beats Qwen3-32B, Qwen3-30B-A3B MoE, Mistral Large 3 at same RAM.",
+  "_description": "Iris AI \u2014 Large (112B total params). 8B\u201332B models. Fits 24 GB RAM. Beats Qwen3-32B, Qwen3-30B-A3B MoE, Mistral Large 3 at same RAM.",
   "models": {
     "triage": "Qwen/Qwen3-8B",
     "router": "Qwen/Qwen3-Coder-32B",
@@ -8,7 +8,9 @@
     "code": "Qwen/Qwen3-Coder-32B",
     "reasoning": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
     "general": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
-    "vision": "Qwen/Qwen3-VL-8B-Instruct"
+    "vision": "Qwen/Qwen3-VL-8B-Instruct",
+    "stt": "UsefulSensors/moonshine-base",
+    "tts": "hexgrad/Kokoro-82M"
   },
   "gguf": {
     "triage": "iris_001.gguf",

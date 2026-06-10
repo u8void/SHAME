@@ -735,6 +735,34 @@ body.chat-active .center-panel {
 .input-area {
     padding-bottom: 16px;
     padding-top: 8px;
+    position: relative;
+}
+
+.input-drag-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 100;
+    background: rgba(30, 30, 34, 0.9);
+    backdrop-filter: blur(8px);
+    border: 2px dashed var(--iris-purple);
+    border-radius: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--iris-purple);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s var(--ease-out-quart);
+}
+
+.input-drag-overlay.active {
+    opacity: 1;
+}
+
+.input-drag-overlay span {
+    font-size: 16px;
+    font-weight: 500;
 }
 
 .input-wrapper {
@@ -1160,7 +1188,8 @@ body.chat-active .footere {
     position: fixed;
     top: 0;
     right: 0;
-    width: 400px;
+    width: 100%;
+    max-width: 400px;
     height: 100vh;
     background: #141416;
     border-left: 1px solid #262629;
@@ -1772,6 +1801,14 @@ body.chat-active .footere {
         padding: 0 16px 16px;
     }
 
+    .settings-field-row {
+        grid-template-columns: 1fr;
+    }
+
+    .settings-panel {
+        max-width: 100%;
+    }
+
     .message {
         max-width: 90%;
     }
@@ -2215,3 +2252,9 @@ body.chat-active .footere {
 .chat-file-attachment svg {
     color: var(--iris-purple, #A385FF);
 }
+.drag-over {
+    background-color: var(--iris-gray);
+    border-radius: 12px;
+    outline: 2px dashed var(--iris-purple);
+}
+

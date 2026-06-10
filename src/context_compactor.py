@@ -15,6 +15,7 @@ Compaction levels:
 import re
 from typing import List, Dict, Optional, Tuple
 from enum import Enum
+import src.iris as iris_module
 
 
 class CompactionLevel(str, Enum):
@@ -82,13 +83,11 @@ Dense digest:"""
 
 def _summarize_with_model(messages: List[Dict[str, str]], max_output_tokens: int = 300) -> str:
     """Use the triage (4B) model to summarize a batch of old messages."""
-    from .iris import load_model, ModelRole as _MR
-
     conversation_text = _format_messages_for_summary(messages)
     prompt = _SUMMARIZE_PROMPT.format(conversation=conversation_text)
 
     try:
-        llm = load_model(_MR.TRIAGE)
+        llm = iris_module.load_model(iris_module.ModelRole.TRIAGE)
         response = llm.create_chat_completion(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_output_tokens,
@@ -144,8 +143,7 @@ def compact_context(
         return [], "no_history"
 
     if role is not None:
-        from .iris import ROLE_CTX, DEFAULT_CTX
-        effective_ctx = n_ctx or ROLE_CTX.get(role, DEFAULT_CTX)
+        effective_ctx = n_ctx or iris_module.ROLE_CTX.get(role, iris_module.DEFAULT_CTX)
     else:
         effective_ctx = n_ctx or 4096
 
@@ -220,8 +218,7 @@ def auto_compact_for_role(
     if not messages:
         return [], "empty"
 
-    from .iris import ROLE_CTX, DEFAULT_CTX
-    n_ctx = ROLE_CTX.get(role, DEFAULT_CTX)
+    n_ctx = iris_module.ROLE_CTX.get(role, iris_module.DEFAULT_CTX)
     available = n_ctx - 256 - max_output_tokens
 
     tokens = estimate_tokens(messages)

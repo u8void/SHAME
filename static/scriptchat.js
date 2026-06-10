@@ -33,12 +33,14 @@ document.addEventListener("DOMContentLoaded", () => {
     let chatActive = false;
     let currentAbortController = null;
     let isGenerating = false;
+    window.selectedFiles = [];
     let chatSettings = JSON.parse(localStorage.getItem('iris_chat_settings')) || {
         max_new_tokens: 512,
         temperature: 0.6,
         top_p: 0.9,
         top_k: 40,
-        repetition_penalty: 1.3
+        repetition_penalty: 1.3,
+        code_review: false
     };
 
     fetch('/get_settings')
@@ -69,7 +71,34 @@ document.addEventListener("DOMContentLoaded", () => {
     const mainContent           = document.getElementById("mainContent");
     const sidebar               = document.querySelector(".sidebar");
     const recentLabel           = document.getElementById("recentLabel") || document.querySelector(".recent-label");
-    let selectedFile = null;
+
+    function renderSelectedFiles() {
+        if (!imagePreviewContainer) return;
+        imagePreviewContainer.innerHTML = '';
+        window.selectedFiles.forEach((file, index) => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'file-preview-item';
+            wrapper.innerHTML = `
+                <span>${escapeHtml(file.name)}</span>
+                <button onclick="window.selectedFiles.splice(${index}, 1); renderSelectedFiles();">✕</button>
+            `;
+            imagePreviewContainer.appendChild(wrapper);
+        });
+    }
+
+    function handleFilesSelect(files) {
+        if (!files) return;
+        Array.from(files).forEach(file => {
+            window.selectedFiles.push(file);
+        });
+        renderSelectedFiles();
+    }
+
+    function clearFileSelection() {
+        window.selectedFiles = [];
+        if (imagePreviewContainer) imagePreviewContainer.innerHTML = '';
+        if (imageInput) imageInput.value = '';
+    }
 
     function readFileAsText(file) {
         return new Promise((resolve, reject) => {
@@ -99,7 +128,42 @@ document.addEventListener("DOMContentLoaded", () => {
             '<mark class="search-highlight">$1</mark>'
         );
     }
-    function renderChatList(query = '') {
+    
+    // ── Regenerate the conversation title based on actual topic ──
+    function regenerateTitle(chat, debounceMs) {
+        if (debounceMs === undefined) debounceMs = 3000;
+        const key = chat.id;
+        if (!regenerateTitle._pending) regenerateTitle._pending = {};
+        if (regenerateTitle._pending[key]) return;
+        regenerateTitle._pending[key] = true;
+        setTimeout(() => {
+            delete regenerateTitle._pending[key];
+            const target = chats.find(c => c.id === key);
+            if (!target) return;
+            const msgs = target.messages || [];
+            if (msgs.length === 0) return;
+            fetch('/generate_title', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages: msgs })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.title && data.title !== "New Conversation") {
+                    const t = chats.find(c => c.id === key);
+                    if (t && t.title !== data.title) {
+                        t.title = data.title;
+                        savePersist();
+                        renderChatList();
+                    }
+                }
+            })
+            .catch(err => console.error("Title regeneration failed:", err));
+        }, debounceMs);
+    }
+    regenerateTitle._pending = {};
+
+function renderChatList(query = '') {
         if (!chatHistory) return;
         chatHistory.innerHTML = '';
         const q = query.trim().toLowerCase();
@@ -232,9 +296,18 @@ document.addEventListener("DOMContentLoaded", () => {
         const blocks = [];
 
         // 1. Extract Think Block (Internal)
-        let work = text.replace(/(?:<think>|<\|thought_start\|>|<thought>)([\s\S]*?)(?:<\/think>|<\|thought_end\|>|<\/thought>|$)/gi, (match, p1) => {
+        let work = text.replace(/(?:<think>|<\|thought_start\|>|<thought>)([\s\S]*?)(?:<\/think>|<\|thought_end\|>|<\/thought>|$)/gi, (match, p1, offset, fullString) => {
+            const content = p1.trim();
+            if (!content) return ''; // Do not create a block if there's no thought process
+            
+            // Fallback: If the model failed to close the tag and the thought block consumes almost the entire text
+            // leaving no actual final response for the user to see, we abort the thought block and render it normally.
+            if (!isStreaming && match.length >= fullString.trim().length * 0.95 && offset <= 10) {
+                return content; // Strip the tag and just return the inner text directly
+            }
+
             const id = `@@@THOUGHT_${blocks.length}@@@`;
-            blocks.push({ type: 'thought', content: p1.trim() });
+            blocks.push({ type: 'thought', content: content });
             return id;
         });
 
@@ -661,9 +734,8 @@ window.downloadCode = (btn, ext) => {
 
     async function handleSendMessage() {
         const text = chatInput.value.trim();
-        const hasFile = !!selectedFile;
-        const isImage = hasFile && selectedFile.type.startsWith('image/');
-        if (!text && !hasFile) return;
+        const hasFiles = window.selectedFiles.length > 0;
+        if (!text && !hasFiles) return;
 
         if (!currentChatId || !chats.find(c => c.id === currentChatId)) {
             startNewChat();
@@ -671,47 +743,31 @@ window.downloadCode = (btn, ext) => {
 
         const chat = normaliseChat(chats.find(c => c.id === currentChatId));
 
-        if (chat.messages.length === 0) {
-            chat.title = text ? (text.length > 35 ? text.slice(0, 35) + '…' : text) : (hasFile ? selectedFile.name : "New Conversation");
+        // ── Title: regenerate after EVERY exchange based on full conversation ──
+        const isFirstMessage = chat.messages.length === 0;
+        if (isFirstMessage) {
+            chat.title = text ? (text.length > 40 ? text.slice(0, 40) + '…' : text) : (hasFiles ? window.selectedFiles[0].name : "New Conversation");
+        }
+        if (text) {
+            regenerateTitle(chat);
         }
 
         let displayImageUrl = null;
         let attachmentName = null;
-        let finalContent = text;
-
-        if (hasFile) {
-            if (isImage) {
-                displayImageUrl = URL.createObjectURL(selectedFile);
+        
+        if (hasFiles) {
+            const firstFile = window.selectedFiles[0];
+            if (firstFile.type.startsWith('image/')) {
+                displayImageUrl = URL.createObjectURL(firstFile);
             } else {
-                attachmentName = selectedFile.name;
-                
-                // Show a warning if file size > 1MB
-                if (selectedFile.size > 1024 * 1024) {
-                    alert("File is too large. Please select a file under 1MB.");
-                    return;
-                }
-
-                try {
-                    const fileContent = await readFileAsText(selectedFile);
-                    const ext = attachmentName.split('.').pop().toLowerCase();
-                    
-                    finalContent = `I have attached a file named \`${attachmentName}\`. Here is the content of the file:\n\n` +
-                                   `\`\`\`${ext}\n` +
-                                   `${fileContent}\n` +
-                                   `\`\`\`\n\n` +
-                                   `User Prompt:\n${text}`;
-                } catch (e) {
-                    console.error("Failed to read file:", e);
-                    alert("Could not read file content.");
-                    return;
-                }
+                attachmentName = window.selectedFiles.length > 1 ? `${window.selectedFiles.length} files attached` : firstFile.name;
             }
         }
 
         const messageObj = {
             role: 'user',
-            content: finalContent,
-            displayText: text || `[Attached: ${attachmentName}]`,
+            content: text,
+            displayText: text || `[Attached: ${attachmentName || 'files'}]`,
             imageUrl: displayImageUrl,
             attachmentName: attachmentName
         };
@@ -724,13 +780,15 @@ window.downloadCode = (btn, ext) => {
         appendMessageDOM('user', messageObj.displayText, true, displayImageUrl, attachmentName);
 
         chatInput.value = '';
-        const fileToUpload = selectedFile; // keep reference
-        clearFileSelection(); // clear for next message
+        const filesToUpload = [...window.selectedFiles];
+        clearFileSelection();
         
         if (typeof handleInputResize === 'function') handleInputResize();
 
         setGeneratingState(true);
         showTypingIndicator();
+        
+        window._inThinkingStream = false;
 
         let fullReply = "";
         let actionResult = "";
@@ -738,12 +796,15 @@ window.downloadCode = (btn, ext) => {
         let aiContentDiv = null;
 
         try {
-            // Unified Path: Always send to /chat (Agent Path)
             const formData = new FormData();
-            if (hasFile && isImage) {
-                formData.append('image', fileToUpload);
-            }
-            formData.append('message', finalContent);
+            filesToUpload.forEach(f => {
+                if (f.type.startsWith('image/')) {
+                    formData.append('image', f);
+                } else {
+                    formData.append('document', f);
+                }
+            });
+            formData.append('message', text);
             formData.append('chat_id', currentChatId);
             formData.append('messages', JSON.stringify(chat.messages));
             formData.append('history', chat.historyString);
@@ -924,6 +985,14 @@ window.downloadCode = (btn, ext) => {
             
             chat.messages.push({ role: 'bot', content: cleanResponse });
             savePersist();
+            
+            // Regenerate title after every complete exchange (debounced 3s)
+            regenerateTitle(chat);
+            
+            // Final render to apply non-streaming fallback logic (like stripping unclosed <think> tags)
+            if (aiContentDiv) {
+                aiContentDiv.innerHTML = formatMessage(cleanResponse, false);
+            }
 
         } catch (err) {
             console.error('[Iris] fetch error:', err);
@@ -1036,42 +1105,99 @@ window.downloadCode = (btn, ext) => {
 
     window.appendMessage = appendMessageDOM;
 
-    imageInput?.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+    window.removeSelectedFile = function(index) {
+        window.selectedFiles.splice(index, 1);
+        renderSelectedFiles();
+    };
 
-        selectedFile = file;
-        const isImage = file.type.startsWith('image/');
+    function renderSelectedFiles() {
+        if (window.selectedFiles.length === 0) {
+            imagePreviewContainer.innerHTML = '';
+            imagePreviewContainer.classList.remove('visible');
+            return;
+        }
 
-        if (isImage) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                imagePreviewContainer.innerHTML = `
-                    <img src="${e.target.result}" alt="Preview">
-                    <button class="remove-image-btn" id="removeImageBtn" title="Remove image">✕</button>
+        let html = '<div style="display: flex; gap: 8px; flex-wrap: wrap;">';
+        window.selectedFiles.forEach((file, index) => {
+            const isImage = file.type.startsWith('image/');
+            if (isImage) {
+                const objectUrl = URL.createObjectURL(file);
+                html += `
+                    <div style="position: relative; display: inline-block;">
+                        <img src="${objectUrl}" alt="Preview" style="max-height: 60px; border-radius: 6px; border: 1px solid #33334a;">
+                        <button class="remove-image-btn" onclick="window.removeSelectedFile(${index})" title="Remove image">✕</button>
+                    </div>
                 `;
-                imagePreviewContainer.classList.add('visible');
-                document.getElementById('removeImageBtn')?.addEventListener('click', clearFileSelection);
-            };
-            reader.readAsDataURL(file);
-        } else {
-            imagePreviewContainer.innerHTML = `
-                <div class="file-preview-box">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                        <polyline points="14 2 14 8 20 8"></polyline>
-                    </svg>
-                    <span class="file-preview-name">${escapeHtml(file.name)}</span>
-                </div>
-                <button class="remove-image-btn" id="removeImageBtn" title="Remove file">✕</button>
-            `;
-            imagePreviewContainer.classList.add('visible');
-            document.getElementById('removeImageBtn')?.addEventListener('click', clearFileSelection);
+            } else {
+                html += `
+                    <div style="position: relative; display: inline-block;">
+                        <div class="file-preview-box" style="padding: 6px 10px;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                            </svg>
+                            <span class="file-preview-name" style="font-size: 11px;">${escapeHtml(file.name)}</span>
+                        </div>
+                        <button class="remove-image-btn" onclick="window.removeSelectedFile(${index})" title="Remove file" style="top: -6px; right: -6px; width: 16px; height: 16px; font-size: 10px;">✕</button>
+                    </div>
+                `;
+            }
+        });
+        html += '</div>';
+        imagePreviewContainer.innerHTML = html;
+        imagePreviewContainer.classList.add('visible');
+    }
+
+    function handleFilesSelect(files) {
+        if (!files || files.length === 0) return;
+        for (let i = 0; i < files.length; i++) {
+            window.selectedFiles.push(files[i]);
+        }
+        renderSelectedFiles();
+    }
+
+    imageInput?.addEventListener('change', (e) => {
+        handleFilesSelect(e.target.files);
+        imageInput.value = ''; // Reset input so the same files can be selected again if removed
+    });
+
+    let dragTimeout;
+    const dragOverlay = document.getElementById('inputDragOverlay');
+
+    window.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        
+        let hasFiles = false;
+        if (e.dataTransfer && e.dataTransfer.types) {
+            for (let i = 0; i < e.dataTransfer.types.length; i++) {
+                const type = e.dataTransfer.types[i];
+                if (type === 'Files' || type === 'application/x-moz-file') {
+                    hasFiles = true;
+                    break;
+                }
+            }
+        }
+        
+        if (hasFiles) {
+            if (dragOverlay) dragOverlay.classList.add('active');
+            clearTimeout(dragTimeout);
+            dragTimeout = setTimeout(() => {
+                if (dragOverlay) dragOverlay.classList.remove('active');
+            }, 150);
+        }
+    });
+
+    window.addEventListener('drop', (e) => {
+        e.preventDefault();
+        clearTimeout(dragTimeout);
+        if (dragOverlay) dragOverlay.classList.remove('active');
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleFilesSelect(e.dataTransfer.files);
         }
     });
 
     function clearFileSelection() {
-        selectedFile = null;
+        window.selectedFiles = [];
         if (imageInput) imageInput.value = '';
         imagePreviewContainer.innerHTML = '';
         imagePreviewContainer.classList.remove('visible');

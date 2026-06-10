@@ -3,7 +3,7 @@ iris.py — Iris AI Base Model with MRA (Multi-Role Architecture)
 ===============================================================
 """
 
-total_time_spent = 248 #hours (update after working)
+total_time_spent = 256 #hours (update after working)
 
 import os
 from .logger import get_logger
@@ -24,6 +24,12 @@ from typing import Optional, Tuple, Dict, Any, Generator, List, Union
 
 warnings.filterwarnings("ignore")
 
+from src.context_compactor import auto_compact_for_role
+from src.compressed_attention import (
+    select_kv_quant, _get_ftype, estimate_kv_cache_ram,
+    smart_compress, KVQuantLevel,
+)
+
 try:
     from sentence_transformers import SentenceTransformer, util
     RAG_AVAILABLE = True
@@ -38,6 +44,12 @@ try:
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
+
+try:
+    import mlx.core as mx
+    MLX_AVAILABLE = True
+except ImportError:
+    MLX_AVAILABLE = False
 
 try:
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -95,6 +107,7 @@ class TaskType(str, Enum):
     MATH           = "math"
     REASONING      = "reasoning"
     GENERAL        = "general"
+    SEARCH         = "search"
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -147,13 +160,16 @@ ROLE_CTX: Dict[ModelRole, int] = {
     ModelRole.CODE:      8192,
     ModelRole.REASONING: 8192,
     ModelRole.REVIEWER:  8192,
-    ModelRole.GENERAL:   4096,
+    ModelRole.GENERAL:   8192,   # bumped from 4096 — depth prompts need more ctx
     ModelRole.VISION:    4096,
 }
 
 DEFAULT_CTX = 4096
 DEFAULT_GPU_LAYERS = -1
-DEFAULT_THREADS = 8
+DEFAULT_THREADS = 4         # M-series: perf cores only (avoid E-core stalls)
+DEFAULT_BATCH = 2048        # Larger batch for fewer kernel launches
+DEFAULT_UBATCH = 512        # Micro-batch for Apple Silicon memory hierarchy
+DEFAULT_THREADS_BATCH = 4   # Separate thread count for prompt processing
 
 
 IRIS_IDENTITY = (
@@ -166,34 +182,47 @@ IRIS_IDENTITY = (
 
 TRIAGE_SYSTEM_PROMPT = (
     f"{IRIS_IDENTITY}\n"
-    "You are the Iris AI Triage node.\n"
+    "You are the Iris AI Triage node. You are strictly a router.\n"
     "Rules:\n"
-    "1. If the user is just greeting, saying hi/hello, asking simple conversational or factual questions, "
+    "1. If the user is just greeting, saying hi/hello, or asking who you are, "
     "answer them directly. Do NOT output any routing tags.\n"
-    "2. If the query needs a specialist model, output EXACTLY ONE routing tag "
-    "and NOTHING ELSE (do not answer the query yourself):\n"
-    "   [ROUTE: GENERAL]     — general knowledge, explanations, broad topics\n"
-    "   [ROUTE: REASONING]   — complex logic, system design, strategy, architecture\n"
+    "2. YOU ARE FORBIDDEN from answering factual questions, coding questions, math questions, or explaining anything yourself. If the user asks a question, you MUST route it to a specialist model.\n"
+    "3. To route to a specialist model, output EXACTLY ONE routing tag and NOTHING ELSE:\n"
+    "   [ROUTE: SEARCH: keywords] — use FIRST for ANY factual query: history, people, places, events, products, specs, lists, encyclopedic knowledge. ALWAYS search before answering factual questions. (e.g. [ROUTE: SEARCH: Apollo missions list])\n"
+    "   [ROUTE: REASONING]   — deep analysis, explanations, how/why questions, comparisons, system design, strategy, ALL document summaries/explanations, complex topics requiring multi-step thought\n"
+    "   [ROUTE: GENERAL]     — ONLY for casual conversation, opinions, creative writing, jokes, or trivial queries that don't need facts or deep reasoning\n"
     "   [ROUTE: MATH]        — math, equations, proofs, algorithmic problems\n"
     "   [ROUTE: CODE_SIMPLE]  — simple single-file code, small functions, snippets\n"
     "   [ROUTE: CODE_COMPLEX] — large projects, games, multi-file, kernels, bootloaders\n\n"
-    "Be precise. If unsure, default to [ROUTE: GENERAL]."
+    "CRITICAL RULE 1: The user asked about a specific historical event, list of things, person, product, or fact-based topic? You MUST route to [ROUTE: SEARCH: keywords] FIRST. Never try to answer factual queries from memory.\n"
+    "CRITICAL RULE 2: The user asked 'how', 'why', 'explain', 'what is', 'tell me about' a non-trivial topic? Route to [ROUTE: REASONING].\n"
+    "CRITICAL RULE 3: Only use [ROUTE: GENERAL] when the query is purely conversational and doesn't need facts or deep reasoning."
 )
 
 GENERAL_SYSTEM_PROMPT = (
-    f"{IRIS_IDENTITY}\nProvide a helpful, direct response. "
-    "Use chain-of-thought reasoning when appropriate."
+    f"{IRIS_IDENTITY}\n"
+    "You are the Iris AI Knowledge Specialist. Your job is to provide DEEP, THOROUGH, and COMPREHENSIVE explanations.\n"
+    "CRITICAL DEPTH RULES:\n"
+    "1. NEVER give one-sentence answers about any topic. Always go deep.\n"
+    "2. Structure your response with clear sections, bullet points, and examples.\n"
+    "3. Cover: (a) what it is, (b) how it works, (c) why it matters, (d) key details, (e) practical implications.\n"
+    "4. Use analogies, comparisons, and concrete examples to make concepts crystal clear.\n"
+    "5. If the topic has history, alternatives, or competing approaches — mention them.\n"
+    "6. End with a summary that ties everything together.\n"
+    "7. Minimum response: 3 paragraphs for simple topics, 5+ for complex ones.\n"
+    "8. Format for readability: use **bold** for key terms, - for bullets, and clear section breaks.\n"
+    "9. If the user asks 'what is X' or 'explain Y', treat it as a deep-dive request — not a definition request."
 )
 
 CODE_SYSTEM_PROMPT = (
     f"{IRIS_IDENTITY}\n"
     "You are the Iris AI Coding Specialist. Generate clean, fully working, production-quality code. "
     "Ensure correctness, edge-case handling, and error-free syntax. "
-    "Do NOT include explanatory comments in your code, EXCEPT for the filename. "
-    "You MUST wrap all code inside standard markdown triple backticks (```language ... ```). "
-    "CRITICAL: The very first line inside the code block MUST be a comment containing ONLY the intended filename (e.g. // main.cpp or # app.py). "
-    "After the code block, provide a concise explanation of the code, its key features, "
-    "and clear instructions on how to compile/run it."
+    "If you are writing or modifying code, you MUST wrap all code inside standard markdown triple backticks (```language ... ```). "
+    "CRITICAL: If you write a code block, the very first line inside the code block MUST be a comment containing ONLY the intended filename (e.g. // main.cpp or # app.py). "
+    "Do NOT include explanatory comments inside the code block other than the filename. "
+    "After the code block, provide a concise explanation of the code. "
+    "If the user is ONLY asking for an explanation, summary, or debugging help without needing new code, do NOT generate a code block; just reply in plain text."
 )
 
 MATH_SYSTEM_PROMPT = (
@@ -205,23 +234,144 @@ MATH_SYSTEM_PROMPT = (
 REASONING_SYSTEM_PROMPT = (
     f"{IRIS_IDENTITY}\n"
     "You are the Iris AI Reasoning Specialist. Think step-by-step using chain-of-thought reasoning. "
-    "Break down complex problems methodically before giving the final answer."
+    "Break down complex problems methodically before giving the final answer. "
+    "You MUST ALWAYS wrap your internal thought process inside <think>...</think> tags before providing your final answer.\n"
+    "CRITICAL DEPTH RULES:\n"
+    "1. Never give shallow answers. Always analyze the problem from multiple angles.\n"
+    "2. Structure your reasoning: problem definition → analysis → approach → solution → verification.\n"
+    "3. For explanations: cover origin, mechanics, alternatives, trade-offs, and real-world context.\n"
+    "4. For strategy/design: cover goals, constraints, options evaluated, chosen approach, and rationale.\n"
+    "5. For document analysis: cover structure, key arguments, evidence, strengths, weaknesses, and implications.\n"
+    "6. Always include concrete examples or scenarios to ground abstract concepts.\n"
+    "7. Minimum response: 3-5 paragraphs with clear logical progression.\n"
+    "8. End with actionable takeaways or conclusions when applicable.\n"
+    "9. If the question seems simple, still explore its nuances and edge cases."
 )
 
 REVIEWER_SYSTEM_PROMPT = (
     f"{IRIS_IDENTITY}\n"
     "You are the Iris AI Code Reviewer. Review and refine code for correctness, efficiency, edge cases, "
     "and readability. Ensure the final output is production-ready. Fix any errors, fill missing logic, "
-    "and optimize where possible. You MUST wrap your final corrected code inside standard markdown triple backticks. "
-    "CRITICAL: The very first line inside the code block MUST be a comment containing ONLY the intended filename (e.g. // main.cpp or # app.py). "
-    "Return the final code and explanation."
+    "and optimize where possible. "
+    "If you provide corrected code, you MUST wrap your final corrected code inside standard markdown triple backticks. "
+    "CRITICAL: If you write a code block, the very first line inside the code block MUST be a comment containing ONLY the intended filename (e.g. // main.cpp or # app.py). "
+    "If no code changes are needed, or if you are just summarizing, just explain your review in plain text without code blocks."
 )
 
 
 _active_role: Optional[ModelRole] = None
 _active_llm: Optional[Llama] = None
+_active_model_path: Optional[str] = None
 _keep_loaded: bool = False  # Set True during benchmarks to skip unload
 _model_lock = threading.Lock()
+
+# ── MLX Text Backend: swap llama.cpp for Metal-accelerated mlx_lm when available ──
+_mlx_backend_cache: dict = {}
+_mlx_cache_lock = threading.Lock()
+
+class MLXTextModel:
+    """Thin wrapper around mlx_lm that presents the same streaming interface as llama_cpp.Llama."""
+    def __init__(self, model_path: str, temp: float = 0.7):
+        from mlx_lm import load as mlx_load
+        import mlx.core as mx
+        self.model, self.tokenizer = mlx_load(model_path)
+        self.temp = temp
+        self._path = model_path
+    def n_ctx(self) -> int:
+        return 32768  # mlx_lm default
+    def n_embd(self) -> int:
+        return getattr(self, '_n_embd', 0) or 2560
+    def create_chat_completion(self, messages, stream=True, max_tokens=512,
+                                temperature=None, top_p=0.9, top_k=40,
+                                repeat_penalty=1.0, frequency_penalty=0.0,
+                                presence_penalty=0.0, min_p=0.0, seed=42, **kwargs):
+        from mlx_lm import generate as mlx_gen
+        import mlx.core as mx
+        import json, time
+        
+        temp = temperature if temperature is not None else self.temp
+        
+        # Apply chat template
+        if hasattr(self.tokenizer, 'apply_chat_template'):
+            prompt = self.tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        else:
+            prompt = json.dumps(messages)
+        
+        # Build generation prompt and tokenize
+        try:
+            tokens = mx.array(self.tokenizer.encode(prompt))
+        except Exception:
+            from mlx_lm.utils import generate_step
+            # Fallback: just concat
+            prompt = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
+            tokens = mx.array(self.tokenizer.encode(prompt))
+        
+        max_new = min(max_tokens, 8192)
+        
+        if not stream:
+            response = mlx_gen(
+                self.model, self.tokenizer,
+                prompt=prompt,
+                max_tokens=max_new,
+                temp=temp,
+                top_p=top_p,
+                verbose=False,
+            )
+            return {
+                "choices": [{
+                    "message": {"content": response},
+                    "finish_reason": "stop",
+                }]
+            }
+        
+        # Streaming version — yields dicts with same shape as llama_cpp
+        class _MLXStream:
+            def __init__(slf):
+                slf._gen = mlx_gen(
+                    self.model, self.tokenizer,
+                    prompt=prompt, max_tokens=max_new,
+                    temp=temp, top_p=top_p,
+                    verbose=False,
+                )
+                slf._done = False
+                slf._buf = ""
+            def __iter__(slf):
+                return slf
+            def __next__(slf):
+                if slf._done:
+                    raise StopIteration
+                try:
+                    text = next(slf._gen)
+                    if isinstance(text, str) and text:
+                        slf._buf += text
+                        return {"choices": [{"delta": {"content": text}}]}
+                    return {"choices": [{"delta": {"content": ""}}]}
+                except StopIteration:
+                    slf._done = True
+                    return {"choices": [{"delta": {"content": ""}, "finish_reason": "stop"}]}
+        return _MLXStream()
+    def reset(self):
+        pass
+    def close(self):
+        import mlx.core as mx
+        mx.clear_cache()
+
+def _get_mlx_model(model_path: str, temp: float = 0.7) -> Optional[MLXTextModel]:
+    global _mlx_backend_cache
+    with _mlx_cache_lock:
+        key = f"{model_path}:{temp:.2f}"
+        if key in _mlx_backend_cache:
+            return _mlx_backend_cache[key]
+        try:
+            model = MLXTextModel(model_path, temp)
+            _mlx_backend_cache[key] = model
+            logger.info(f"[MLX] Loaded text model via Metal GPU: {os.path.basename(model_path)}")
+            return model
+        except Exception as e:
+            logger.warning(f"[MLX] Failed to load model via MLX: {e}")
+            return None
 
 
 def _get_model_filename(role: ModelRole) -> str:
@@ -322,10 +472,9 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
         logger.warning(f"[Iris] Failed to download {filename}: {last_error}")
     return False
 
-
 def _unload_locked() -> None:
     """Internal: unload without acquiring lock (caller holds _model_lock)."""
-    global _active_role, _active_llm
+    global _active_role, _active_llm, _active_model_path
     if _active_llm is not None:
         role_val = _active_role.value if _active_role else "unknown"
         #print(f"[Iris] Unloaded {role_val}.")
@@ -336,6 +485,7 @@ def _unload_locked() -> None:
         llm = _active_llm
         _active_llm = None
         _active_role = None
+        _active_model_path = None
         del llm
         gc.collect()
         if platform.system() == "Linux":
@@ -348,16 +498,18 @@ def _unload_locked() -> None:
 
 def load_model(role: ModelRole) -> Llama:
     """Load a model by role. Unloads any currently active model first. Only one in RAM."""
-    global _active_role, _active_llm
+    global _active_role, _active_llm, _active_model_path
 
     with _model_lock:
-        if _active_role == role and _active_llm is not None:
+        filename = _get_model_filename(role)
+        path = _model_path(filename)
+        
+        # Fast path: If the requested file is ALREADY loaded (even under a different role), just reuse it!
+        if _active_llm is not None and _active_model_path == path:
+            _active_role = role
             return _active_llm
 
         _unload_locked()
-
-        filename = _get_model_filename(role)
-        path = _model_path(filename)
 
         if not os.path.exists(path):
             raise FileNotFoundError(
@@ -401,22 +553,91 @@ def load_model(role: ModelRole) -> Llama:
         #print(f"[Iris] Loading {role.value} ({filename}) [ctx={n_ctx}]...")
 
         draft_model = None
+        # ── Speculative Decoding (DeepSeek-V4 style draft-target parallelism) ──
+        _sd_cfg = cfg.get("speculative_decoding", {})
+        if _sd_cfg.get("enabled", False):
+            _draft_file = _sd_cfg.get("draft_model", "iris_002.gguf")
+            _draft_path = os.path.join(os.path.dirname(_HERE), "models", _draft_file)
+            if os.path.exists(_draft_path):
+                try:
+                    _draft = Llama(
+                        model_path=_draft_path,
+                        n_ctx=n_ctx,
+                        n_gpu_layers=0,
+                        n_threads=2,
+                        n_threads_batch=2,
+                        type_k=_selected_kv_type,
+                        type_v=_selected_kv_type,
+                        verbose=False,
+                    )
+                    draft_model = _draft
+                    logger.info(f"[Iris] Speculative decoding: draft={_draft_file} n_ctx={n_ctx}")
+                except Exception as _e:
+                    logger.warning(f"[Iris] Speculative decoding failed to load draft: {_e}")
+            else:
+                logger.warning(f"[Iris] Draft model not found: {_draft_path}")
+
+        # ── DeepSeek-V4 style KV cache quantization ──
+        _ca_cfg = cfg.get("compressed_attention", {})
+        _kv_pref = _ca_cfg.get("kv_quant", "auto")
+        _profile = cfg.get("size", "tiny")
+        _ram_gb = 16.0
+        try:
+            if os.name == 'posix':
+                _ram_gb = (os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')) / (1024**3)
+        except Exception:
+            pass
+        _kv_quant = select_kv_quant(
+            model_size_gb=os.path.getsize(path) / (1024**3),
+            n_ctx=n_ctx,
+            ram_gb=_ram_gb,
+            preference=KVQuantLevel(_kv_pref) if _kv_pref in KVQuantLevel.__members__ else KVQuantLevel.AUTO,
+            profile=_profile,
+        )
+        _selected_kv_type = _get_ftype(_kv_quant)
+        _kv_ram_mb = estimate_kv_cache_ram(os.path.getsize(path) / (1024**3), n_ctx, _kv_quant)
+        logger.info(f"[Iris] KV cache: {_kv_quant.value.upper()} → ~{_kv_ram_mb:.0f} MB @ n_ctx={n_ctx}")
+
+        # ── MLX Metal GPU backend: only when explicitly requested via IRIS_BACKEND=mlx ──
+        # Requires models/ dir to contain MLX-format model directories (not GGUF files).
+        # To use: convert GGUF → MLX with `python -m mlx_lm.convert --hf-path /path --mlx-path mlx_data/`
+        _backend_pref = (os.environ.get("IRIS_BACKEND") or cfg.get("backend", "auto")).lower()
+        _use_mlx = _backend_pref in ("mlx", "metal", "gpu")
+        if _use_mlx and MLX_AVAILABLE:
+            try:
+                _mlx_dir = os.path.join(os.path.dirname(_HERE), "mlx_data", os.path.splitext(filename)[0])
+                if os.path.isdir(_mlx_dir):
+                    _mlx_temp = cfg.get("temperature", 0.7)
+                    _mlx_llm = _get_mlx_model(_mlx_dir, _mlx_temp)
+                    if _mlx_llm is not None:
+                        _active_llm = _mlx_llm
+                        _active_role = role
+                        _active_model_path = path
+                        logger.info(f"[Iris] Using MLX Metal GPU backend for {role.value}")
+                        return _active_llm
+                else:
+                    logger.warning(f"[Iris] MLX model dir not found: {_mlx_dir}. Falling back to llama.cpp (GGUF).")
+            except Exception as _mlx_e:
+                logger.warning(f"[Iris] MLX backend failed, falling back to llama.cpp: {_mlx_e}")
 
         _active_llm = Llama(
             model_path=path,
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
             n_threads=n_threads,
+            n_threads_batch=cfg.get("n_threads_batch", DEFAULT_THREADS_BATCH),
             use_mmap=True,
             use_mlock=False,
             flash_attn=True,
-            type_k=getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
-            type_v=getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
-            n_batch=1024,
+            type_k=_selected_kv_type,
+            type_v=_selected_kv_type,
+            n_batch=cfg.get("n_batch", DEFAULT_BATCH),
+            n_ubatch=cfg.get("n_ubatch", DEFAULT_UBATCH),
             verbose=False,
             draft_model=draft_model,
         )
         _active_role = role
+        _active_model_path = path
         return _active_llm
 
 
@@ -480,6 +701,12 @@ def _is_continuation(query: str, history: List[Dict[str, str]]) -> bool:
 
 def _fallback_classify(query: str) -> Optional[TaskType]:
     q = query.lower()
+    
+    analysis_keywords = {"analyze", "analyse", "explain", "summarize", "what does this", "how does this", "walkthrough", "break down", "what is this", "what's this"}
+    for kw in analysis_keywords:
+        if re.search(rf"\b{re.escape(kw)}\b", q):
+            return TaskType.REASONING
+
     code_keywords = {
         "code", "coding", "program", "programming", "compile", "compiler",
         "debug", "debugging", "refactor", "refactoring", "script", "scripts",
@@ -531,7 +758,12 @@ def classify_task(
     user_query: str, history: List[Dict[str, str]]
 ) -> Tuple[Optional[TaskType], Optional[str]]:
     """Triage: classify the query or answer it directly."""
-    result = _fallback_classify(user_query)
+    
+    # Strip out document contents and image tags so they don't trigger keyword fallbacks
+    query_for_classification = re.sub(r'<document>[\s\S]*?</document>', '', user_query, flags=re.IGNORECASE)
+    query_for_classification = re.sub(r'\[IMAGE_UPLOADED:[^\]]+\]', '', query_for_classification, flags=re.IGNORECASE)
+    
+    result = _fallback_classify(query_for_classification)
     if result is not None:
         return result, None
 
@@ -560,6 +792,14 @@ def classify_task(
         "CODING_COMPLEX":TaskType.CODING_COMPLEX,
         "CODE_COMPLEX":  TaskType.CODING_COMPLEX,
     }
+
+    search_match = re.search(r'\[\s*route:\s*SEARCH:\s*(.*?)\s*\]', answer, re.IGNORECASE)
+    if search_match:
+        kw = search_match.group(1).strip()
+        if kw.lower() in ["keywords", "query"]:
+            kw = ""
+        return TaskType.SEARCH, kw
+
     for tag, ttype in tag_map.items():
         if re.search(rf'\[\s*route:\s*{re.escape(tag)}\s*\]', answer, re.IGNORECASE):
             return ttype, None
@@ -671,17 +911,41 @@ def _stream_tokens(
     model_name = _get_model_filename(role)
 
     for loop_idx in range(5):
+        # Ensure we never crash during auto-continuation by compacting context
+        # ── DeepSeek-V4 style hybrid compression ──
+        _ca_cfg = load_generation_config().get("compressed_attention", {})
+        if _ca_cfg.get("enabled", True) and len(full_messages) > 4:
+            _query = messages[-1].get("content", "") if messages else ""
+            _compressed = smart_compress(
+                full_messages, query=_query,
+                n_ctx=llm.n_ctx(),
+                max_output_tokens=min(max_tokens, 1024),
+                llm=llm,
+                profile=load_generation_config().get("size", "tiny"),
+            )
+            if _compressed.compressed_tokens < _compressed.original_tokens:
+                logger.info(
+                    f"[CA] {_compressed.strategy_used.value}: "
+                    f"{_compressed.original_tokens}→{_compressed.compressed_tokens} tokens "
+                    f"({100*(1-_compressed.compressed_tokens/max(_compressed.original_tokens,1)):.0f}% saved)"
+                )
+                full_messages = _compressed.messages
+
+        full_messages, _ = auto_compact_for_role(full_messages, role=role, max_output_tokens=min(max_tokens, 1024))
+        
         logger.info(f"[Model Start] Role: {role.value.upper()} | Model: {model_name}")
         stream = llm.create_chat_completion(
-            messages=full_messages, 
-            stream=True, 
-            max_tokens=max_tokens, 
-            temperature=actual_temp, 
+            messages=full_messages,
+            stream=True,
+            max_tokens=max_tokens,
+            temperature=actual_temp,
             repeat_penalty=rep_penalty,
             frequency_penalty=freq_penalty,
             presence_penalty=pres_penalty,
             top_p=top_p,
-            top_k=top_k
+            top_k=top_k,
+            min_p=0.05,
+            seed=42 + loop_idx,
         )
         loop_content = ""
         finish_reason = "stop"
@@ -916,6 +1180,26 @@ def _stream_tokens(
                 yield {"type": "token", "content": buffer}
                 loop_content += buffer
 
+        # Detect premature stops that llama-cpp-python falsely reports as "stop"
+        if finish_reason == "stop":
+            looks_incomplete = False
+            prompt_est = sum(len(m.get("content", "")) for m in full_messages) // 4
+            if in_thinking:
+                looks_incomplete = True
+            elif loop_content.count("```") % 2 != 0:
+                looks_incomplete = True
+            elif token_count >= max_tokens - 10:
+                looks_incomplete = True
+            elif hasattr(llm, "n_ctx") and (prompt_est + token_count) >= llm.n_ctx() - 50:
+                looks_incomplete = True
+            elif loop_content.strip() and re.search(r'[a-zA-Z0-9,]$', loop_content.strip()):
+                looks_incomplete = True
+            
+            logger.info(f"DEBUG LOOP CONTENT END: {repr(loop_content[-20:])} | Incomplete? {looks_incomplete}")
+            
+            if looks_incomplete:
+                finish_reason = "length"
+
         yield {"type": "finish", "reason": finish_reason}
 
         if finish_reason == "length":
@@ -923,7 +1207,7 @@ def _stream_tokens(
             full_messages.append({
                 "role": "user",
                 "content": "Continue exactly where you left off, from the very next character. "
-                "Do not repeat anything, do not write intro text or markdown blocks, just the raw continuation."
+                "Do not repeat anything."
             })
         else:
             break
@@ -1000,8 +1284,7 @@ def ask_stream(
                 full += ev["content"]
 
         if not _keep_loaded:
-            if not _keep_loaded:
-                unload_model()
+            unload_model()
 
         if force_role == ModelRole.MATH:
             full, mw = _apply_math_harness(full)
@@ -1028,6 +1311,27 @@ def ask_stream(
             elif sandbox.result == SandboxResult.FAIL:
                 yield {"type": "harness_warning", "content": f"Sandbox: {sandbox.tests_failed} test(s) failed"}
 
+            # ── Code Review toggle ──
+            if isinstance(settings, dict) and settings.get("code_review"):
+                yield {"type": "clear"}
+                yield {"type": "status", "content": "Reviewing code..."}
+                _rmsgs = optimized + [
+                    {"role": "assistant", "content": full},
+                    {"role": "user", "content": "Review this code. Fix issues. Return corrected code in a block or say 'No issues found.'"}
+                ]
+                _rev = ""
+                for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+                    yield ev
+                    if ev["type"] == "token":
+                        _rev += ev["content"]
+                if not _keep_loaded:
+                    unload_model()
+                _rl = _detect_language(_rev) or lang
+                _rev, _hw = _apply_and_yield_harness(_rev, _rl)
+                for w in _hw:
+                    yield w
+                full = _rev
+
         cleaned = _quality_guard(full)
         if cleaned != full:
             yield {"type": "clear"}
@@ -1040,16 +1344,40 @@ def ask_stream(
         yield from _run_continuation(user_query, history, retriever)
         return
 
-    yield {"type": "status", "content": "Analyzing query..."}
-    task_type, direct_answer = classify_task(user_query, history)
+    web_context = ""
+    original_query = user_query.strip()
+    
+    # Manual @web override
+    if original_query.lower().startswith("@web "):
+        search_term = original_query[5:].strip()
+        user_query = search_term
+        task_type = TaskType.SEARCH
+        direct_answer = search_term
+    else:
+        yield {"type": "status", "content": "Analyzing query..."}
+        task_type, direct_answer = classify_task(user_query, history)
+
+    if task_type == TaskType.SEARCH:
+        search_term = direct_answer or user_query
+        yield {"type": "status", "content": f"Searching the web for '{search_term}'..."}
+        try:
+            from src.web_search import WebSearch
+            ws = WebSearch()
+            web_context = ws.search_to_context(search_term, max_results=3)
+            if not web_context:
+                yield {"type": "status", "content": "Web search returned no results."}
+        except Exception as e:
+            logger.warning(f"Web search failed: {e}")
+            yield {"type": "status", "content": "Web search unavailable."}
+        
+        # After searching, fallback to reasoning model to synthesize answer
+        task_type = TaskType.REASONING
 
     if task_type is None:
         if direct_answer:
-            with open("/Users/ahmed/Iris-AI/logs/debug_triage.log", "w") as f:
-                f.write(f"RAW DIRECT ANSWER:\n{repr(direct_answer)}\n\n")
+            logger.debug(f"RAW DIRECT ANSWER:\n{repr(direct_answer)}\n\n")
             cleaned = _quality_guard(direct_answer)
-            with open("/Users/ahmed/Iris-AI/logs/debug_triage.log", "a") as f:
-                f.write(f"CLEANED:\n{repr(cleaned)}\n\n")
+            logger.debug(f"CLEANED:\n{repr(cleaned)}\n\n")
             yield {"type": "token", "content": cleaned}
             yield {"type": "raw_response", "content": cleaned}
         return
@@ -1067,13 +1395,19 @@ def ask_stream(
         }
         context = retriever.retrieve(user_query, top_k=3, category=rag_cats.get(task_type, "general"))
 
-    optimized = [{"role": "user", "content": user_query}]
+    final_query = user_query
+    if web_context:
+        final_query = f"{web_context}User Query: {user_query}"
+        
+    optimized = [{"role": "user", "content": final_query}]
     if history:
         cfg = load_generation_config()
         profile = str(cfg.get("compacting_profile", "medium")).lower()
         num_history = 2 if profile == "aggressive" else (10 if profile == "low" else 5)
         recent = history[-num_history:]
         optimized = [{"role": m["role"], "content": m["content"]} for m in recent] + optimized
+
+    optimized, _ = auto_compact_for_role(optimized, role=ModelRole.REASONING if task_type == TaskType.REASONING else (ModelRole.CODE if task_type in (TaskType.CODING_SIMPLE, TaskType.CODING_COMPLEX) else ModelRole.GENERAL), max_output_tokens=2048)
 
     if task_type == TaskType.GENERAL:
         yield {"type": "status", "content": "Thinking deeply..."}
@@ -1083,8 +1417,7 @@ def ask_stream(
             if ev["type"] == "token":
                 full += ev["content"]
         if not _keep_loaded:
-            if not _keep_loaded:
-                unload_model()
+            unload_model()
         cleaned = _quality_guard(full)
         if cleaned != full:
             yield {"type": "clear"}
@@ -1092,15 +1425,16 @@ def ask_stream(
         yield {"type": "raw_response", "content": cleaned}
 
     elif task_type == TaskType.REASONING:
-        yield {"type": "status", "content": "Reasoning step-by-step..."}
+        yield {"type": "status", "content": "Deep analysis..."}
         full = ""
-        for ev in _stream_tokens(ModelRole.REASONING, optimized, max_tokens=4096, temperature=0.5, think_mode="show"):
+        _r_temp = 0.7 if web_context else 0.5  # richer when grounded in search results
+        _r_tokens = 6144 if web_context else 4096  # more room when facts are provided
+        for ev in _stream_tokens(ModelRole.REASONING, optimized, max_tokens=_r_tokens, temperature=_r_temp, think_mode="show"):
             yield ev
             if ev["type"] == "token":
                 full += ev["content"]
         if not _keep_loaded:
-            if not _keep_loaded:
-                unload_model()
+            unload_model()
         yield {"type": "raw_response", "content": full}
 
     elif task_type == TaskType.MATH:
@@ -1111,8 +1445,7 @@ def ask_stream(
             if ev["type"] == "token":
                 full += ev["content"]
         if not _keep_loaded:
-            if not _keep_loaded:
-                unload_model()
+            unload_model()
 
         full, mw = _apply_math_harness(full)
         for w in mw:
@@ -1141,8 +1474,7 @@ def ask_stream(
             if ev["type"] == "token":
                 full += ev["content"]
         if not _keep_loaded:
-            if not _keep_loaded:
-                unload_model()
+            unload_model()
 
         lang = _detect_language(full)
         err = check_syntax(full, lang)
@@ -1187,13 +1519,31 @@ def ask_stream(
             for rerr in sandbox.runtime_errors[:3]:
                 yield {"type": "harness_warning", "content": f"Runtime: {rerr[:200]}"}
 
+        # ── Code Review toggle ──
+        if isinstance(settings, dict) and settings.get("code_review"):
+            yield {"type": "clear"}
+            yield {"type": "status", "content": "Reviewing code quality..."}
+            _rmsgs = optimized + [
+                {"role": "assistant", "content": full},
+                {"role": "user", "content": "Review this code for correctness, edge cases, performance, and best practices. Fix issues inside a code block with filename comment, or say 'No issues found.'"}
+            ]
+            _rev = ""
+            for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+                yield ev
+                if ev["type"] == "token":
+                    _rev += ev["content"]
+            if not _keep_loaded:
+                unload_model()
+            _rl = _detect_language(_rev) or lang
+            _rev, _hw = _apply_and_yield_harness(_rev, _rl)
+            for w in _hw:
+                yield w
+            full = _rev
+
         yield {"type": "raw_response", "content": full}
 
     elif task_type == TaskType.CODING_COMPLEX:
         yield from _run_complex_coding(user_query, history, optimized, context, retriever, settings)
-
-    if not _keep_loaded:
-        unload_model()
 
 
 def _apply_and_yield_harness(text: str, language: str) -> Tuple[str, List[dict]]:
@@ -1442,8 +1792,7 @@ def _run_complex_coding(
             if ev["type"] == "token":
                 corrected += ev["content"]
         if not _keep_loaded:
-            if not _keep_loaded:
-                unload_model()
+            unload_model()
 
         second_err = check_syntax(corrected, lang)
         if second_err:
@@ -1462,6 +1811,27 @@ def _run_complex_coding(
     elif sandbox.runtime_errors:
         for rerr in sandbox.runtime_errors[:3]:
             yield {"type": "harness_warning", "content": f"Runtime: {rerr[:200]}"}
+
+    # ── Code Review toggle ──
+    if isinstance(settings, dict) and settings.get("code_review"):
+        yield {"type": "clear"}
+        yield {"type": "status", "content": "Reviewing final code quality..."}
+        _rmsgs = optimized + [
+            {"role": "assistant", "content": final_output},
+            {"role": "user", "content": "Final review pass. Fix remaining issues inside a code block with filename, or say 'No issues found.'"}
+        ]
+        _rev = ""
+        for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+            yield ev
+            if ev["type"] == "token":
+                _rev += ev["content"]
+        if not _keep_loaded:
+            unload_model()
+        _rl = _detect_language(_rev) or lang
+        _rev, _hw = _apply_and_yield_harness(_rev, _rl)
+        for w in _hw:
+            yield w
+        final_output = _rev
 
     yield {"type": "raw_response", "content": final_output}
 
@@ -1484,8 +1854,7 @@ def generate_internal_code(
         return res["choices"][0]["message"]["content"]
     finally:
         if not _keep_loaded:
-            if not _keep_loaded:
-                unload_model()
+            unload_model()
 
 
 
@@ -1520,7 +1889,7 @@ class BookRetriever:
         file_entries: list = []
         abs_root = os.path.abspath(self.raw_data_dir)
 
-        for ext in ["*.md", "*.txt"]:
+        for ext in ["*.md", "*.txt", "*.pdf", "*.docx", "*.xlsx", "*.pptx", "*.csv", "*.html", "*.json", "*.xml"]:
             for path in glob.glob(os.path.join(abs_root, ext)):
                 file_entries.append((path, "general"))
             for path in glob.glob(os.path.join(abs_root, "**", ext), recursive=True):
@@ -1564,8 +1933,19 @@ class BookRetriever:
 
         for path, category in file_entries:
             try:
-                with open(path, "r", encoding="utf-8") as f:
-                    raw_text = f.read()
+                ext = os.path.splitext(path)[1].lower()
+                if ext in [".md", ".txt", ".json", ".xml", ".csv"]:
+                    with open(path, "r", encoding="utf-8") as f:
+                        raw_text = f.read()
+                else:
+                    try:
+                        from markitdown import MarkItDown
+                        md = MarkItDown()
+                        result = md.convert(path)
+                        raw_text = result.text_content
+                    except ImportError:
+                        logger.warning(f"[RAG] markitdown not installed. Cannot read {path}")
+                        continue
             except Exception as e:
                 logger.warning(f"[RAG] Could not read {path}: {e}")
                 continue

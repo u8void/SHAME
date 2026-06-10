@@ -407,17 +407,9 @@ def parse_ai_response(text: str) -> dict | None:
     except json.JSONDecodeError:
         return None
 
-def ai_agent_handle(user_input: str, *args, **kwargs):
+def ai_agent_handle(user_input: str, retriever=None, history=None, **kwargs):
     """Generator that yields events for the frontend: tokens, actions, results."""
-    if len(args) == 5:
-        retriever = args[3]
-        history = args[4]
-    elif len(args) == 2:
-        retriever = args[0]
-        history = args[1]
-    else:
-        retriever = kwargs.get("retriever")
-        history = kwargs.get("history") or []
+    history = history or []
 
     force_role = kwargs.get("force_role") or getattr(ai_agent_handle, "force_role", None)
     settings = kwargs.get("settings", {})
@@ -2585,16 +2577,20 @@ def handle_copy_file(src: str, dst: str) -> str:
         return f"Could not copy: {e}"
 
 def handle_delete_file(path: str) -> str:
-    import subprocess
+    import platform, shutil
     p = _resolve(path)
+    if not p.exists():
+        return f"File not found: {p}"
     try:
-        if not p.exists():
-            return f"File not found: {p}"
-
-        subprocess.run(["osascript", "-e",
-            f'tell app "Finder" to delete POSIX file "{p}"'],
-            check=True, capture_output=True)
+        import send2trash
+        send2trash.send2trash(str(p))
         return f"Moved to Trash: {p}"
+    except ImportError:
+        try:
+            p.unlink() if p.is_file() else shutil.rmtree(str(p))
+            return f"Deleted: {p}"
+        except Exception as e:
+            return f"Could not delete: {e}"
     except Exception as e:
         return f"Could not delete: {e}"
 

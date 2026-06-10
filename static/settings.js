@@ -30,6 +30,7 @@
         repetition_penalty: document.getElementById('cs_repetition_penalty'),
         n_ctx_allocation  : document.getElementById('cs_n_ctx_allocation'),
         compacting_profile: document.getElementById('cs_compacting_profile'),
+        code_review       : document.getElementById('cs_code_review'),
     };
 
     const saveChatSettingsBtn = document.getElementById('saveChatSettingsBtn');
@@ -62,6 +63,10 @@
             csFields.compacting_profile.value = idx; 
             const display_vals = ['Low','Medium','Aggressive'];
             document.getElementById('val_compacting_profile').innerText = display_vals[idx]; 
+        }
+
+        if (csFields.code_review) {
+            csFields.code_review.checked = s.code_review === true;
         }
 
         settingsPanel.classList.add('open');
@@ -130,6 +135,40 @@
     }
 
     msFields.roleSelect?.addEventListener('change', populateModelSettings);
+
+    // ── Save Chat Settings ──
+    saveChatSettingsBtn?.addEventListener('click', () => {
+        const s = window.getChatSettings ? window.getChatSettings() : {};
+
+        s.max_new_tokens     = parseInt(csFields.max_new_tokens?.value) || 512;
+        s.temperature        = parseFloat(csFields.temperature?.value) || 0.6;
+        s.top_p              = parseFloat(csFields.top_p?.value) || 0.9;
+        s.top_k              = parseInt(csFields.top_k?.value) || 40;
+        s.repetition_penalty = parseFloat(csFields.repetition_penalty?.value) || 1.3;
+        s.code_review        = csFields.code_review?.checked || false;
+
+        const n_ctx_map = ['auto','4096','8192','16384','32768'];
+        s.n_ctx_allocation = n_ctx_map[parseInt(csFields.n_ctx_allocation?.value) || 0] || 'auto';
+
+        const cp_map = ['low','medium','aggressive'];
+        s.compacting_profile = cp_map[parseInt(csFields.compacting_profile?.value) || 1] || 'medium';
+
+        localStorage.setItem('iris_chat_settings', JSON.stringify(s));
+        if (window.setChatSettings) window.setChatSettings(s);
+
+        // Persist to server
+        fetch('/save_settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                code_review: s.code_review,
+                n_ctx_allocation: s.n_ctx_allocation,
+                compacting_profile: s.compacting_profile
+            })
+        }).catch(() => {});
+
+        showToast('Chat settings saved');
+    });
 
     saveModelSettingsBtn?.addEventListener('click', async () => {
         const role = msFields.roleSelect?.value;

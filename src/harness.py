@@ -243,7 +243,8 @@ def normalize_header(text: str, language: str='python') -> Tuple[str, List[str]]
         lines.insert(0, '#!/usr/bin/env bash')
         warnings.append('Header: added #!/usr/bin/env bash')
     return ('\n'.join(lines), warnings)
-_PASSES = [('normalize_fences', normalize_fences), ('redact_secrets', redact_secrets), ('repair_truncation', repair_truncation), ('strip_comments', strip_comments), ('inject_imports', inject_imports), ('normalize_header', normalize_header), ('deduplicate_blocks', deduplicate_blocks), ('clean_whitespace', clean_whitespace)]
+_PASSES = [('normalize_fences', normalize_fences), ('redact_secrets', redact_secrets), ('repair_truncation', repair_truncation), ('inject_imports', inject_imports), ('normalize_header', normalize_header), ('deduplicate_blocks', deduplicate_blocks), ('clean_whitespace', clean_whitespace)]
+_OPTIONAL_PASSES = {'strip_comments': strip_comments}  # opt-in only — never run by default
 
 def apply_all(text: str, language: str='python', enabled: Optional[List[str]]=None) -> Tuple[str, List[dict]]:
     all_warnings: List[dict] = []
