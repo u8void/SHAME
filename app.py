@@ -22,8 +22,8 @@ logger = get_logger("app")
 
 from src.iris import ask_stream, solve_math, BookRetriever, analyze_image
 
-# Title generation lock — prevents concurrent llama.cpp calls (decode -3 errors)
-_title_lock = threading.Lock()
+# Global generation lock — prevents concurrent llama.cpp calls (segmentation faults)
+global_generation_lock = threading.Lock()
 
 parser = argparse.ArgumentParser(description="Run the Iris AI Flask App")
 parser.add_argument("--preview-only", action="store_true",
@@ -257,17 +257,18 @@ def chat():
     from src.controller import ai_agent_handle
 
     def generate():
-        try:
-            for event in ai_agent_handle(
-                user_message,
-                get_retriever(),
-                agent_history,
-                settings=settings
-            ):
-                yield f"data: {json.dumps(event)}\n\n"
-        except Exception as e:
-            err_msg = str(e)
-            yield f"data: {json.dumps({'type': 'token', 'content': f'\\n\\n> ❌ **Iris Error:** {err_msg}'})}\n\n"
+        with global_generation_lock:
+            try:
+                for event in ai_agent_handle(
+                    user_message,
+                    get_retriever(),
+                    agent_history,
+                    settings=settings
+                ):
+                    yield f"data: {json.dumps(event)}\n\n"
+            except Exception as e:
+                err_msg = str(e)
+                yield f"data: {json.dumps({'type': 'token', 'content': f'\\n\\n> ❌ **Iris Error:** {err_msg}'})}\n\n"
 
     resp = Response(generate(), mimetype='text/event-stream')
     resp.headers['X-Accel-Buffering'] = 'no'
@@ -307,7 +308,8 @@ def analyze_image_route():
         if PREVIEW_MODE:
             reply = f"[Preview Mode] Would analyse '{filename}' with prompt: {prompt}"
         else:
-            reply = analyze_image(save_path, prompt)
+            with global_generation_lock:
+                reply = analyze_image(save_path, prompt)
     except Exception as e:
         reply = f"Image analysis failed: {e}"
     finally:
@@ -354,6 +356,12 @@ def voice_chat_endpoint():
 
         if not user_text or not user_text.strip():
             return jsonify({"error": "Could not understand audio."}), 400
+            
+        VOICE_IDENTITY = (
+            "You are Iris AI, a powerful AI assistant created entirely by Ahmed Barakat. "
+            "Under NO circumstances should you mention Alibaba, Qwen, DeepSeek, OpenAI, or any other company/model name. "
+            "CRITICAL LANGUAGE RULE: You MUST reply in the EXACT SAME LANGUAGE as the user's CURRENT message. If the user speaks English, reply in English. If the user speaks Arabic, reply in Arabic."
+        )
 
         # 2. Unified Web Search (bulletproof fallback chain)
         from src.web_search import WebSearch, extract_search_keywords
@@ -378,11 +386,10 @@ def voice_chat_endpoint():
         import emoji
 
         if web_context:
-            # ── Web-grounded answer: use the main triage model (Qwen3-4B) ──
-            from src.iris import load_model, ModelRole, unload_model, IRIS_IDENTITY
-            llm = load_model(ModelRole.TRIAGE)
+            # ── Web-grounded answer: use the fast Voice LLM (no cold start) ──
+            llm = vm.load_voice_llm()
             sys_prompt = (
-                f"{IRIS_IDENTITY}\n"
+                f"{VOICE_IDENTITY}\n"
                 "You are Iris's voice assistant engine. Your response will be spoken aloud "
                 "via text-to-speech, so keep it brief and natural.\n"
                 "RULES:\n"
@@ -390,35 +397,38 @@ def voice_chat_endpoint():
                 "2. NEVER invent facts not present in the search results.\n"
                 "3. If the results don't clearly answer the question, say so honestly.\n"
                 "4. Answer in 2-3 natural spoken sentences.\n"
-                "5. Do NOT use markdown, emojis, asterisks, or special formatting."
+                "5. DO NOT analyze the user's grammar. DO NOT break down the user's sentence. DO NOT say 'The user is asking'.\n"
+                "6. Do NOT use markdown, emojis, asterisks, or special formatting."
             )
             full_msg = [
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": f"{web_context}\n\nUser: {user_text}"},
             ]
-            res = llm.create_chat_completion(
-                messages=full_msg, max_tokens=300, temperature=0.3
-            )
+            with global_generation_lock:
+                res = llm.create_chat_completion(
+                    messages=full_msg, max_tokens=300, temperature=0.3
+                )
             bot_text = res["choices"][0]["message"]["content"].strip()
             bot_text = re.sub(r'<think>.*?</think>', '', bot_text, flags=re.DOTALL).strip()
-            # Release the 4B model immediately — don't hold it in RAM
-            unload_model()
             tts_text = emoji.replace_emoji(bot_text, replace='')
             tts_text = tts_text.replace('*', '')
         else:
             # ── Casual chat: use the fast 1B voice LLM ──
             llm = vm.load_voice_llm()
             system_prompt = (
-                "You are Iris, a friendly and highly conversational voice assistant. "
+                f"{VOICE_IDENTITY}\n"
+                "You are a friendly and highly conversational voice assistant. "
                 "Give extremely brief, concise, and natural human-sounding answers. "
-                "Never output your thinking process or chain of thought. Answer directly in 1-2 short sentences maximum."
+                "DO NOT analyze the user's grammar. DO NOT break down the user's sentence. DO NOT say 'The user is asking'. "
+                "Answer directly in 1-2 short sentences maximum."
             )
             messages = [{"role": "system", "content": system_prompt}]
             for msg in voice_history:
                 messages.append(msg)
             messages.append({"role": "user", "content": user_text})
 
-            res = llm.create_chat_completion(messages=messages, max_tokens=250, temperature=0.7)
+            with global_generation_lock:
+                res = llm.create_chat_completion(messages=messages, max_tokens=250, temperature=0.7)
             bot_text = res["choices"][0]["message"]["content"].strip()
             bot_text = re.sub(r'<think>.*?</think>', '', bot_text, flags=re.DOTALL).strip()
             tts_text = emoji.replace_emoji(bot_text, replace='')
@@ -450,7 +460,7 @@ def generate_title():
     if not messages or len(messages) == 0:
         return jsonify({"title": "New Conversation"})
 
-    with _title_lock:
+    with global_generation_lock:
         try:
             from src.iris import load_model, ModelRole, _keep_loaded, unload_model
             import re

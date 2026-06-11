@@ -34,14 +34,12 @@ for arg in "$@"; do
   esac
 done
 
-# ── Header ────────────────────────────────────────────────────────────────────
 echo -e "${BOLD}"
 echo "  ╔══════════════════════════════════════════╗"
 echo "  ║         Iris AI — Setup Script           ║"
 echo "  ╚══════════════════════════════════════════╝"
 echo -e "${RESET}"
 
-# ── 1. Verify Environment ─────────────────────────────────────────────────────
 section "Step 1/3 — Verify Environment"
 
 if [ ! -d ".git" ]; then
@@ -65,7 +63,6 @@ else
   ok "llama-quantize found in PATH."
 fi
 
-# ── 2. Download convert_hf_to_gguf.py ─────────────────────────────────────────
 section "Step 2/3 — GGUF Converter Script"
 
 SCRIPT_DIR="$(pwd)/scripts"
@@ -85,7 +82,6 @@ else
   fi
 fi
 
-# ── 3. Python dependencies ────────────────────────────────────────────────────
 section "Step 3/3 — Python Dependencies"
 
 if [ "$SKIP_PIP" = true ]; then

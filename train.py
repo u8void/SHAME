@@ -739,9 +739,9 @@ def main():
     else:
         target = "cpu"
 
-    roles_to_train = resolve_roles(args.train_role)
+    roles_to_train = resolve_roles(args.role)
     if not roles_to_train:
-        print(f"[ERROR] No valid training roles resolved from: {args.train_role}")
+        print(f"[ERROR] No valid training roles resolved from: {args.role}")
         sys.exit(1)
 
     print(f"[INFO] Target training device: {target.upper()}")

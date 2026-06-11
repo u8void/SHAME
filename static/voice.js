@@ -47,7 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.audio_url) {
                 voiceTranscription.style.display = 'block';
                 voiceTranscription.innerHTML = `
-                    <div><strong>Iris:</strong> Hi, How can I assist you today?</div>
+                <div dir="auto"><strong>Iris:</strong> Hi, How can I assist you today?</div>
                 `;
                 playAudioResponse(data.audio_url);
             }
@@ -248,8 +248,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             voiceTranscription.style.display = 'block';
             voiceTranscription.innerHTML = `
-                <div style="margin-bottom:12px; opacity: 0.8"><strong>You:</strong> ${data.user_text}</div>
-                <div><strong>Iris:</strong> ${data.bot_text}</div>
+                <div dir="auto" style="margin-bottom:12px; opacity: 0.8"><strong>You:</strong> ${data.user_text}</div>
+                <div dir="auto"><strong>Iris:</strong> ${data.bot_text}</div>
             `;
             
             // Scroll to bottom

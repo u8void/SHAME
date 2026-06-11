@@ -322,7 +322,7 @@ def detect_intent(text: str):
     return "ai_agent", None
 
 import os
-_prompt_path = os.path.join(os.path.dirname(__file__), "training", "control", "control.md")
+_prompt_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "training", "control", "control.md")
 try:
     with open(_prompt_path, "r", encoding="utf-8") as f:
         _content = f.read().strip()
@@ -348,7 +348,7 @@ def _get_agent_system_prompt() -> str:
     control.md — they will always be included.
     """
     global _agent_prompt_cache
-    path = os.path.join(os.path.dirname(__file__), "training", "control.md")
+    path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "training", "control", "control.md")
     try:
         mtime = os.path.getmtime(path)
         if _agent_prompt_cache["text"] is None or mtime != _agent_prompt_cache["mtime"]:

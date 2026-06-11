@@ -6,17 +6,29 @@ import soundfile as sf
 import librosa
 from threading import Lock
 
-# Voice Models
-STT_MODEL_ID = "distil-whisper/distil-small.en"
+STT_MODEL_ID = "openai/whisper-large-v3-turbo"
 TTS_MODEL_DIR = "models/voice"
-PIPER_MODEL_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx"
-PIPER_JSON_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
 
-VOICE_LLM_URL = "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+PIPER_MODELS = {
+    "en": {
+        "onnx": "en_US-lessac-medium.onnx",
+        "json": "en_US-lessac-medium.onnx.json",
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx",
+        "json_url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
+    },
+    "ar": {
+        "onnx": "ar_JO-kareem-medium.onnx",
+        "json": "ar_JO-kareem-medium.onnx.json",
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/ar/ar_JO/kareem/medium/ar_JO-kareem-medium.onnx",
+        "json_url": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/ar/ar_JO/kareem/medium/ar_JO-kareem-medium.onnx.json"
+    }
+}
+
+VOICE_LLM_URL = "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
 
 _stt_processor = None
 _stt_model = None
-_tts_pipeline = None
+_tts_pipelines = {}
 _voice_llm = None
 
 _voice_lock = Lock()
@@ -42,36 +54,39 @@ def load_stt_model():
         
         from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq
         
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
+        device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
         _stt_processor = AutoProcessor.from_pretrained(STT_MODEL_ID)
         _stt_model = AutoModelForSpeechSeq2Seq.from_pretrained(STT_MODEL_ID).to(device)
         
         return _stt_processor, _stt_model
 
-def load_tts_model():
-    global _tts_pipeline
+def load_tts_model(lang="en"):
+    global _tts_pipelines
     with _voice_lock:
-        if _tts_pipeline is not None:
-            return _tts_pipeline
+        if lang in _tts_pipelines:
+            return _tts_pipelines[lang]
             
         import logging
-        logging.getLogger('iris').info("[Voice] Loading Piper TTS model")
+        logging.getLogger('iris').info(f"[Voice] Loading Piper TTS model ({lang})")
         
         os.makedirs(TTS_MODEL_DIR, exist_ok=True)
-        onnx_path = os.path.join(TTS_MODEL_DIR, "en_US-lessac-medium.onnx")
-        json_path = os.path.join(TTS_MODEL_DIR, "en_US-lessac-medium.onnx.json")
+        conf = PIPER_MODELS[lang]
+        
+        onnx_path = os.path.join(TTS_MODEL_DIR, conf["onnx"])
+        json_path = os.path.join(TTS_MODEL_DIR, conf["json"])
         
         if not os.path.exists(onnx_path):
-            _download_file(PIPER_MODEL_URL, onnx_path)
+            _download_file(conf["url"], onnx_path)
         if not os.path.exists(json_path):
-            _download_file(PIPER_JSON_URL, json_path)
+            _download_file(conf["json_url"], json_path)
             
         from piper import PiperVoice
         
-        # Load Piper using ONNX
-        _tts_pipeline = PiperVoice.load(onnx_path, config_path=json_path, use_cuda=False)
+        # Load Piper using ONNX, optionally with CUDA
+        use_cuda = torch.cuda.is_available()
+        _tts_pipelines[lang] = PiperVoice.load(onnx_path, config_path=json_path, use_cuda=use_cuda)
         
-        return _tts_pipeline
+        return _tts_pipelines[lang]
 
 def load_voice_llm():
     global _voice_llm
@@ -80,11 +95,11 @@ def load_voice_llm():
             return _voice_llm
             
         import logging
-        logging.getLogger('iris').info("[Voice] Loading ultra-fast Conversational LLM (Llama-3.2-1B)")
+        logging.getLogger('iris').info("[Voice] Loading ultra-fast Conversational LLM (Qwen2.5-1.5B)")
         
-        # Save as iris_008.gguf in the main models directory
+        # Save as iris_009.gguf in the main models directory
         _root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        llm_path = os.path.join(_root_dir, "models", "iris_008.gguf")
+        llm_path = os.path.join(_root_dir, "models", "iris_009.gguf")
         
         if not os.path.exists(llm_path):
             _download_file(VOICE_LLM_URL, llm_path)
@@ -103,7 +118,7 @@ def load_voice_llm():
 def transcribe_audio(audio_data: bytes, original_filename: str) -> str:
     """Converts recorded audio bytes to text using Moonshine."""
     processor, model = load_stt_model()
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
     
     import tempfile
     
@@ -127,31 +142,41 @@ def transcribe_audio(audio_data: bytes, original_filename: str) -> str:
     return text.strip()
 
 def synthesize_speech(text: str) -> str:
-    """Converts text to speech using Piper TTS and returns a base64 encoded wav."""
-    piper_voice = load_tts_model()
-    
+    """Converts text to speech using Microsoft Edge Neural TTS and returns a base64 encoded mp3."""
+    import re
     import logging
+    import asyncio
+    import base64
+    from edge_tts import Communicate
+    
     logger = logging.getLogger('iris')
     
     if not text.strip():
         return None
         
     try:
-        logger.info("[Voice] Generating Piper TTS response...")
+        logger.info("[Voice] Generating Edge Neural TTS response...")
         
-        import wave
-        import io
-        import base64
+        # Auto-detect language for TTS based on Arabic characters
+        is_ar = bool(re.search(r'[\u0600-\u06FF]', text))
+        voice = "ar-EG-SalmaNeural" if is_ar else "en-US-AriaNeural"
         
-        wav_io = io.BytesIO()
-        with wave.open(wav_io, 'wb') as wav_file:
-            # synthesize_wav automatically sets format, channels, and sample rate
-            piper_voice.synthesize_wav(text.strip(), wav_file)
+        async def get_audio_bytes(text, voice):
+            # Boost rate and pitch slightly to sound more upbeat, casual and human
+            communicate = Communicate(text, voice, rate="+12%", pitch="+4Hz")
+            audio_data = b""
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_data += chunk["data"]
+            return audio_data
             
-        wav_bytes = wav_io.getvalue()
-        b64_audio = base64.b64encode(wav_bytes).decode('utf-8')
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        audio_bytes = loop.run_until_complete(get_audio_bytes(text.strip(), voice))
         
-        return f"data:audio/wav;base64,{b64_audio}"
+        b64_audio = base64.b64encode(audio_bytes).decode('utf-8')
+        
+        return f"data:audio/mp3;base64,{b64_audio}"
         
     except Exception as e:
         logger.error(f"[Voice] TTS failed: {e}")
