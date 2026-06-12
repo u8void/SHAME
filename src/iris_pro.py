@@ -800,85 +800,119 @@ async def ask_stream(
                     yield {"type": "status", "content": "Resuming code generation..."}
                 else:
                     minimized_history = []
-                if history:
-                    last_msg = history[-1]
-                    content = last_msg.get("content", "")
-                    content_clean = re.sub(r'```[\s\S]*?```', '```\n[Code block omitted]\n```', content)
-                    if len(content_clean) > MAX_TRIAGE_CONTENT_CHARS:
-                        content_clean = content_clean[:MAX_TRIAGE_CONTENT_CHARS] + "\n...[truncated]"
-                    minimized_history.append({"role": last_msg.get("role"), "content": content_clean})
-                triage_query = user_query
-                if "I have attached a file named" in triage_query and "User Prompt:\n" in triage_query:
-                    parts = triage_query.split("User Prompt:\n")
-                    if len(parts) > 1:
-                        triage_query = parts[-1]
-                minimized_history.append({"role": "user", "content": triage_query})
+                    if history:
+                        last_msg = history[-1]
+                        content = last_msg.get("content", "")
+                        content_clean = re.sub(r'```[\s\S]*?```', '```\n[Code block omitted]\n```', content)
+                        if len(content_clean) > MAX_TRIAGE_CONTENT_CHARS:
+                            content_clean = content_clean[:MAX_TRIAGE_CONTENT_CHARS] + "\n...[truncated]"
+                        minimized_history.append({"role": last_msg.get("role"), "content": content_clean})
+                    triage_query = user_query
+                    if "I have attached a file named" in triage_query and "User Prompt:\n" in triage_query:
+                        parts = triage_query.split("User Prompt:\n")
+                        if len(parts) > 1:
+                            triage_query = parts[-1]
+                    minimized_history.append({"role": "user", "content": triage_query})
 
-                yield {"type": "status", "content": "Analyzing query complexity..."}
-                triage_prompt = (
-                    "You are the Iris AI query router.\n"
-                    "If the user asks a conversational/general knowledge question, do NOT output any tags; answer directly.\n\n"
-                    "Otherwise, output EXACTLY ONE tag and NOTHING ELSE. DO NOT answer the query yourself:\n"
-                    "- [TASK_TYPE: coding_simple] (for simple coding questions, explaining code, syntax, basic functions, single script edits)\n"
-                    "- [TASK_TYPE: coding_complex] (for large projects, writing games, custom emulators/drivers, multi-file codebases, or complex logic coding)\n"
-                    "- [TASK_TYPE: math] (for equations, proofs, algorithmic derivations)\n"
-                    "- [TASK_TYPE: reasoning] (for deep logic puzzles, architecture design, long analysis)\n\n"
-                    "CRITICAL: If the query mentions writing a complete game (e.g. Pong), building compilers, operating system bootloaders, or complex hardware simulation, output [TASK_TYPE: coding_complex]."
-                )
-                triage_messages = [
-                    {"role": "system", "content": triage_prompt},
-                    *minimized_history
-                ]
+                    yield {"type": "status", "content": "Analyzing query complexity..."}
+                    triage_prompt = (
+                        "You are the Iris AI query router.\n"
+                        "If the user asks a conversational/general knowledge question, do NOT output any tags; answer directly.\n\n"
+                        "Otherwise, output EXACTLY ONE tag and NOTHING ELSE. DO NOT answer the query yourself:\n"
+                        "- [TASK_TYPE: coding_simple] (for simple coding questions, explaining code, syntax, basic functions, single script edits)\n"
+                        "- [TASK_TYPE: coding_complex] (for large projects, writing games, custom emulators/drivers, multi-file codebases, or complex logic coding)\n"
+                        "- [TASK_TYPE: math] (for equations, proofs, algorithmic derivations)\n"
+                        "- [TASK_TYPE: reasoning] (for deep logic puzzles, architecture design, long analysis)\n\n"
+                        "CRITICAL: If the query mentions writing a complete game (e.g. Pong), building compilers, operating system bootloaders, or complex hardware simulation, output [TASK_TYPE: coding_complex]."
+                    )
+                    triage_messages = [
+                        {"role": "system", "content": triage_prompt},
+                        *minimized_history
+                    ]
 
-                t0_triage = time.perf_counter()
-                triage_answer = ""
-                triage_usage = {}
-                try:
-                    async for chunk in client.stream_chat(
-                        model=Model.ORCHESTRATOR.value,
-                        messages=triage_messages,
-                        temperature=0.2,
-                        max_tokens=MAX_TOKENS_TRIAGE,
-                    ):
-                        if chunk.get("usage"):
-                            triage_usage = chunk["usage"]
-                        token = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                        if token:
-                            triage_answer += token
-                        if chunk.get("keepalive"):
-                            yield {"type": "status", "content": "Analyzing..."}
-                except (openai.APIStatusError, openai.APIConnectionError, openai.APITimeoutError) as exc:
-                    log.exception("Unexpected error in Triage stage: %s", exc)
-                    triage_answer = "[TASK_TYPE: general]"
+                    t0_triage = time.perf_counter()
+                    triage_answer = ""
+                    triage_usage = {}
+                    try:
+                        async for chunk in client.stream_chat(
+                            model=Model.ORCHESTRATOR.value,
+                            messages=triage_messages,
+                            temperature=0.2,
+                            max_tokens=MAX_TOKENS_TRIAGE,
+                        ):
+                            if chunk.get("usage"):
+                                triage_usage = chunk["usage"]
+                            token = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            if token:
+                                triage_answer += token
+                            if chunk.get("keepalive"):
+                                yield {"type": "status", "content": "Analyzing..."}
+                    except (openai.APIStatusError, openai.APIConnectionError, openai.APITimeoutError) as exc:
+                        log.exception("Unexpected error in Triage stage: %s", exc)
+                        triage_answer = "[TASK_TYPE: general]"
 
-                task_type = None
-                if re.search(r'\[\s*task_type:\s*coding_complex\s*\]', triage_answer, re.IGNORECASE): task_type = TaskType.CODING_COMPLEX
-                elif re.search(r'\[\s*task_type:\s*coding_simple\s*\]', triage_answer, re.IGNORECASE): task_type = TaskType.CODING_SIMPLE
-                elif re.search(r'\[\s*task_type:\s*coding\s*\]', triage_answer, re.IGNORECASE): task_type = TaskType.CODING_SIMPLE
-                elif re.search(r'\[\s*task_type:\s*math\s*\]', triage_answer, re.IGNORECASE): task_type = TaskType.MATH
-                elif re.search(r'\[\s*task_type:\s*reasoning\s*\]', triage_answer, re.IGNORECASE): task_type = TaskType.REASONING
-                elif re.search(r'\[\s*task_type:\s*general\s*\]', triage_answer, re.IGNORECASE): task_type = TaskType.GENERAL
+                    task_type = None
+                    if re.search(r'\[\s*task_type:\s*coding_complex\s*\]', triage_answer, re.IGNORECASE): task_type = TaskType.CODING_COMPLEX
+                    elif re.search(r'\[\s*task_type:\s*coding_simple\s*\]', triage_answer, re.IGNORECASE): task_type = TaskType.CODING_SIMPLE
+                    elif re.search(r'\[\s*task_type:\s*coding\s*\]', triage_answer, re.IGNORECASE): task_type = TaskType.CODING_SIMPLE
+                    elif re.search(r'\[\s*task_type:\s*math\s*\]', triage_answer, re.IGNORECASE): task_type = TaskType.MATH
+                    elif re.search(r'\[\s*task_type:\s*reasoning\s*\]', triage_answer, re.IGNORECASE): task_type = TaskType.REASONING
+                    elif re.search(r'\[\s*task_type:\s*general\s*\]', triage_answer, re.IGNORECASE): task_type = TaskType.GENERAL
 
-                if task_type is None and "task_type" not in triage_answer.lower():
-                    task_type = fallback_classify(user_query)
+                    if task_type is None and "task_type" not in triage_answer.lower():
+                        task_type = fallback_classify(user_query)
 
-                if task_type is None:
-                    triage_clean = triage_answer.strip()
-                    if not triage_clean:
-                        triage_clean = "Hello! How can I help you today?"
-                    
-                    yield {"type": "token", "content": triage_clean}
-                    elapsed = time.perf_counter() - t0_triage
-                    synthetic_raw = {
-                        "choices": [{"message": {"content": triage_clean}}],
-                        "usage": triage_usage
-                    }
-                    hop = _timed_hop("0:triage_answer", Model.ORCHESTRATOR.value, synthetic_raw, elapsed)
-                    hop.content = triage_clean
-                    hops.append(hop)
-                    return
+                    if task_type is None:
+                        triage_clean = triage_answer.strip()
+                        if not triage_clean:
+                            triage_clean = "Hello! How can I help you today?"
+                        
+                        yield {"type": "token", "content": triage_clean}
+                        elapsed = time.perf_counter() - t0_triage
+                        synthetic_raw = {
+                            "choices": [{"message": {"content": triage_clean}}],
+                            "usage": triage_usage
+                        }
+                        hop = _timed_hop("0:triage_answer", Model.ORCHESTRATOR.value, synthetic_raw, elapsed)
+                        hop.content = triage_clean
+                        hops.append(hop)
+                        return
 
                 yield {"type": "status", "content": f"Task categorized as {task_type.value.upper()}..."}
+
+            if task_type == TaskType.CONTROL:
+                yield {"type": "status", "content": "Generating computer command..."}
+                from src.controller import _get_agent_system_prompt, parse_ai_response, execute_action_by_dict
+                
+                control_messages = [{"role": "system", "content": _get_agent_system_prompt()}, {"role": "user", "content": user_query}]
+                
+                action_json = ""
+                try:
+                    async for chunk in client.stream_chat(
+                        model=Model.CODE_SIMPLE.value,
+                        messages=control_messages,
+                        temperature=0.1,
+                        max_tokens=1024,
+                    ):
+                        token = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        if token:
+                            action_json += token
+                            
+                    action_dict = parse_ai_response(action_json)
+                    if action_dict:
+                        action_name = action_dict.get("action", "unknown")
+                        yield {"type": "status", "content": f"Executing: {action_name}"}
+                        result = execute_action_by_dict(action_dict)
+                        yield {"type": "action_result", "content": f"Action '{action_name}' Executed.\nResult:\n{result}"}
+                        messages.append({"role": "system", "content": f"Computer Command Execution Result:\n{result}\n\n"})
+                    else:
+                        yield {"type": "status", "content": "Action failed to parse."}
+                        messages.append({"role": "system", "content": "Computer Command Failed.\n\n"})
+                except Exception as exc:
+                    log.exception("Error in Control stage: %s", exc)
+                    messages.append({"role": "system", "content": "Computer Command Failed due to exception.\n\n"})
+                
+                task_type = TaskType.GENERAL
 
             if task_type in (TaskType.GENERAL, TaskType.SEARCH):
                 t0 = time.perf_counter()

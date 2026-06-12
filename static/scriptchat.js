@@ -299,12 +299,6 @@ function renderChatList(query = '') {
         let work = text.replace(/(?:<think>|<\|thought_start\|>|<thought>)([\s\S]*?)(?:<\/think>|<\|thought_end\|>|<\/thought>|$)/gi, (match, p1, offset, fullString) => {
             const content = p1.trim();
             if (!content) return ''; // Do not create a block if there's no thought process
-            
-            // Fallback: If the model failed to close the tag and the thought block consumes almost the entire text
-            // leaving no actual final response for the user to see, we abort the thought block and render it normally.
-            if (!isStreaming && match.length >= fullString.trim().length * 0.95 && offset <= 10) {
-                return content; // Strip the tag and just return the inner text directly
-            }
 
             const id = `@@@THOUGHT_${blocks.length}@@@`;
             blocks.push({ type: 'thought', content: content });
@@ -1040,6 +1034,108 @@ window.downloadCode = (btn, ext) => {
             setTimeout(handleInputResize, 10);
         }
     });
+
+    // ── Dictation Button Logic (Local Whisper Backend) ──
+    const dictationBtn = document.getElementById("dictationBtn");
+    if (dictationBtn && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
+        
+        dictationBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            
+            if (!isRecording) {
+                isRecording = true; // Set instantly to prevent double clicks
+                dictationBtn.classList.add('recording-active');
+                dictationBtn.style.color = '#ff4d4d';
+                chatInput.placeholder = "Listening...";
+                
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    
+                    let options = { mimeType: 'audio/webm' };
+                    if (typeof MediaRecorder.isTypeSupported === 'function' && !MediaRecorder.isTypeSupported('audio/webm')) {
+                        options = { mimeType: 'audio/mp4' };
+                    }
+                    
+                    mediaRecorder = new MediaRecorder(stream, options);
+                    audioChunks = [];
+                    
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data && event.data.size > 0) {
+                            audioChunks.push(event.data);
+                        }
+                    };
+                    
+                    mediaRecorder.onstop = async () => {
+                        isRecording = false;
+                        dictationBtn.classList.remove('recording-active');
+                        dictationBtn.style.color = '';
+                        chatInput.placeholder = "Transcribing...";
+                        
+                        if (audioChunks.length === 0) {
+                            chatInput.placeholder = "Ask anything";
+                            return;
+                        }
+                        
+                        const mimeType = options.mimeType || 'audio/webm';
+                        const audioBlob = new Blob(audioChunks, { type: mimeType });
+                        const formData = new FormData();
+                        // Give it an extension matching the mime type
+                        const filename = mimeType.includes('mp4') ? 'dictation.mp4' : 'dictation.webm';
+                        formData.append("audio", audioBlob, filename);
+                        
+                        try {
+                            const res = await fetch('/api/transcribe', {
+                                method: 'POST',
+                                body: formData
+                            });
+                            const data = await res.json();
+                            if (data.text) {
+                                chatInput.value += (chatInput.value ? ' ' : '') + data.text.trim();
+                                if (typeof handleInputResize === 'function') handleInputResize();
+                                
+                                // Automatically send the message after dictation
+                                if (!isGenerating && chatInput.value.trim() !== '') {
+                                    handleSendMessage();
+                                    setTimeout(handleInputResize, 10);
+                                }
+                            } else if (data.error) {
+                                console.error("Dictation API error:", data.error);
+                            }
+                        } catch (err) {
+                            console.error("Dictation network error:", err);
+                        }
+                        
+                        chatInput.placeholder = "Ask anything";
+                        stream.getTracks().forEach(track => track.stop());
+                    };
+                    
+                    mediaRecorder.start();
+                } catch (err) {
+                    console.error("Microphone access error:", err);
+                    isRecording = false;
+                    dictationBtn.classList.remove('recording-active');
+                    dictationBtn.style.color = '';
+                    chatInput.placeholder = "Ask anything";
+                    alert("Please allow microphone permissions to use dictation.");
+                }
+            } else {
+                if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                    mediaRecorder.stop();
+                } else {
+                    // Fallback reset if it gets stuck
+                    isRecording = false;
+                    dictationBtn.classList.remove('recording-active');
+                    dictationBtn.style.color = '';
+                    chatInput.placeholder = "Ask anything";
+                }
+            }
+        });
+    } else if (dictationBtn) {
+        dictationBtn.style.display = 'none';
+    }
 
     chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {

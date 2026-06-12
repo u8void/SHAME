@@ -108,6 +108,7 @@ class TaskType(str, Enum):
     REASONING      = "reasoning"
     GENERAL        = "general"
     SEARCH         = "search"
+    CONTROL        = "control"
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -153,14 +154,14 @@ _MODEL_SOURCES: Dict[str, list] = {
 
 
 ROLE_CTX: Dict[ModelRole, int] = {
-    ModelRole.TRIAGE:    2048,
-    ModelRole.ROUTER:    2048,
+    ModelRole.TRIAGE:    1024,   # triage only needs to output a routing tag
+    ModelRole.ROUTER:    1024,
     ModelRole.CONTROL:   2048,
     ModelRole.MATH:      4096,
     ModelRole.CODE:      8192,
     ModelRole.REASONING: 8192,
     ModelRole.REVIEWER:  8192,
-    ModelRole.GENERAL:   8192,   # bumped from 4096 — depth prompts need more ctx
+    ModelRole.GENERAL:   8192,
     ModelRole.VISION:    4096,
 }
 
@@ -183,36 +184,39 @@ IRIS_IDENTITY = (
 
 TRIAGE_SYSTEM_PROMPT = (
     f"{IRIS_IDENTITY}\n"
-    "You are the Iris AI Triage node. You are strictly a router.\n"
+    "You are the Iris AI Router. Your ONLY job is to output ONE routing tag.\n"
     "Rules:\n"
-    "1. If the user is just greeting, saying hi/hello, asking who you are, or testing your language capabilities (e.g. 'can you speak Arabic?'), "
-    "answer them directly in their language. Do NOT output any routing tags.\n"
-    "2. YOU ARE FORBIDDEN from answering factual questions, coding questions, math questions, or explaining anything yourself. If the user asks a question, you MUST route it to a specialist model.\n"
-    "3. To route to a specialist model, output EXACTLY ONE routing tag and NOTHING ELSE:\n"
-    "   [ROUTE: SEARCH: keywords] — use FIRST for ANY factual query: history, people, places, events, products, specs, lists, encyclopedic knowledge. ALWAYS search before answering factual questions. (e.g. [ROUTE: SEARCH: Apollo missions list])\n"
-    "   [ROUTE: REASONING]   — deep analysis, explanations, how/why questions, comparisons, system design, strategy, ALL document summaries/explanations, complex topics requiring multi-step thought\n"
-    "   [ROUTE: GENERAL]     — ONLY for casual conversation, opinions, creative writing, jokes, or trivial queries that don't need facts or deep reasoning\n"
-    "   [ROUTE: MATH]        — math, equations, proofs, algorithmic problems\n"
-    "   [ROUTE: CODE_SIMPLE]  — simple single-file code, small functions, snippets\n"
-    "   [ROUTE: CODE_COMPLEX] — large projects, games, multi-file, kernels, bootloaders\n\n"
-    "CRITICAL RULE 1: The user asked about a specific historical event, list of things, person, product, or fact-based topic? You MUST route to [ROUTE: SEARCH: keywords] FIRST. Never try to answer factual queries from memory.\n"
-    "CRITICAL RULE 2: The user asked 'how', 'why', 'explain', 'what is', 'tell me about' a non-trivial topic? Route to [ROUTE: REASONING].\n"
-    "CRITICAL RULE 3: Only use [ROUTE: GENERAL] when the query is purely conversational and doesn't need facts or deep reasoning."
+    "1. Greetings, 'hi', 'hello', 'who are you', 'what language do you speak' → answer directly, NO tag.\n"
+    "2. For EVERY other query, output EXACTLY ONE of these tags and NOTHING ELSE:\n"
+    "   [ROUTE: SEARCH: keywords]  — factual question, current events, people, places, products, history, definitions\n"
+    "   [ROUTE: REASONING]         — how/why questions, explanations, analysis, comparisons, summaries, document reading\n"
+    "   [ROUTE: GENERAL]           — casual chat, opinions, creative writing\n"
+    "   [ROUTE: MATH]              — math problems, equations, proofs\n"
+    "   [ROUTE: CODE_SIMPLE]       — small code snippets, functions\n"
+    "   [ROUTE: CODE_COMPLEX]      — full projects, multi-file code, games\n"
+    "   [ROUTE: CONTROL]           — OS/PC commands: open apps, run commands, check system\n\n"
+    "EXAMPLES:\n"
+    "User: what is the capital of France → [ROUTE: SEARCH: capital of France]\n"
+    "User: explain how photosynthesis works → [ROUTE: REASONING]\n"
+    "User: write a python hello world → [ROUTE: CODE_SIMPLE]\n"
+    "User: 2+2 → [ROUTE: MATH]\n"
+    "User: open spotify → [ROUTE: CONTROL]\n"
+    "User: hi → Hello! How can I help you today?\n\n"
+    "Output ONLY the tag. No explanation. No other text."
 )
 
 GENERAL_SYSTEM_PROMPT = (
     f"{IRIS_IDENTITY}\n"
-    "You are the Iris AI Knowledge Specialist. Your job is to provide DEEP, THOROUGH, and COMPREHENSIVE explanations.\n"
-    "CRITICAL DEPTH RULES:\n"
-    "1. NEVER give one-sentence or shallow answers about any topic. ALWAYS explain EVERY topic the user asks about deeply, comprehensively, and thoroughly.\n"
-    "2. Structure your response with clear sections, bullet points, and examples.\n"
-    "3. Cover: (a) what it is, (b) how it works, (c) why it matters, (d) key details, (e) practical implications.\n"
-    "4. Use analogies, comparisons, and concrete examples to make concepts crystal clear.\n"
-    "5. If the topic has history, alternatives, or competing approaches — mention them.\n"
-    "6. End with a summary that ties everything together.\n"
-    "7. Minimum response: 3 paragraphs for simple topics, 5+ for complex ones.\n"
-    "8. Format for readability: use **bold** for key terms, - for bullets, and clear section breaks.\n"
-    "9. If the user asks 'what is X' or 'explain Y', treat it as a deep-dive request — not a definition request."
+    "You are the Iris AI General Assistant. Provide helpful, accurate, and clear answers.\n"
+    "ACCURACY RULES (HIGHEST PRIORITY):\n"
+    "1. NEVER invent facts, statistics, dates, names, or specific details you are uncertain about. "
+    "If you are unsure, say so clearly: 'I'm not certain, but...' or 'I don't have reliable data on that.'\n"
+    "2. When search results are provided in the query, base your factual claims on those results only.\n"
+    "RESPONSE RULES:\n"
+    "3. Give clear, complete answers — not one-liners, but also not padded filler.\n"
+    "4. Use examples and analogies to explain concepts clearly.\n"
+    "5. Format for readability: use **bold** for key terms, bullet points when listing, and clear paragraphs.\n"
+    "6. Match the language of the user exactly."
 )
 
 CODE_SYSTEM_PROMPT = (
@@ -237,16 +241,17 @@ REASONING_SYSTEM_PROMPT = (
     "You are the Iris AI Reasoning Specialist. Think step-by-step using chain-of-thought reasoning. "
     "Break down complex problems methodically before giving the final answer. "
     "You MUST ALWAYS wrap your internal thought process inside <think>...</think> tags before providing your final answer.\n"
-    "CRITICAL DEPTH RULES:\n"
-    "1. NEVER give shallow answers. ALWAYS explain EVERY topic the user asks about deeply, comprehensively, and thoroughly. Always analyze the problem from multiple angles.\n"
-    "2. Structure your reasoning: problem definition → analysis → approach → solution → verification.\n"
-    "3. For explanations: cover origin, mechanics, alternatives, trade-offs, and real-world context.\n"
-    "4. For strategy/design: cover goals, constraints, options evaluated, chosen approach, and rationale.\n"
-    "5. For document analysis: cover structure, key arguments, evidence, strengths, weaknesses, and implications.\n"
-    "6. Always include concrete examples or scenarios to ground abstract concepts.\n"
-    "7. Minimum response: 3-5 paragraphs with clear logical progression.\n"
-    "8. End with actionable takeaways or conclusions when applicable.\n"
-    "9. If the question seems simple, still explore its nuances and edge cases."
+    "ACCURACY RULES (HIGHEST PRIORITY):\n"
+    "1. NEVER invent facts, statistics, names, dates, or specific details you are not certain about. "
+    "If you do not know something, say 'I'm not certain, but...' or 'Based on my training data...' clearly.\n"
+    "2. For factual questions (history, science, people, places), web search results will be provided in the query. "
+    "Use ONLY the provided search context for specific facts. Do NOT add unsourced numbers or claims.\n"
+    "3. Prefer saying 'I don't have reliable information on that specific detail' over guessing.\n"
+    "DEPTH RULES:\n"
+    "4. Structure your reasoning: problem definition → analysis → approach → solution → verification.\n"
+    "5. For explanations: cover mechanics, context, and real-world examples.\n"
+    "6. Minimum response: 2-3 solid paragraphs. Maximum: as long as needed to be accurate and complete.\n"
+    "7. End with actionable takeaways or a clear conclusion when applicable."
 )
 
 REVIEWER_SYSTEM_PROMPT = (
@@ -703,6 +708,28 @@ def _is_continuation(query: str, history: List[Dict[str, str]]) -> bool:
 def _fallback_classify(query: str) -> Optional[TaskType]:
     q = query.lower()
     
+    control_keywords = {
+        "open", "launch", "start", "run", "play", "send", "copy", "set volume", "set brightness",
+        "brightness", "clipboard", "email", "spotify", "youtube", "terminal", "command",
+        "lock screen", "sleep", "restart", "shutdown", "check storage", "free storage",
+        "system info", "wifi", "bluetooth", "take note", "screenshot", "record",
+        "check memory", "check battery", "empty trash", "type text", "press key"
+    }
+    for kw in control_keywords:
+        if q.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", q):
+            # Check if it's explicitly asking "how to" which implies reasoning, not doing
+            if not re.search(r"\bhow to\b", q):
+                return TaskType.CONTROL
+
+    search_keywords = {
+        "what is", "what are", "who is", "who was", "where is", "where are", 
+        "when did", "how many", "how much",
+        "ما هي", "ما هو", "من هو", "من هي", "أين يقع", "أين تقع", "أين", "متى"
+    }
+    for kw in search_keywords:
+        if q.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", q):
+            return TaskType.SEARCH
+
     analysis_keywords = {"analyze", "analyse", "explain", "summarize", "what does this", "how does this", "walkthrough", "break down", "what is this", "what's this"}
     for kw in analysis_keywords:
         if re.search(rf"\b{re.escape(kw)}\b", q):
@@ -777,8 +804,8 @@ def classify_task(
     llm = load_model(ModelRole.TRIAGE)
     res = llm.create_chat_completion(
         messages=triage_messages,
-        max_tokens=512,
-        temperature=0.2,
+        max_tokens=64,
+        temperature=0.1,
     )
     answer = res["choices"][0]["message"]["content"].strip()
     if not _keep_loaded:
@@ -792,6 +819,7 @@ def classify_task(
         "CODE_SIMPLE":   TaskType.CODING_SIMPLE,
         "CODING_COMPLEX":TaskType.CODING_COMPLEX,
         "CODE_COMPLEX":  TaskType.CODING_COMPLEX,
+        "CONTROL":       TaskType.CONTROL,
     }
 
     search_match = re.search(r'\[\s*route:\s*SEARCH:\s*(.*?)\s*\]', answer, re.IGNORECASE)
@@ -804,6 +832,30 @@ def classify_task(
     for tag, ttype in tag_map.items():
         if re.search(rf'\[\s*route:\s*{re.escape(tag)}\s*\]', answer, re.IGNORECASE):
             return ttype, None
+
+    # ── Hallucination Guard ──────────────────────────────────────────────────
+    # If the triage model produced a direct answer instead of a routing tag,
+    # DO NOT serve it — small models (1.7B) hallucinate on factual/reasoning queries.
+    # Only allow direct answers for trivially short greetings / identity replies.
+    # For anything substantive, force-route to the reasoning specialist.
+    if answer:
+        answer_words = len(answer.split())
+        # Looks like a pure greeting/identity reply (very short, no factual verb) → serve directly
+        is_greeting_reply = (
+            answer_words <= 25
+            and not re.search(
+                r'\b(is|are|was|were|has|have|had|will|would|can|could|do|does|did|because|therefore|however)\b',
+                answer, re.IGNORECASE
+            )
+        )
+        if is_greeting_reply:
+            return None, answer
+        # Anything else: route to reasoning to prevent hallucination
+        logger.info(
+            f"[Triage] No routing tag — redirecting to REASONING to prevent hallucination. "
+            f"Triage said: {answer[:80]}..."
+        )
+        return TaskType.REASONING, None
 
     return None, answer
 
@@ -1374,6 +1426,32 @@ def ask_stream(
         # After searching, fallback to reasoning model to synthesize answer
         task_type = TaskType.REASONING
 
+    if task_type == TaskType.CONTROL:
+        yield {"type": "status", "content": "Generating computer command..."}
+        from src.controller import _get_agent_system_prompt, parse_ai_response, execute_action_by_dict
+        
+        control_messages = [{"role": "system", "content": _get_agent_system_prompt()}, {"role": "user", "content": user_query}]
+        control_llm = load_model(ModelRole.CONTROL)
+        
+        action_json = ""
+        for chunk in control_llm.create_chat_completion(messages=control_messages, max_tokens=1024, stream=True, temperature=0.1):
+            delta = chunk["choices"][0].get("delta", {})
+            if "content" in delta:
+                action_json += delta["content"]
+                
+        action_dict = parse_ai_response(action_json)
+        if action_dict:
+            action_name = action_dict.get("action", "unknown")
+            yield {"type": "status", "content": f"Executing: {action_name}"}
+            result = execute_action_by_dict(action_dict)
+            yield {"type": "action_result", "content": f"Action '{action_name}' Executed.\nResult:\n{result}"}
+            web_context = f"Computer Command Execution Result:\n{result}\n\n"
+        else:
+            yield {"type": "status", "content": "Action failed to parse."}
+            web_context = "Computer Command Failed.\n\n"
+        
+        task_type = TaskType.GENERAL
+
     if task_type is None:
         if direct_answer:
             logger.debug(f"RAW DIRECT ANSWER:\n{repr(direct_answer)}\n\n")
@@ -1398,7 +1476,14 @@ def ask_stream(
 
     final_query = user_query
     if web_context:
-        final_query = f"{web_context}User Query: {user_query}\n\nCRITICAL DIRECTIVE: You MUST answer deeply and thoroughly. Your ENTIRE response, including the <think> thought process, MUST be in the EXACT SAME LANGUAGE as the User Query."
+        final_query = (
+            f"[WEB SEARCH RESULTS]\n{web_context}\n[END WEB SEARCH RESULTS]\n\n"
+            f"User Query: {user_query}\n\n"
+            f"INSTRUCTIONS: Answer the user's question using ONLY the search results above. "
+            f"Do NOT add facts, statistics, or details that are not in the search results. "
+            f"If the search results don't contain enough information to answer, say so clearly. "
+            f"Respond in the SAME LANGUAGE as the user's query."
+        )
         
     optimized = [{"role": "user", "content": final_query}]
     if history:
@@ -1411,9 +1496,9 @@ def ask_stream(
     optimized, _ = auto_compact_for_role(optimized, role=ModelRole.REASONING if task_type == TaskType.REASONING else (ModelRole.CODE if task_type in (TaskType.CODING_SIMPLE, TaskType.CODING_COMPLEX) else ModelRole.GENERAL), max_output_tokens=2048)
 
     if task_type == TaskType.GENERAL:
-        yield {"type": "status", "content": "Thinking deeply..."}
+        yield {"type": "status", "content": "Thinking..."}
         full = ""
-        for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=4096, temperature=0.4, think_mode="show"):
+        for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=2048, temperature=0.3, think_mode="hide"):
             yield ev
             if ev["type"] == "token":
                 full += ev["content"]
@@ -1426,10 +1511,10 @@ def ask_stream(
         yield {"type": "raw_response", "content": cleaned}
 
     elif task_type == TaskType.REASONING:
-        yield {"type": "status", "content": "Deep analysis..."}
+        yield {"type": "status", "content": "Analyzing..."}
         full = ""
-        _r_temp = 0.7 if web_context else 0.5  # richer when grounded in search results
-        _r_tokens = 6144 if web_context else 4096  # more room when facts are provided
+        _r_temp = 0.4 if web_context else 0.3  # lower temp = fewer hallucinations
+        _r_tokens = 4096 if web_context else 3072
         for ev in _stream_tokens(ModelRole.REASONING, optimized, max_tokens=_r_tokens, temperature=_r_temp, think_mode="show"):
             yield ev
             if ev["type"] == "token":
@@ -2362,10 +2447,10 @@ _gen_config_mtime: float | None = None
 def load_generation_config() -> dict:
     global _gen_config_cache, _gen_config_mtime
     defaults = {
-        "max_new_tokens": 256,
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "repetition_penalty": 1.0,
+        "max_new_tokens": 2048,
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "repetition_penalty": 1.05,
         "disable_rag": False,
         "n_ctx": None,
         "n_gpu_layers": DEFAULT_GPU_LAYERS,

@@ -786,6 +786,8 @@ body.chat-active .center-panel {
 }
 
 .action-btn {
+    background: transparent;
+    border: none;
     padding: 8px;
     color: #999;
     cursor: pointer;

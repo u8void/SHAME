@@ -452,6 +452,25 @@ def voice_chat_endpoint():
         logging.getLogger('iris').error(f"Voice chat failed: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/transcribe", methods=["POST"])
+def api_transcribe():
+    """Endpoint exclusively for the text-chat dictation microphone."""
+    try:
+        import src.voice_models as vm
+        if 'audio' not in request.files:
+            return jsonify({"error": "No audio file"}), 400
+            
+        audio_file = request.files['audio']
+        audio_data = audio_file.read()
+        
+        transcript = vm.transcribe_audio(audio_data, audio_file.filename)
+        return jsonify({"text": transcript})
+    except Exception as e:
+        import logging
+        logging.getLogger('iris').error(f"Transcribe failed: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/generate_title", methods=["POST"])
 def generate_title():
     data = request.get_json()
@@ -713,12 +732,57 @@ def model_status():
         "available": available
     })
 
+def warmup_models():
+    """
+    Sequentially loads and unloads models in the background.
+    This forces the OS to cache the GGUF files in the filesystem RAM cache (page cache).
+    Because we unload after each load, it completely avoids active memory overhauls, 
+    but subsequent loads by the user will be instantly read from RAM instead of the SSD, 
+    fixing the cold start problem!
+    """
+    if PRO_MODE:
+        return
+    import logging
+    from src.iris import load_model, ModelRole
+    import src.voice_models as vm
+    
+    logger = logging.getLogger('iris')
+    logger.info("[Warmup] Sequentially caching models in OS RAM to prevent cold starts...")
+    
+    roles_to_warm = [ModelRole.GENERAL, ModelRole.CODE, ModelRole.MATH]
+    
+    for role in roles_to_warm:
+        try:
+            logger.info(f"[Warmup] Caching {role.value} model...")
+            load_model(role)
+        except Exception:
+            pass
+            
+    # Cache the voice model
+    try:
+        logger.info("[Warmup] Caching Voice LLM...")
+        vm.load_voice_llm()
+    except Exception:
+        pass
+
+    # Finish by keeping the TRIAGE router model loaded, as it's ALWAYS the first hit
+    try:
+        logger.info("[Warmup] Caching and locking Triage router...")
+        load_model(ModelRole.TRIAGE)
+    except Exception:
+        pass
+
+    logger.info("[Warmup] Caching complete. Cold starts eliminated!")
+
 if __name__ == "__main__":
     if PRO_MODE:
         mode_label = "IRIS PRO (OpenRouter Multi-Agent API)"
     else:
         mode_label = "Local GGUF Multi-Model Routing System"
     logger.info(f"[INFO] Starting Iris AI — {mode_label}")
+
+    import threading
+    threading.Thread(target=warmup_models, daemon=True).start()
 
     port = int(os.environ.get("PORT", "5050"))
     app.run(debug=False, host="127.0.0.1", port=port)

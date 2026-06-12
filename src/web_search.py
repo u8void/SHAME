@@ -156,24 +156,34 @@ class WebSearch:
     # ── Fallback 1: Wikipedia API ──
 
     def _search_wikipedia(self, query: str, max_results: int, timeout: float = 6.0) -> List[SearchResult]:
-        """Search Wikipedia via the mediawiki API."""
+        """Search Wikipedia via the mediawiki API and get full intro paragraphs."""
         if not REQUESTS_AVAILABLE:
             return []
         results: List[SearchResult] = []
         try:
             encoded = urllib.parse.quote(query)
-            url = (f"https://en.wikipedia.org/w/api.php?action=query&list=search"
-                   f"&srsearch={encoded}&utf8=&format=json&srlimit={max(3, max_results)}")
+            is_ar = bool(re.search(r'[\u0600-\u06FF]', query))
+            wiki_domain = "ar.wikipedia.org" if is_ar else "en.wikipedia.org"
+            url = (f"https://{wiki_domain}/w/api.php?action=query&generator=search"
+                   f"&gsrsearch={encoded}&gsrlimit={max(3, max_results)}"
+                   f"&prop=extracts&exintro=1&explaintext=1&exlimit={max(3, max_results)}&utf8=&format=json")
             resp = self._session.get(url, timeout=timeout,
                                      headers={"User-Agent": self._user_agent})
             resp.raise_for_status()
             data = resp.json()
-            for item in data.get("query", {}).get("search", [])[:max_results]:
-                snippet = re.sub(r"<[^>]+>", "", item.get("snippet", ""))
+            
+            pages = data.get("query", {}).get("pages", {})
+            # Sort pages by index (search rank)
+            sorted_pages = sorted(pages.values(), key=lambda p: p.get("index", 999))
+            
+            for item in sorted_pages[:max_results]:
+                extract = item.get("extract", "").strip()
+                if not extract:
+                    continue
                 results.append(SearchResult(
                     title=item.get("title", ""),
-                    body=f"Wikipedia: {snippet}",
-                    href=f"https://en.wikipedia.org/wiki/{urllib.parse.quote(item.get('title', ''))}",
+                    body=f"Wikipedia: {extract}",
+                    href=f"https://{wiki_domain}/wiki/{urllib.parse.quote(item.get('title', ''))}",
                     source="wikipedia",
                 ))
         except Exception as e:
@@ -189,7 +199,9 @@ class WebSearch:
         results: List[SearchResult] = []
         try:
             encoded = urllib.parse.quote(query)
-            url = f"https://www.google.com/search?q={encoded}&hl=en"
+            is_ar = bool(re.search(r'[\u0600-\u06FF]', query))
+            hl = "ar" if is_ar else "en"
+            url = f"https://www.google.com/search?q={encoded}&hl={hl}"
             resp = self._session.get(url, timeout=timeout,
                                      headers={"User-Agent": self._user_agent})
             resp.raise_for_status()
@@ -235,18 +247,19 @@ class WebSearch:
         deadline = time.time() + timeout
         all_results: List[SearchResult] = []
 
-        # Tier 1: DuckDuckGo (fast, accurate)
-        if self._ddg_available:
-            all_results = self._search_ddg(query, max_results, timeout=min(6.0, timeout))
-            if all_results:
-                logger.info(f"[WebSearch] DDG returned {len(all_results)} results for '{query[:60]}'")
-
-        # Tier 2: Wikipedia API
-        if len(all_results) < max_results and time.time() < deadline:
-            wiki_results = self._search_wikipedia(query, max_results - len(all_results))
+        # Tier 1: Wikipedia API (High factual accuracy)
+        if time.time() < deadline:
+            wiki_results = self._search_wikipedia(query, max_results=max_results)
             if wiki_results:
                 logger.info(f"[WebSearch] Wikipedia returned {len(wiki_results)} results")
                 all_results.extend(wiki_results)
+
+        # Tier 2: DuckDuckGo (Broader scope, news, forums)
+        if len(all_results) < max_results and self._ddg_available:
+            ddg_results = self._search_ddg(query, max_results - len(all_results), timeout=min(6.0, timeout))
+            if ddg_results:
+                logger.info(f"[WebSearch] DDG returned {len(ddg_results)} results for '{query[:60]}'")
+                all_results.extend(ddg_results)
 
         # Tier 3: Google scrape
         if len(all_results) == 0 and time.time() < deadline:
