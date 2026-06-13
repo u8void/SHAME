@@ -770,10 +770,13 @@ def main():
         
         has_finished_adapter = False
         if os.path.exists(args.output_dir):
-            for fname in ["adapters.safetensors", "adapters.npz", "adapter_model.safetensors", "adapter_model.bin"]:
-                if os.path.exists(os.path.join(args.output_dir, fname)):
-                    has_finished_adapter = True
-                    break
+            has_mlx = os.path.exists(os.path.join(args.output_dir, "adapters.safetensors")) or os.path.exists(os.path.join(args.output_dir, "adapters.npz"))
+            has_torch = os.path.exists(os.path.join(args.output_dir, "adapter_config.json")) and (
+                os.path.exists(os.path.join(args.output_dir, "adapter_model.safetensors")) or 
+                os.path.exists(os.path.join(args.output_dir, "adapter_model.bin"))
+            )
+            if has_mlx or has_torch:
+                has_finished_adapter = True
 
         adapter_matches = True
         if has_finished_adapter:
