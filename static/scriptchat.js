@@ -296,12 +296,13 @@ function renderChatList(query = '') {
         const blocks = [];
 
         // 1. Extract Think Block (Internal)
-        let work = text.replace(/(?:<think>|<\|thought_start\|>|<thought>)([\s\S]*?)(?:<\/think>|<\|thought_end\|>|<\/thought>|$)/gi, (match, p1, offset, fullString) => {
+        let work = text.replace(/(?:<think>|<\|thought_start\|>|<thought>)([\s\S]*?)(?:<\/think>|<\|thought_end\|>|<\/thought>|$)/gi, (match, p1) => {
             const content = p1.trim();
             if (!content) return ''; // Do not create a block if there's no thought process
 
+            const isClosed = /(?:<\/think>|<\|thought_end\|>|<\/thought>)$/i.test(match);
             const id = `@@@THOUGHT_${blocks.length}@@@`;
-            blocks.push({ type: 'thought', content: content });
+            blocks.push({ type: 'thought', content: content, isClosed: isClosed });
             return id;
         });
 
@@ -349,13 +350,15 @@ function renderChatList(query = '') {
             const detectedLang = lang.trim() || 'code';
             const contentTrimmed = codeContent.trim();
             const isCmdOrShort = isCommandOrShortBlock(detectedLang, contentTrimmed);
+            const isFinished = match.endsWith('```');
             blocks.push({
                 type: 'code',
                 lang: detectedLang,
                 content: contentTrimmed,
                 hidden: !isCmdOrShort,
                 autoCard: !isCmdOrShort,
-                claimed: false
+                claimed: false,
+                finished: isFinished
             });
             return id;
         });
@@ -426,8 +429,15 @@ function renderChatList(query = '') {
         );
 
         if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+            if (typeof markedKatex !== 'undefined') {
+                marked.use(markedKatex({ throwOnError: false }));
+            }
             work = marked.parse(work, { breaks: true, gfm: true });
-            work = DOMPurify.sanitize(work);
+            const purifyConfig = {
+                ADD_TAGS: ['math', 'mrow', 'mi', 'mo', 'mn', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mphantom', 'mpadded', 'mroot', 'mfrac', 'msub', 'msup', 'msubsup', 'munder', 'mover', 'munderover', 'mmultiscripts', 'msection', 'maction', 'annotation', 'semantics'],
+                ADD_ATTR: ['mathvariant', 'mathcolor', 'mathsize', 'mathbackground', 'display', 'xmlns']
+            };
+            work = DOMPurify.sanitize(work, purifyConfig);
             // marked wraps block-level text in <p>, which would break our injected <div>s. Let's unwrap placeholders.
             work = work.replace(/<p>(@@@[A-Z_0-9]+@@@)<\/p>/g, '$1');
         } else {
@@ -443,20 +453,32 @@ function renderChatList(query = '') {
             let id, html;
             if (block.type === 'thought') {
                 id = `@@@THOUGHT_${index}@@@`;
-                html = `
-                    <div class="thought-wrapper expanded">
-                        <div class="thought-header" onclick="this.parentElement.classList.toggle('expanded')">
-                            <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
-                            <span>Thought Process</span>
+                if (!block.isClosed) {
+                    html = `
+                        <div class="thought-wrapper expanded">
+                            <div class="thought-header streaming">
+                                <div class="thought-loader"></div>
+                                <span>Thinking...</span>
+                            </div>
                         </div>
-                        <div class="thought-content">${escapeHtml(block.content).replace(/\n/g, '<br>')}</div>
-                    </div>
-                `;
+                    `;
+                } else {
+                    html = `
+                        <div class="thought-wrapper">
+                            <div class="thought-header" onclick="this.parentElement.classList.toggle('expanded')">
+                                <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                                <span>Thought Process</span>
+                            </div>
+                            <div class="thought-content">${escapeHtml(block.content).replace(/\n/g, '<br>')}</div>
+                        </div>
+                    `;
+                }
             } else if (block.type === 'coding') {
                 id = `@@@CODING_${index}@@@`;
                 let inner = '';
                 if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
-                    inner = DOMPurify.sanitize(marked.parse(block.content, { breaks: true, gfm: true })).replace(/<p>(@@@[A-Z_0-9]+@@@)<\/p>/g, '$1');
+                    const purifyConfig = { ADD_TAGS: ['math', 'mrow', 'mi', 'mo', 'mn', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mphantom', 'mpadded', 'mroot', 'mfrac', 'msub', 'msup', 'msubsup', 'munder', 'mover', 'munderover', 'mmultiscripts', 'msection', 'maction', 'annotation', 'semantics'], ADD_ATTR: ['mathvariant', 'mathcolor', 'mathsize', 'mathbackground', 'display', 'xmlns'] };
+                    inner = DOMPurify.sanitize(marked.parse(block.content, { breaks: true, gfm: true }), purifyConfig).replace(/<p>(@@@[A-Z_0-9]+@@@)<\/p>/g, '$1');
                 } else {
                     inner = escapeHtml(block.content).replace(/\n/g, '<br>');
                 }
@@ -473,7 +495,8 @@ function renderChatList(query = '') {
                 id = `@@@REVIEW_${index}@@@`;
                 let inner = '';
                 if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
-                    inner = DOMPurify.sanitize(marked.parse(block.content, { breaks: true, gfm: true })).replace(/<p>(@@@[A-Z_0-9]+@@@)<\/p>/g, '$1');
+                    const purifyConfig = { ADD_TAGS: ['math', 'mrow', 'mi', 'mo', 'mn', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mphantom', 'mpadded', 'mroot', 'mfrac', 'msub', 'msup', 'msubsup', 'munder', 'mover', 'munderover', 'mmultiscripts', 'msection', 'maction', 'annotation', 'semantics'], ADD_ATTR: ['mathvariant', 'mathcolor', 'mathsize', 'mathbackground', 'display', 'xmlns'] };
+                    inner = DOMPurify.sanitize(marked.parse(block.content, { breaks: true, gfm: true }), purifyConfig).replace(/<p>(@@@[A-Z_0-9]+@@@)<\/p>/g, '$1');
                 } else {
                     inner = escapeHtml(block.content).replace(/\n/g, '<br>');
                 }
@@ -545,7 +568,15 @@ function renderChatList(query = '') {
                 `;
             } else if (block.type === 'code') {
                 id = `@@@CODE_${index}@@@`;
-                if (block.hidden) {
+                if (!block.finished && isStreaming) {
+                    html = `
+                        <div class="code-loading-box" style="margin: 12px 0; padding: 16px; background: rgba(30, 30, 30, 0.5); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; display: flex; align-items: center; gap: 12px;">
+                            <style>@keyframes spin-loader { to { transform: rotate(360deg); } }</style>
+                            <div style="width: 20px; height: 20px; border: 2px solid rgba(163, 133, 255, 0.3); border-top-color: #a385ff; border-radius: 50%; animation: spin-loader 1s linear infinite;"></div>
+                            <span style="color: rgba(255, 255, 255, 0.8); font-size: 14px; font-family: 'Inter', sans-serif;">Writing ${escapeHtml(block.lang || 'code')}...</span>
+                        </div>
+                    `;
+                } else if (block.hidden) {
                     // Auto-generate a file card for hidden blocks that weren't claimed by an explicit <file_card> tag
                     if (block.autoCard && block.content) {
                         const autoLang = block.lang || 'code';
@@ -956,7 +987,10 @@ window.downloadCode = (btn, ext) => {
                     } catch (e) { console.error("Event parse error", e); }
                 }
                 
-                chatMessages.scrollTop = chatMessages.scrollHeight;
+                const isAtBottom = chatMessages.scrollHeight - chatMessages.scrollTop <= chatMessages.clientHeight + 50;
+                if (isAtBottom) {
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
             }
 
             setGeneratingState(false);

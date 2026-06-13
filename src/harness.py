@@ -1019,16 +1019,125 @@ class CodeSandbox:
     """Isolated subprocess execution for code verification."""
     
     @staticmethod
-    def extract_code(text: str) -> str:
-        """Extract Python code from markdown fences."""
-        blocks = re.findall(r'```(?:python|py)?\n(.*?)\n```', text, re.DOTALL)
+    def extract_code(text: str, language: Optional[str] = None) -> str:
+        """Extract code from markdown fences."""
+        if language:
+            lang_pattern = language
+            if language.lower() in ("python", "py"):
+                lang_pattern = r"(?:python|py)"
+            elif language.lower() in ("cpp", "c++", "c"):
+                lang_pattern = r"(?:cpp|c\+\+|c)"
+            blocks = re.findall(fr'```(?:{lang_pattern})?\n(.*?)\n```', text, re.IGNORECASE | re.DOTALL)
+        else:
+            blocks = re.findall(r'```(?:\w+)?\n(.*?)\n```', text, re.IGNORECASE | re.DOTALL)
+            
         if blocks:
             # Usually the last code block contains the final solution
             return blocks[-1].strip()
+            
         # Fallback: return raw text if no fences but it looks like code
-        if "def " in text or "import " in text:
+        if "def " in text or "import " in text or "#include" in text:
             return text.strip()
         return ""
+
+    @staticmethod
+    def run_code_with_io(code: str, language: str, test_cases: List[TestCase], timeout_seconds: float = 10.0) -> SandboxReport:
+        """Run C++ or Python code using standard I/O against test cases."""
+        import tempfile
+        import subprocess
+        import time
+        import os
+        
+        start_time = time.time()
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            if language.lower() in ("cpp", "c++", "c"):
+                src_file = os.path.join(tmpdir, "solution.cpp")
+                exe_file = os.path.join(tmpdir, "solution")
+                with open(src_file, "w", encoding="utf-8") as f:
+                    f.write(code)
+                
+                # Compile
+                try:
+                    comp = subprocess.run(
+                        ["g++", "-O2", "-std=c++17", src_file, "-o", exe_file],
+                        capture_output=True, text=True, timeout=10.0
+                    )
+                    if comp.returncode != 0:
+                        return SandboxReport(
+                            status=SandboxResult.SYNTAX_ERROR,
+                            stdout="",
+                            stderr=comp.stderr,
+                            exit_code=comp.returncode,
+                            elapsed_ms=(time.time() - start_time) * 1000,
+                            error_message="Compilation Failed"
+                        )
+                except Exception as e:
+                    return SandboxReport(
+                        status=SandboxResult.RUNTIME_ERROR,
+                        stdout="", stderr=str(e), exit_code=-1,
+                        elapsed_ms=(time.time() - start_time) * 1000,
+                        error_message="Compiler not found or error"
+                    )
+                run_cmd = [exe_file]
+            else:
+                # Python
+                src_file = os.path.join(tmpdir, "solution.py")
+                with open(src_file, "w", encoding="utf-8") as f:
+                    f.write(code)
+                run_cmd = [sys.executable, src_file]
+                
+            # Run test cases
+            for i, tc in enumerate(test_cases):
+                try:
+                    proc = subprocess.run(
+                        run_cmd,
+                        input=tc.input_data,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout_seconds
+                    )
+                    if proc.returncode != 0:
+                        return SandboxReport(
+                            status=SandboxResult.RUNTIME_ERROR,
+                            stdout=proc.stdout,
+                            stderr=proc.stderr,
+                            exit_code=proc.returncode,
+                            elapsed_ms=(time.time() - start_time) * 1000,
+                            failed_test_index=i,
+                            error_message=f"Runtime error on test {i+1}"
+                        )
+                        
+                    # Compare output
+                    out_clean = proc.stdout.strip()
+                    expected_clean = tc.expected_output.strip()
+                    
+                    if out_clean != expected_clean:
+                        return SandboxReport(
+                            status=SandboxResult.TEST_FAILED,
+                            stdout=proc.stdout,
+                            stderr=f"Expected:\n{expected_clean}\nGot:\n{out_clean}",
+                            exit_code=0,
+                            elapsed_ms=(time.time() - start_time) * 1000,
+                            failed_test_index=i,
+                            error_message=f"Test {i+1} failed"
+                        )
+                except subprocess.TimeoutExpired:
+                    return SandboxReport(
+                        status=SandboxResult.TIMEOUT,
+                        stdout="", stderr="Timeout", exit_code=-1,
+                        elapsed_ms=(time.time() - start_time) * 1000,
+                        failed_test_index=i,
+                        error_message=f"Timeout on test {i+1}"
+                    )
+                    
+            return SandboxReport(
+                status=SandboxResult.SUCCESS,
+                stdout="All tests passed",
+                stderr="",
+                exit_code=0,
+                elapsed_ms=(time.time() - start_time) * 1000
+            )
 
     @staticmethod
     def run_python(code: str, test_cases: Optional[List[TestCase]] = None, timeout_seconds: float = 10.0) -> SandboxReport:
@@ -1306,18 +1415,84 @@ class SmartHarness:
         return SmartHarnessResult(best_ans, self.domain, True, 1, candidates, [counts])
 
 
+def extract_codeforces_tests(problem_description: str) -> List[TestCase]:
+    if not problem_description:
+        return []
+    tests = []
+    pattern = re.compile(
+        r'(?i)(?:^|\n)\**Input(?:Copy)?\**\s*?\n(.*?)\n\**Output(?:Copy)?\**\s*?\n(.*?)(?=\n\**Note\**\s*?\n|\n\**Input(?:Copy)?\**\s*?\n|$)',
+        re.DOTALL
+    )
+    matches = pattern.findall(problem_description)
+    for inp, out in matches:
+        inp = inp.strip()
+        out = out.strip()
+        if inp and out:
+            tests.append(TestCase(input_data=inp, expected_output=out))
+    return tests
+
+class SandboxResultReport:
+    result: SandboxResult = SandboxResult.PASS
+    tests_passed: int = 0
+    tests_failed: int = 0
+    syntax_error: Optional[str] = None
+    runtime_errors: List[str] = []
+
 def apply_smart_harness_code(text: str, language: Optional[str] = None, problem_description: Optional[str] = None):
-    class _DummySandbox:
-        result = SandboxResult.PASS
-        tests_passed = 1
-        tests_failed = 0
-    return text, _DummySandbox()
+    # Parse test cases
+    tests = extract_codeforces_tests(problem_description)
+    
+    rep = SandboxResultReport()
+    rep.result = SandboxResult.PASS
+    rep.tests_passed = 0
+    rep.tests_failed = 0
+    rep.syntax_error = None
+    rep.runtime_errors = []
+    
+    if not tests:
+        # Just run syntax check or nothing
+        rep.tests_passed = 1
+        return text, rep
+        
+    code = CodeSandbox.extract_code(text, language)
+    if not code:
+        rep.result = SandboxResult.FAIL
+        rep.syntax_error = "Could not extract code from response."
+        return text, rep
+        
+    lang = language or "python"
+    report = CodeSandbox.run_code_with_io(code, lang, tests)
+    
+    if report.status == SandboxResult.SUCCESS:
+        rep.result = SandboxResult.PASS
+        rep.tests_passed = len(tests)
+    elif report.status == SandboxResult.TEST_FAILED:
+        rep.result = SandboxResult.FAIL
+        rep.tests_passed = report.failed_test_index
+        rep.tests_failed = len(tests) - rep.tests_passed
+        rep.runtime_errors.append(f"Test {report.failed_test_index + 1} Failed.\n{report.stderr}")
+    elif report.status == SandboxResult.SYNTAX_ERROR:
+        rep.result = SandboxResult.FAIL
+        rep.syntax_error = str(report.error_message) + "\n" + str(report.stderr)
+        rep.tests_failed = len(tests)
+    elif report.status in (SandboxResult.RUNTIME_ERROR, SandboxResult.TIMEOUT):
+        rep.result = SandboxResult.FAIL
+        rep.tests_passed = report.failed_test_index or 0
+        rep.tests_failed = len(tests) - rep.tests_passed
+        rep.runtime_errors.append(f"{report.error_message}\n{report.stderr}")
+        
+    return text, rep
 
 def apply_smart_harness_math(text: str):
     class _DummyMath:
         result = SandboxResult.PASS
         steps_verified = 1
         steps_failed = 0
+        final_answer_extracted = None
+        numerical_match = True
+        expected_value = None
+        computed_value = None
+        self_consistent = True
     return text, _DummyMath()
 
 def build_code_refinement_prompt(code: str, problem_description: Optional[str] = None) -> str:

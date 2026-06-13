@@ -175,8 +175,8 @@ DEFAULT_THREADS_BATCH = 4   # Separate thread count for prompt processing
 
 IRIS_IDENTITY = (
     "You are Iris AI, a powerful AI assistant created entirely by Ahmed Barakat. "
-    "Under NO circumstances should you mention Alibaba, Qwen, DeepSeek, OpenAI, or any other company/model name. "
     "If asked who made you, who created you, or who you are, you MUST answer that you are Iris AI, created by Ahmed Barakat. "
+    "However, if the user asks for recommendations, comparisons, or general information about other AI models (like GPT-4, Claude, DeepSeek, etc.), you should answer normally, accurately, and objectively. "
     "If you use <think> or similar tags for internal reasoning, you MUST always close them properly (e.g. </think>) before providing your final response. "
     "Answer directly without introducing yourself with 'I am Iris AI' at the start of every message. "
     "CRITICAL LANGUAGE RULE: You MUST always respond in the EXACT SAME LANGUAGE as the user's input. If the user speaks Arabic, you MUST reply entirely in Arabic. This includes your internal <think> process: if the user speaks Arabic, your <think> block MUST ALSO be in Arabic to prevent cross-lingual hallucinations and degradation of depth."
@@ -192,9 +192,12 @@ TRIAGE_SYSTEM_PROMPT = (
     "   [ROUTE: REASONING]         — how/why questions, explanations, analysis, comparisons, summaries, document reading\n"
     "   [ROUTE: GENERAL]           — casual chat, opinions, creative writing\n"
     "   [ROUTE: MATH]              — math problems, equations, proofs\n"
-    "   [ROUTE: CODE_SIMPLE]       — small code snippets, functions\n"
+    "   [ROUTE: CODE_SIMPLE]       — small code snippets, functions, or programming problems (DO NOT search for these)\n"
     "   [ROUTE: CODE_COMPLEX]      — full projects, multi-file code, games\n"
     "   [ROUTE: CONTROL]           — OS/PC commands: open apps, run commands, check system\n\n"
+    "CRITICAL ROUTING RULE:\n"
+    "- If the user asks to 'solve in c++', 'write a script', or pastes a large algorithmic problem description, you MUST route to [ROUTE: CODE_SIMPLE], [ROUTE: CODE_COMPLEX], or [ROUTE: MATH].\n"
+    "- NEVER use [ROUTE: SEARCH] for programming problems, competitive programming questions, or large blocks of text.\n\n"
     "EXAMPLES:\n"
     "User: what is the capital of France → [ROUTE: SEARCH: capital of France]\n"
     "User: explain how photosynthesis works → [ROUTE: REASONING]\n"
@@ -226,6 +229,7 @@ CODE_SYSTEM_PROMPT = (
     "If you are writing or modifying code, you MUST wrap all code inside standard markdown triple backticks (```language ... ```). "
     "CRITICAL: If you write a code block, the very first line inside the code block MUST be a comment containing ONLY the intended filename (e.g. // main.cpp or # app.py). "
     "Do NOT include explanatory comments inside the code block other than the filename. "
+    "Do NOT use LaTeX or MathJax formatting (like $...$ or _{...}) for variable names or identifiers inside code blocks. Code must be syntactically valid plain text. "
     "After the code block, provide a concise explanation of the code. "
     "If the user is ONLY asking for an explanation, summary, or debugging help without needing new code, do NOT generate a code block; just reply in plain text."
 )
@@ -233,7 +237,8 @@ CODE_SYSTEM_PROMPT = (
 MATH_SYSTEM_PROMPT = (
     f"{IRIS_IDENTITY}\n"
     "You are the Iris AI Math Core. Solve mathematical/algorithmic problems step-by-step. "
-    "Use precise notation. Please reason step by step, and put your final answer within \\boxed{}."
+    "Use precise notation. Please reason step by step, and put your final answer within \\boxed{}. "
+    "If your solution includes writing code (like Python or C++), DO NOT use LaTeX or MathJax formatting (like $...$ or _{...}) inside the code block. Variable names must be plain text."
 )
 
 REASONING_SYSTEM_PROMPT = (
@@ -1085,7 +1090,7 @@ def _stream_tokens(
                         hidden_buffer += buffer
                         buffer = ""
 
-                        if len(hidden_buffer) > 500:
+                        if len(hidden_buffer) > 500000:
                             think_mode = "pass"
                             content_to_yield = f"{thinking_tag}\n{hidden_buffer}" if thinking_tag else hidden_buffer
                             yield {"type": "token", "content": content_to_yield}
@@ -1373,7 +1378,7 @@ def ask_stream(
                     {"role": "user", "content": "Review this code. Fix issues. Return corrected code in a block or say 'No issues found.'"}
                 ]
                 _rev = ""
-                for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+                for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
                     yield ev
                     if ev["type"] == "token":
                         _rev += ev["content"]
@@ -1498,7 +1503,7 @@ def ask_stream(
     if task_type == TaskType.GENERAL:
         yield {"type": "status", "content": "Thinking..."}
         full = ""
-        for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=2048, temperature=0.3, think_mode="hide"):
+        for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=2048, temperature=0.3, think_mode="pass"):
             yield ev
             if ev["type"] == "token":
                 full += ev["content"]
@@ -1555,7 +1560,7 @@ def ask_stream(
     elif task_type == TaskType.CODING_SIMPLE:
         yield {"type": "status", "content": "Writing code..."}
         full = ""
-        for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=None, temperature=0.2, think_mode="hide", settings=settings):
+        for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings):
             yield ev
             if ev["type"] == "token":
                 full += ev["content"]
@@ -1575,7 +1580,7 @@ def ask_stream(
                  "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code."}
             ]
             corrected = ""
-            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=None, temperature=0.2, think_mode="hide", settings=settings):
+            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings):
                 yield ev
                 if ev["type"] == "token":
                     corrected += ev["content"]
@@ -1593,38 +1598,39 @@ def ask_stream(
             yield w
 
         # SmartHarness: sandbox-verify generated code
-        yield {"type": "status", "content": "Verifying code in sandbox..."}
-        _, sandbox = apply_smart_harness_code(full, problem_description=user_query, language=lang)
-        if sandbox.result == SandboxResult.PASS:
-            yield {"type": "status", "content": f"Sandbox: {sandbox.tests_passed} tests passed"}
-        elif sandbox.result == SandboxResult.FAIL:
-            yield {"type": "harness_warning", "content": f"Sandbox: {sandbox.tests_passed}/{sandbox.tests_passed + sandbox.tests_failed} tests passed — some tests failed"}
-        elif sandbox.syntax_error:
-            yield {"type": "syntax_error", "content": f"Sandbox: {sandbox.syntax_error}"}
-        elif sandbox.runtime_errors:
-            for rerr in sandbox.runtime_errors[:3]:
-                yield {"type": "harness_warning", "content": f"Runtime: {rerr[:200]}"}
+        if "```" in full:
+            yield {"type": "status", "content": "Verifying code in sandbox..."}
+            _, sandbox = apply_smart_harness_code(full, problem_description=user_query, language=lang)
+            if sandbox.result == SandboxResult.PASS:
+                yield {"type": "status", "content": f"Sandbox: {sandbox.tests_passed} tests passed"}
+            elif sandbox.result == SandboxResult.FAIL:
+                yield {"type": "harness_warning", "content": f"Sandbox: {sandbox.tests_passed}/{sandbox.tests_passed + sandbox.tests_failed} tests passed — some tests failed"}
+            elif sandbox.syntax_error:
+                yield {"type": "syntax_error", "content": f"Sandbox: {sandbox.syntax_error}"}
+            elif sandbox.runtime_errors:
+                for rerr in sandbox.runtime_errors[:3]:
+                    yield {"type": "harness_warning", "content": f"Runtime: {rerr[:200]}"}
 
-        # ── Code Review toggle ──
-        if isinstance(settings, dict) and settings.get("code_review"):
-            yield {"type": "clear"}
-            yield {"type": "status", "content": "Reviewing code quality..."}
-            _rmsgs = optimized + [
-                {"role": "assistant", "content": full},
-                {"role": "user", "content": "Review this code for correctness, edge cases, performance, and best practices. Fix issues inside a code block with filename comment, or say 'No issues found.'"}
-            ]
-            _rev = ""
-            for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
-                yield ev
-                if ev["type"] == "token":
-                    _rev += ev["content"]
-            if not _keep_loaded:
-                unload_model()
-            _rl = _detect_language(_rev) or lang
-            _rev, _hw = _apply_and_yield_harness(_rev, _rl)
-            for w in _hw:
-                yield w
-            full = _rev
+            # ── Code Review toggle ──
+            if isinstance(settings, dict) and settings.get("code_review"):
+                yield {"type": "clear"}
+                yield {"type": "status", "content": "Reviewing code quality..."}
+                _rmsgs = optimized + [
+                    {"role": "assistant", "content": full},
+                    {"role": "user", "content": "Review this code for correctness, edge cases, performance, and best practices. Fix issues inside a code block with filename comment, or say 'No issues found.'"}
+                ]
+                _rev = ""
+                for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+                    yield ev
+                    if ev["type"] == "token":
+                        _rev += ev["content"]
+                if not _keep_loaded:
+                    unload_model()
+                _rl = _detect_language(_rev) or lang
+                _rev, _hw = _apply_and_yield_harness(_rev, _rl)
+                for w in _hw:
+                    yield w
+                full = _rev
 
         yield {"type": "raw_response", "content": full}
 
@@ -1661,7 +1667,7 @@ def _run_continuation(
 
     yield {"type": "status", "content": "Stage 1 \u2014 Continuing code..."}
     full = ""
-    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=None, temperature=0.2, think_mode="hide", settings=settings):
+    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings):
         yield ev
         if ev["type"] == "token":
             full += ev["content"]
@@ -1677,7 +1683,7 @@ def _run_continuation(
          "Fix errors, fill gaps, ensure consistency. Return the final corrected code inside a ```python``` block, followed by a brief explanation."}
     ]
     reviewed = ""
-    for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=None, temperature=0.2, think_mode="hide", settings=settings, system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+    for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings, system_prompt_override=REVIEWER_SYSTEM_PROMPT):
         yield ev
         if ev["type"] == "token":
             reviewed += ev["content"]
@@ -1907,7 +1913,7 @@ def _run_complex_coding(
             {"role": "user", "content": "Final review pass. Fix remaining issues inside a code block with filename, or say 'No issues found.'"}
         ]
         _rev = ""
-        for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="hide", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+        for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
             yield ev
             if ev["type"] == "token":
                 _rev += ev["content"]

@@ -1,7 +1,4 @@
 import os
-
-# CRITICAL MAC FIX: Restrict underlying AI libraries from aggressively hogging all CPU threads.
-# Without this, ONNX (Kokoro) and PyTorch (Whisper) default to 100% core usage and starve the OS scheduler.
 os.environ["OMP_NUM_THREADS"] = "4"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
 os.environ["MKL_NUM_THREADS"] = "4"
