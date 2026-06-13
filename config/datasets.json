@@ -158,5 +158,28 @@
       "training/general",
       "training/shared"
     ]
+  },
+  "control": {
+    "huggingface": [
+      {
+        "path": "NousResearch/hermes-function-calling-v1",
+        "max_samples": 8000
+      },
+      {
+        "path": "Jofthomas/hermes-function-calling-thinking-V1",
+        "max_samples": 8000
+      }
+    ],
+    "local_dirs": [
+      "training/control",
+      "training/shared"
+    ]
+  },
+  "vision": {
+    "huggingface": [],
+    "local_dirs": [
+      "training/general",
+      "training/shared"
+    ]
   }
 }

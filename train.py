@@ -406,7 +406,7 @@ def run_mlx_path(args, role: str):
     pairs = load_all_data(role, args.max_pairs)
     if not pairs:
         print("[ERROR] No training data found.")
-        return
+        return False
     export_to_jsonl(pairs, data_dir)
 
     train_cmd = [
@@ -445,7 +445,8 @@ def run_mlx_path(args, role: str):
         subprocess.run(train_cmd, check=True)
     except Exception as e:
         print(f"[ERROR] MLX Training failed: {e}")
-        return
+        return False
+    return True
 
 def run_torch_path(args, device_type: str, role: str):
     print("\n" + "="*60)
@@ -459,7 +460,7 @@ def run_torch_path(args, device_type: str, role: str):
     pairs = load_all_data(role, args.max_pairs)
     if not pairs:
         print("[ERROR] No training data found.")
-        return
+        return False
 
     print(f"[INFO] Loading {args.model}...")
     tokenizer = AutoTokenizer.from_pretrained(args.model)
@@ -571,15 +572,20 @@ def run_torch_path(args, device_type: str, role: str):
         if checkpoints:
             resume_checkpoint = True
 
-    if resume_checkpoint:
-        print(f"[INFO] Resuming Torch training from checkpoint in {args.output_dir}")
-        trainer.train(resume_from_checkpoint=True)
-    else:
-        trainer.train()
-    trainer.save_model(args.output_dir)
-    if hasattr(model, "save_pretrained"):
-        model.save_pretrained(args.output_dir)
-    print(f"\n[OK] Training complete. Adapters saved to {args.output_dir}")
+    try:
+        if resume_checkpoint:
+            print(f"[INFO] Resuming Torch training from checkpoint in {args.output_dir}")
+            trainer.train(resume_from_checkpoint=True)
+        else:
+            trainer.train()
+        trainer.save_model(args.output_dir)
+        if hasattr(model, "save_pretrained"):
+            model.save_pretrained(args.output_dir)
+        print(f"\n[OK] Training complete. Adapters saved to {args.output_dir}")
+        return True
+    except Exception as e:
+        print(f"[ERROR] Torch Training failed: {e}")
+        return False
 
 def merge_and_save(base_model_id: str, adapter_dir: str, out_dir: str):
     from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -799,13 +805,16 @@ def main():
                 if os.path.exists(final_gguf) and not gguf_matches:
                     print(f"[INFO] Existing GGUF model {final_gguf} has a different base model. Will train/convert from scratch.")
 
+        training_success = True
         if not skip_training:
             if target == "mps":
-                run_mlx_path(args, role)
+                training_success = run_mlx_path(args, role)
             else:
-                run_torch_path(args, target, role)
+                training_success = run_torch_path(args, target, role)
 
-        if not args.skip_gguf:
+        if not training_success:
+            print(f"[ERROR] Training failed or was aborted for role '{role}'. Skipping GGUF conversion.")
+        elif not args.skip_gguf:
             if not args.resume or not os.path.exists(final_gguf) or not gguf_matches:
                 convert_to_gguf(
                     hf_adapter_dir=args.output_dir,
