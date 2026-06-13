@@ -577,6 +577,8 @@ def run_torch_path(args, device_type: str, role: str):
     else:
         trainer.train()
     trainer.save_model(args.output_dir)
+    if hasattr(model, "save_pretrained"):
+        model.save_pretrained(args.output_dir)
     print(f"\n[OK] Training complete. Adapters saved to {args.output_dir}")
 
 def merge_and_save(base_model_id: str, adapter_dir: str, out_dir: str):
