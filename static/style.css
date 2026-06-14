@@ -2283,3 +2283,6 @@ body.chat-active .footere {
     outline: 2px dashed var(--iris-purple);
 }
 
+
+@keyframes spin-loader { to { transform: rotate(360deg); } }
+
