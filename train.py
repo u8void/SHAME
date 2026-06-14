@@ -9,7 +9,6 @@ import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import sys
 import json
-import torch
 import random
 import argparse
 import subprocess
@@ -127,7 +126,7 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate")
     parser.add_argument("--batch-size", type=int, default=1, help="Batch size")
     parser.add_argument("--accum-steps", type=int, default=8, help="Gradient accumulation steps")
-    parser.add_argument("--max-seq-length", type=int, default=512, help="Maximum sequence length")
+    parser.add_argument("--max-seq-length", type=int, default=1024, help="Maximum sequence length")
     parser.add_argument("--device", choices=["cuda", "mps", "cpu"], default=None)
 
     parser.add_argument("--max-pairs", type=int, default=5000)
@@ -316,8 +315,22 @@ def load_all_data(role: str, max_pairs: int) -> List[Tuple[str, str]]:
     if len(pairs) > max_pairs:
         pairs = pairs[:max_pairs]
         
-    print(f"[DATA] Loaded {len(pairs)} pairs total for role '{role}'.")
-    return pairs
+    # Pre-split massive sequences to prevent OOM and hard truncation
+    chunked_pairs = []
+    chunk_size = 3500  # Approx 850 tokens, leaves room for prompt and system message
+    for prompt, response in pairs:
+        if len(response) <= chunk_size:
+            chunked_pairs.append((prompt, response))
+        else:
+            chunks = [response[i:i+chunk_size] for i in range(0, len(response), chunk_size)]
+            for i, chunk in enumerate(chunks):
+                if i == 0:
+                    chunked_pairs.append((prompt, chunk))
+                else:
+                    chunked_pairs.append(("Please continue.", chunk))
+                    
+    print(f"[DATA] Loaded {len(pairs)} raw pairs, expanded to {len(chunked_pairs)} pairs after chunking for role '{role}'.")
+    return chunked_pairs
 
 def export_to_jsonl(pairs: List[Tuple[str, str]], out_dir: str):
     os.makedirs(out_dir, exist_ok=True)
