@@ -177,12 +177,8 @@ def web_search(query: str, max_results: int = 5) -> str:
     except Exception as exc:
         return f"(Web search unavailable: {exc})"
 
-try:
-    import pyperclip
-    CLIPBOARD_AVAILABLE = True
-except ImportError:
-    CLIPBOARD_AVAILABLE = False
-    logger.info("[INFO] Install 'pyperclip' for clipboard support: pip install pyperclip")
+# Removed pyperclip dependency warning
+CLIPBOARD_AVAILABLE = True
 try:
     from src.iris import ask_stream, get_device, solve_math, BookRetriever, analyze_image
     IRIS_AVAILABLE = True
@@ -201,6 +197,7 @@ if not MLX_MODEL_ID:
 
 CONFIG_FILE  = "./config/control.conf"
 
+_is_linux = platform.system() == "Linux"
 DEFAULT_CONFIG = {
     "email": {
         "smtp_server": "smtp.gmail.com",
@@ -213,17 +210,23 @@ DEFAULT_CONFIG = {
         }
     },
     "apps": {
-        "notepad":      "notepad.exe",
-        "calculator":   "calc.exe",
-        "paint":        "mspaint.exe",
+        "notepad":      "gedit" if _is_linux else "notepad.exe",
+        "calculator":   "gnome-calculator" if _is_linux else "calc.exe",
+        "paint":        "drawing" if _is_linux else "mspaint.exe",
         "spotify":      "spotify",
         "vscode":       "code",
         "chrome":       "google-chrome",
         "firefox":      "firefox",
-        "explorer":     "explorer.exe",
-        "terminal":     "cmd.exe",
-        "word":         "winword.exe",
-        "excel":        "excel.exe"
+        "explorer":     "nautilus" if _is_linux else "explorer.exe",
+        "terminal":     "gnome-terminal" if _is_linux else "cmd.exe",
+        "settings":     "gnome-control-center" if _is_linux else "start ms-settings:",
+        "system_monitor":"gnome-system-monitor" if _is_linux else "taskmgr.exe",
+        "store":        "gnome-software" if _is_linux else "ms-windows-store:",
+        "camera":       "cheese" if _is_linux else "microsoft.windows.camera:",
+        "mail":         "thunderbird" if _is_linux else "outlook",
+        "calendar":     "gnome-calendar" if _is_linux else "outlookcal:",
+        "word":         "libreoffice --writer" if _is_linux else "winword.exe",
+        "excel":        "libreoffice --calc" if _is_linux else "excel.exe"
     },
     "browser": "default"
 }
@@ -447,7 +450,8 @@ def ai_agent_handle(user_input: str, retriever=None, history=None, **kwargs):
             return
 
     from src.iris import ask_stream
-    yield from ask_stream(user_input, history, retriever=retriever, force_role=force_role, settings=settings)
+    keep_loaded = kwargs.get("keep_loaded", False)
+    yield from ask_stream(user_input, history, retriever=retriever, force_role=force_role, settings=settings, keep_loaded=keep_loaded)
 
 def execute_action_by_dict(action_dict: dict) -> str:
     action = action_dict.get("action", "chat")
@@ -463,6 +467,8 @@ def execute_action_by_dict(action_dict: dict) -> str:
         elif action == "open_app":
             app = action_dict.get("name", "")
             return handle_app_by_name(app, load_config())
+        elif action == "open_settings":
+            return handle_open_settings()
         elif action == "youtube_video":
             query = action_dict.get("query", "")
             return handle_youtube_video_from_query(query)
@@ -600,22 +606,26 @@ def execute_action_by_dict(action_dict: dict) -> str:
             return handle_brightness("up")
         elif action == "brightness_down":
             return handle_brightness("down")
-        elif action == "brightness_set":
+        elif action in ("brightness_set", "set_brightness"):
             pct = action_dict.get("percent")
             if pct is None:
                 pct = action_dict.get("pct", 50)
-            return handle_brightness_set(int(pct))
+            if isinstance(pct, str):
+                pct = pct.replace('%', '').strip()
+            return handle_brightness_set(int(float(pct)))
         elif action == "volume_up":
             return handle_volume("up")
         elif action == "volume_down":
             return handle_volume("down")
         elif action == "volume_mute":
             return handle_volume("mute")
-        elif action == "volume_set":
+        elif action in ("volume_set", "set_volume"):
             pct = action_dict.get("percent")
             if pct is None:
                 pct = action_dict.get("pct", 50)
-            return handle_volume_set(int(pct))
+            if isinstance(pct, str):
+                pct = pct.replace('%', '').strip()
+            return handle_volume_set(int(float(pct)))
         elif action == "say":
             text = action_dict.get("text", "")
             return handle_say(text)
@@ -853,6 +863,30 @@ def handle_app_by_name(app_name: str, config: dict = None):
             if key in app_name.lower() or app_name.lower() in key:
                 cmd = val
                 break
+                
+    if not cmd and platform.system() == "Linux":
+        linux_defaults = {
+            "settings": "gnome-control-center",
+            "calculator": "gnome-calculator",
+            "calc": "gnome-calculator",
+            "notepad": "gedit",
+            "paint": "drawing",
+            "store": "gnome-software",
+            "camera": "cheese",
+            "clock": "gnome-clocks",
+            "mail": "thunderbird",
+            "calendar": "gnome-calendar",
+            "weather": "gnome-weather",
+            "photos": "eog",
+            "maps": "gnome-maps",
+            "task manager": "gnome-system-monitor",
+            "system monitor": "gnome-system-monitor",
+            "terminal": "gnome-terminal"
+        }
+        for k, v in linux_defaults.items():
+            if k in app_name.lower():
+                cmd = v
+                break
     
     if not cmd and platform.system() == "Windows":
         windows_defaults = {
@@ -899,6 +933,21 @@ def handle_app_by_name(app_name: str, config: dict = None):
         return f"Launching {app_name}."
     else:
         return f"I couldn't find '{app_name}'. Add it to {CONFIG_FILE} under 'apps'."
+
+def handle_open_settings():
+    system = platform.system()
+    if system == "Darwin":
+        cmd = "open x-apple.systempreferences:"
+    elif system == "Windows":
+        cmd = "start ms-settings:"
+    else:
+        cmd = "gnome-control-center"
+    log_action("system", f"Opening settings: {cmd}")
+    try:
+        subprocess.run(cmd, shell=True, start_new_session=True)
+        return "Opened settings."
+    except Exception as e:
+        return f"Failed to open settings: {e}"
 
 def _youtube_search_url(query: str) -> str:
     q = urllib.parse.quote_plus(query)
@@ -1582,14 +1631,20 @@ def handle_volume(action: str):
         log_action("system", f"Adjusting volume: {action}")
         return f"Success: Volume adjusted ({action})."
     else:
-        if action == "up":
-            cmd = "amixer -D pulse sset Master 5%+"
-        elif action == "down":
-            cmd = "amixer -D pulse sset Master 5%-"
-        elif action == "mute":
-            cmd = "amixer -D pulse sset Master toggle"
+        import shutil
+        cmd = None
+        if shutil.which("wpctl"):
+            if action == "up": cmd = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+            elif action == "down": cmd = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+            elif action == "mute": cmd = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+            else: return "Unknown volume action."
+        elif shutil.which("pactl"):
+            if action == "up": cmd = "pactl set-sink-volume @DEFAULT_SINK@ +5%"
+            elif action == "down": cmd = "pactl set-sink-volume @DEFAULT_SINK@ -5%"
+            elif action == "mute": cmd = "pactl set-sink-mute @DEFAULT_SINK@ toggle"
+            else: return "Unknown volume action."
         else:
-            return "Unknown volume action."
+            return "Failed to adjust volume: No native audio server found (wpctl/pactl)."
     log_action("system", f"Adjusting volume: {action}")
     return handle_run_command(cmd)
 
@@ -1641,100 +1696,25 @@ Add-Type -TypeDefinition $code
         except Exception as e:
             return f"Failed to set volume: {e}"
     else:
-        cmd = f"amixer -D pulse sset Master {pct}%"
+        import shutil
+        pct = max(0, min(100, pct))
+        cmd = None
+        if shutil.which("wpctl"):
+            cmd = f"wpctl set-volume @DEFAULT_AUDIO_SINK@ {pct}%"
+        elif shutil.which("pactl"):
+            cmd = f"pactl set-sink-volume @DEFAULT_SINK@ {pct}%"
+        else:
+            return "Failed to set volume: No native audio server found (wpctl/pactl)."
     log_action("system", f"Setting volume to {pct}%")
     return handle_run_command(cmd)
 
 def linux_get_brightness() -> int:
-    import shutil
-    import subprocess
-    import re
     import os
+    import re
+    import subprocess
+    import shutil
 
-    # 1. Try brightnessctl
-    if shutil.which("brightnessctl"):
-        res = subprocess.run("brightnessctl g", shell=True, capture_output=True, text=True)
-        res_max = subprocess.run("brightnessctl m", shell=True, capture_output=True, text=True)
-        if res.returncode == 0 and res_max.returncode == 0:
-            try:
-                curr = int(res.stdout.strip())
-                mx = int(res_max.stdout.strip())
-                return int((curr / mx) * 100)
-            except:
-                pass
-
-    # 2. Try xbacklight
-    if shutil.which("xbacklight"):
-        res = subprocess.run("xbacklight -get", shell=True, capture_output=True, text=True)
-        if res.returncode == 0:
-            try:
-                return int(float(res.stdout.strip()))
-            except:
-                pass
-
-    # 3. Try GNOME D-Bus
-    if shutil.which("busctl"):
-        res = subprocess.run(
-            'busctl --user get-property org.gnome.SettingsDaemon.Power /org/gnome/SettingsDaemon/Power org.gnome.SettingsDaemon.Power.Screen Brightness',
-            shell=True, capture_output=True, text=True
-        )
-        if res.returncode == 0:
-            match = re.search(r'(\d+)', res.stdout)
-            if match:
-                return int(match.group(1))
-
-    if shutil.which("gdbus"):
-        res = subprocess.run(
-            'gdbus call --session --dest org.gnome.SettingsDaemon.Power --object-path /org/gnome/SettingsDaemon/Power --method org.freedesktop.DBus.Properties.Get org.gnome.SettingsDaemon.Power.Screen Brightness',
-            shell=True, capture_output=True, text=True
-        )
-        if res.returncode == 0:
-            cleaned = res.stdout.replace("int32", "")
-            match = re.search(r'(\d+)', cleaned)
-            if match:
-                return int(match.group(1))
-
-    # 4. Try KDE D-Bus
-    if shutil.which("qdbus"):
-        res = subprocess.run(
-            'qdbus org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement/Actions/BrightnessControl org.kde.Solid.PowerManagement.Actions.BrightnessControl.brightness',
-            shell=True, capture_output=True, text=True
-        )
-        if res.returncode == 0:
-            try:
-                return int(res.stdout.strip())
-            except:
-                pass
-
-    # 5. Try ddcutil (for external monitors / desktops)
-    if shutil.which("ddcutil"):
-        res = subprocess.run("ddcutil getvcp 10", shell=True, capture_output=True, text=True)
-        if res.returncode == 0:
-            match = re.search(r'current value\s*=\s*(\d+)', res.stdout)
-            if match:
-                return int(match.group(1))
-
-    # 6. Try xrandr (only if not on Wayland)
-    is_wayland = os.environ.get("XDG_SESSION_TYPE") == "wayland" or os.environ.get("WAYLAND_DISPLAY") is not None
-    if not is_wayland and shutil.which("xrandr"):
-        res = subprocess.run("xrandr --verbose", shell=True, capture_output=True, text=True)
-        if res.returncode == 0:
-            display = None
-            for line in res.stdout.splitlines():
-                if " connected " in line:
-                    match = re.match(r"^(\S+)\s+connected", line)
-                    if match:
-                        display = match.group(1)
-                elif "Brightness:" in line and display:
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        try:
-                            val = float(parts[1])
-                            return int(val * 100)
-                        except:
-                            pass
-
-    # 7. Try direct sysfs read
+    # 1. Native sysfs read
     sysfs_dir = "/sys/class/backlight"
     if os.path.exists(sysfs_dir):
         for dev in os.listdir(sysfs_dir):
@@ -1748,46 +1728,88 @@ def linux_get_brightness() -> int:
             except:
                 continue
 
+    # 2. Native GNOME Mutter D-Bus (Wayland/X11 Ubuntu default)
+    if shutil.which("gdbus"):
+        res = subprocess.run(
+            'gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.freedesktop.DBus.Properties.Get org.gnome.Mutter.DisplayConfig Backlight',
+            shell=True, capture_output=True, text=True
+        )
+        if res.returncode == 0:
+            max_match = re.search(r"'max':\s*<(\d+)>", res.stdout)
+            val_match = re.search(r"'value':\s*<(\d+)>", res.stdout)
+            if max_match and val_match:
+                mx = int(max_match.group(1))
+                curr = int(val_match.group(1))
+                if mx > 0:
+                    return int((curr / mx) * 100)
+                
+    # 3. Native KDE D-Bus fallback
+    if shutil.which("qdbus"):
+        res = subprocess.run(
+            'qdbus org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement/Actions/BrightnessControl org.kde.Solid.PowerManagement.Actions.BrightnessControl.brightness',
+            shell=True, capture_output=True, text=True
+        )
+        if res.returncode == 0:
+            try:
+                return int(res.stdout.strip())
+            except:
+                pass
+
     return -1
 
 def linux_set_brightness(pct: int) -> bool:
+    import os
     import shutil
     import subprocess
-    import re
-    import os
     
     pct = max(0, min(100, pct))
     
-    # 1. Try brightnessctl
+    # 1. Native brightnessctl (Dependency-free on Ubuntu, passwordless)
     if shutil.which("brightnessctl"):
-        res = subprocess.run(f"brightnessctl s {pct}%", shell=True, capture_output=True)
+        res = subprocess.run(f"brightnessctl set {pct}%", shell=True, capture_output=True)
         if res.returncode == 0:
             return True
+
+    # 2. Native sysfs write
+    sysfs_dir = "/sys/class/backlight"
+    success = False
+    if os.path.exists(sysfs_dir):
+        for dev in os.listdir(sysfs_dir):
+            try:
+                with open(os.path.join(sysfs_dir, dev, "max_brightness"), "r") as f:
+                    mx = int(f.read().strip())
+                target = int((pct / 100.0) * mx)
+                with open(os.path.join(sysfs_dir, dev, "brightness"), "w") as f:
+                    f.write(str(target))
+                success = True
+            except:
+                continue
+    if success:
+        return True
             
-    # 2. Try xbacklight
-    if shutil.which("xbacklight"):
-        res = subprocess.run(f"xbacklight -set {pct}", shell=True, capture_output=True)
-        if res.returncode == 0:
-            return True
-            
-    # 3. Try GNOME D-Bus
-    if shutil.which("busctl"):
-        res = subprocess.run(
-            f"busctl --user set-property org.gnome.SettingsDaemon.Power /org/gnome/SettingsDaemon/Power org.gnome.SettingsDaemon.Power.Screen Brightness i {pct}",
-            shell=True, capture_output=True
-        )
-        if res.returncode == 0:
-            return True
-            
+    # 3. Native GNOME Mutter D-Bus (Wayland/X11 Ubuntu default)
     if shutil.which("gdbus"):
         res = subprocess.run(
-            f'gdbus call --session --dest org.gnome.SettingsDaemon.Power --object-path /org/gnome/SettingsDaemon/Power --method org.freedesktop.DBus.Properties.Set org.gnome.SettingsDaemon.Power.Screen Brightness "<int32 {pct}>"',
-            shell=True, capture_output=True
+            'gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.freedesktop.DBus.Properties.Get org.gnome.Mutter.DisplayConfig Backlight',
+            shell=True, capture_output=True, text=True
         )
         if res.returncode == 0:
-            return True
+            import re
+            serial_match = re.search(r'uint32\s+(\d+)', res.stdout)
+            connector_match = re.search(r"'connector':\s*<'([^']+)'", res.stdout)
+            max_match = re.search(r"'max':\s*<(\d+)>", res.stdout)
+            if serial_match and connector_match and max_match:
+                serial = serial_match.group(1)
+                connector = connector_match.group(1)
+                mx = int(max_match.group(1))
+                target = int((pct / 100.0) * mx)
+                
+                set_cmd = f'gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.gnome.Mutter.DisplayConfig.SetBacklight {serial} "{connector}" {target}'
+                set_res = subprocess.run(set_cmd, shell=True, capture_output=True)
+                if set_res.returncode == 0:
+                    return True
             
-    # 4. Try KDE D-Bus
+    # 3. Native KDE D-Bus fallback
     if shutil.which("qdbus"):
         res = subprocess.run(
             f'qdbus org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement/Actions/BrightnessControl org.kde.Solid.PowerManagement.Actions.BrightnessControl.setBrightness {pct}',
@@ -1795,43 +1817,9 @@ def linux_set_brightness(pct: int) -> bool:
         )
         if res.returncode == 0:
             return True
-            
-    # 5. Try 'light' utility (handles permissions via setuid or udev)
-    if shutil.which("light"):
-        res = subprocess.run(f"light -S {pct}", shell=True, capture_output=True)
-        if res.returncode == 0:
-            return True
 
-    # 6. Try ddcutil (for external monitors / desktops)
-    if shutil.which("ddcutil"):
-        res = subprocess.run(f"ddcutil setvcp 10 {pct}", shell=True, capture_output=True)
-        if res.returncode == 0:
-            return True
-
-    # 7. Try xrandr (only if not on Wayland)
-    is_wayland = os.environ.get("XDG_SESSION_TYPE") == "wayland" or os.environ.get("WAYLAND_DISPLAY") is not None
-    if not is_wayland and shutil.which("xrandr"):
-        res = subprocess.run("xrandr --verbose", shell=True, capture_output=True, text=True)
-        if res.returncode == 0:
-            displays = []
-            for line in res.stdout.splitlines():
-                if " connected " in line:
-                    match = re.match(r"^(\S+)\s+connected", line)
-                    if match:
-                        displays.append(match.group(1))
-            if displays:
-                val = pct / 100.0
-                success = False
-                for display in displays:
-                    res2 = subprocess.run(f"xrandr --output {display} --brightness {val:.2f}", shell=True, capture_output=True)
-                    if res2.returncode == 0:
-                        success = True
-                if success:
-                    return True
-
-    # 8. Try sysfs write via sudo tee (works if user has NOPASSWD sudo or polkit rule)
-    sysfs_dir = "/sys/class/backlight"
-    if os.path.exists(sysfs_dir):
+    # 4. Native sysfs write via pkexec (Polkit GUI popup)
+    if shutil.which("pkexec") and os.path.exists(sysfs_dir):
         for dev in os.listdir(sysfs_dir):
             try:
                 br_path = os.path.join(sysfs_dir, dev, "brightness")
@@ -1840,22 +1828,16 @@ def linux_set_brightness(pct: int) -> bool:
                     continue
                 with open(mx_path, "r") as f:
                     mx = int(f.read().strip())
-                val = int((pct / 100.0) * mx)
-                # Try direct write first (works if user is in 'video' group with udev rule)
-                if os.access(br_path, os.W_OK):
-                    with open(br_path, "w") as f:
-                        f.write(str(val))
-                    return True
-                # Fallback: sudo tee (passwordless if configured)
+                target = int((pct / 100.0) * mx)
                 res = subprocess.run(
-                    f"echo {val} | sudo -n tee {br_path}",
-                    shell=True, capture_output=True, text=True
+                    f"echo {target} | pkexec tee {br_path}",
+                    shell=True, capture_output=True
                 )
                 if res.returncode == 0:
                     return True
-            except Exception:
+            except:
                 continue
-
+                
     return False
 
 
@@ -1925,28 +1907,6 @@ $methods.WmiSetBrightness(1, $new)
         # Linux branch
         curr = linux_get_brightness()
         if curr == -1:
-            # If we can't read current brightness, check if we can do direct relative adjustments
-            import shutil
-            import subprocess
-            import os
-            if shutil.which("brightnessctl"):
-                cmd = "brightnessctl s 10%+" if action == "up" else "brightnessctl s 10%-"
-                res = subprocess.run(cmd, shell=True, capture_output=True)
-                if res.returncode == 0:
-                    return f"Brightness adjusted {action}."
-            if shutil.which("xbacklight"):
-                cmd = "xbacklight -inc 10" if action == "up" else "xbacklight -dec 10"
-                res = subprocess.run(cmd, shell=True, capture_output=True)
-                if res.returncode == 0:
-                    return f"Brightness adjusted {action}."
-            if shutil.which("gdbus") and "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", ""):
-                method = "StepUp" if action == "up" else "StepDown"
-                res = subprocess.run(
-                    f'gdbus call --session --dest org.gnome.SettingsDaemon.Power --object-path /org/gnome/SettingsDaemon/Power --method org.gnome.SettingsDaemon.Power.Screen.{method}',
-                    shell=True, capture_output=True
-                )
-                if res.returncode == 0:
-                    return f"Brightness adjusted {action} via GNOME D-Bus."
             curr = 50 # Default fallback if we cannot query it
 
         step = 10
@@ -1955,7 +1915,7 @@ $methods.WmiSetBrightness(1, $new)
         if linux_set_brightness(new_val):
             return f"Brightness adjusted {action} (to {new_val}%)."
         else:
-            return "Failed to adjust brightness. Please make sure brightnessctl, xbacklight, xrandr, or a desktop environment D-Bus service is available."
+            return "Failed to adjust brightness natively. You may need to grant write permissions to /sys/class/backlight or ensure D-Bus is running."
 
 def handle_brightness_set(pct: int):
     system = platform.system()
@@ -1992,7 +1952,7 @@ def handle_brightness_set(pct: int):
         if linux_set_brightness(pct):
             return f"Brightness set to {pct}%."
         else:
-            return f"Failed to set brightness to {pct}%. Run this once to fix it permanently:\n\n  sudo apt install brightnessctl\n\nThen try again — no restart needed."
+            return f"Failed to set brightness to {pct}%. You may need to grant write permissions to /sys/class/backlight or ensure D-Bus is running."
 
 def get_system_info(what: str = "all"):
     import platform as pf
@@ -2048,19 +2008,47 @@ def get_system_info(what: str = "all"):
     return "\n".join(info) if info else "No information available."
 
 def clipboard_copy(text: str):
-    if not CLIPBOARD_AVAILABLE:
-        return "Clipboard not available (install pyperclip)."
+    system = platform.system()
     try:
-        pyperclip.copy(text)
+        if system == "Darwin":
+            subprocess.run("pbcopy", input=text.encode('utf-8'))
+        elif system == "Windows":
+            subprocess.run("powershell -command Set-Clipboard", input=text.encode('utf-8'))
+        else:
+            import shutil
+            if shutil.which("wl-copy"):
+                subprocess.run("wl-copy", input=text.encode('utf-8'))
+            elif shutil.which("xclip"):
+                subprocess.run(["xclip", "-selection", "clipboard"], input=text.encode('utf-8'))
+            else:
+                try:
+                    import tkinter as tk
+                    r = tk.Tk(); r.withdraw(); r.clipboard_clear(); r.clipboard_append(text); r.update(); r.destroy()
+                except ImportError:
+                    return "Clipboard copy failed: No native clipboard utility (wl-copy, xclip) or python3-tk found."
         return f"Copied to clipboard: {text[:50]}{'...' if len(text)>50 else ''}"
     except Exception as e:
         return f"Clipboard copy failed: {e}"
 
 def clipboard_read():
-    if not CLIPBOARD_AVAILABLE:
-        return "Clipboard not available (install pyperclip)."
+    system = platform.system()
     try:
-        content = pyperclip.paste()
+        if system == "Darwin":
+            content = subprocess.run("pbpaste", capture_output=True, text=True).stdout
+        elif system == "Windows":
+            content = subprocess.run("powershell -command Get-Clipboard", capture_output=True, text=True).stdout
+        else:
+            import shutil
+            if shutil.which("wl-paste"):
+                content = subprocess.run("wl-paste", capture_output=True, text=True).stdout
+            elif shutil.which("xclip"):
+                content = subprocess.run(["xclip", "-selection", "clipboard", "-o"], capture_output=True, text=True).stdout
+            else:
+                try:
+                    import tkinter as tk
+                    r = tk.Tk(); r.withdraw(); content = r.clipboard_get(); r.destroy()
+                except ImportError:
+                    return "Clipboard read failed: No native clipboard utility (wl-paste, xclip) or python3-tk found."
         return f"Clipboard: {content[:200]}" if content else "Clipboard is empty."
     except Exception as e:
         return f"Clipboard read failed: {e}"
@@ -2188,8 +2176,18 @@ def handle_speed_test() -> str:
         res = subprocess.run("networkQuality", shell=True, capture_output=True, text=True)
         if res.returncode == 0:
             return res.stdout.strip()
-    res = subprocess.run("speedtest-cli --simple || speedtest --simple", shell=True, capture_output=True, text=True)
-    return res.stdout.strip() or "Speedtest tool not found. Install speedtest-cli or speedtest."
+    import time
+    import urllib.request
+    try:
+        url = "http://speedtest.tele2.net/10MB.zip"
+        start = time.time()
+        with urllib.request.urlopen(url, timeout=15) as response:
+            data = response.read()
+        end = time.time()
+        mbps = (len(data) * 8 / (end - start)) / 1000000
+        return f"Download speed: {mbps:.2f} Mbps (Native test)"
+    except Exception as e:
+        return f"Native speedtest failed: {e}"
 
 def handle_flush_dns() -> str:
     system = platform.system()
@@ -2320,7 +2318,17 @@ def handle_screenshot(path: str) -> str:
         except Exception:
             return "Failed to save screenshot. Install PIL/Pillow on Windows."
     else:
-        subprocess.run(f"gnome-screenshot -f \"{resolved_path}\" || scrot \"{resolved_path}\"", shell=True)
+        import shutil
+        if shutil.which("gnome-screenshot"):
+            subprocess.run(f"gnome-screenshot -f \"{resolved_path}\"", shell=True)
+        elif shutil.which("spectacle"):
+            subprocess.run(f"spectacle -b -n -o \"{resolved_path}\"", shell=True)
+        elif shutil.which("grim"):
+            subprocess.run(f"grim \"{resolved_path}\"", shell=True)
+        elif shutil.which("scrot"):
+            subprocess.run(f"scrot \"{resolved_path}\"", shell=True)
+        else:
+            return "Failed to take screenshot: No native screenshot tool found (gnome-screenshot/spectacle/grim/scrot)."
     return f"Screenshot saved to {resolved_path}."
 
 def handle_screen_record(path: str, duration: int) -> str:
@@ -2355,10 +2363,14 @@ def handle_media(action: str) -> str:
             ctypes.windll.user32.keybd_event(vk, 0, 2, 0)
         return f"Media command '{action}' executed."
     else:
-        linux_action = action
-        if action == "play_pause": linux_action = "play-pause"
-        subprocess.run(f"playerctl {linux_action}", shell=True)
-        return f"Media command '{action}' executed."
+        dbus_method = "PlayPause" if action == "play_pause" else action.capitalize()
+        script = f'''
+for player in $(dbus-send --session --dest=org.freedesktop.DBus --type=method_call --print-reply /org/freedesktop/DBus org.freedesktop.DBus.ListNames | grep org.mpris.MediaPlayer2 | awk -F'"' '{{print $2}}'); do
+    dbus-send --print-reply --session --dest=$player /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.{dbus_method} >/dev/null 2>&1
+done
+'''
+        subprocess.run(script, shell=True)
+        return f"Media command '{action}' executed natively."
 
 def handle_say(text: str) -> str:
     system = platform.system()
@@ -2403,7 +2415,8 @@ $notify.showballoontip(10,"{title}","{body}",[system.windows.forms.tooltipicon]:
 '''
         subprocess.run(["powershell", "-Command", ps], shell=True)
     else:
-        subprocess.run(["notify-send", title, body])
+        cmd = f'''dbus-send --session --dest=org.freedesktop.Notifications --type=method_call /org/freedesktop/Notifications org.freedesktop.Notifications.Notify string:"Iris" uint32:0 string:"" string:"{title}" string:"{body}" array:string:"" dict:string:variant:"" int32:5000'''
+        subprocess.run(cmd, shell=True)
     return "Notification displayed."
 
 def handle_take_note(content: str) -> str:

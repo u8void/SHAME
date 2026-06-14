@@ -260,7 +260,8 @@ def chat():
                     user_message,
                     get_retriever(),
                     agent_history,
-                    settings=settings
+                    settings=settings,
+                    keep_loaded=True
                 ):
                     yield f"data: {json.dumps(event)}\n\n"
             except Exception as e:
