@@ -288,7 +288,8 @@ def normalize_math_steps(text: str, language: str='') -> Tuple[str, List[str]]:
         return (text, warnings)
     for i, match in enumerate(re.finditer('(^|\\n)(\\s*)(Step|step)\\s*(\\d+|[ivxlcdm]+)([\\s:.\\-)]+)', text, re.IGNORECASE), 1):
         text = text[:match.start()] + match.group(1) + match.group(2) + f'**Step {i}:** ' + text[match.end():]
-        if i != int(match.group(4)) if match.group(4).isdigit() else True:
+        is_digit = match.group(4).isdigit()
+        if (is_digit and i != int(match.group(4))) or (not is_digit):
             warnings.append('Math: normalized step numbering')
     return (text, warnings)
 
@@ -1144,59 +1145,86 @@ class CodeSandbox:
         """Run Python code securely using a subprocess."""
         start_time = time.time()
         
-        # If there are test cases, we inject assert statements at the bottom of the code.
-        test_injection = ""
-        if test_cases:
-            test_injection = "\n\n# --- AUTO-GENERATED TESTS ---\n"
-            for i, tc in enumerate(test_cases):
-                test_injection += f"assert repr(str(eval({repr(tc.input_data)}))) == repr(str({repr(tc.expected_output)})), 'Test {i} Failed'\n"
-        
-        full_code = code + test_injection
-        
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write(full_code)
+            f.write(code)
             temp_path = f.name
             
         try:
-            result = subprocess.run(
-                [sys.executable, temp_path],
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds
-            )
-            elapsed = (time.time() - start_time) * 1000
-            
-            if result.returncode == 0:
-                return SandboxReport(
-                    status=SandboxResult.SUCCESS,
-                    stdout=result.stdout,
-                    stderr=result.stderr,
-                    exit_code=0,
-                    elapsed_ms=elapsed
+            if not test_cases:
+                result = subprocess.run(
+                    [sys.executable, temp_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds
                 )
-            
-            # Categorize the error
-            stderr = result.stderr
-            status = SandboxResult.RUNTIME_ERROR
-            error_msg = stderr.split('\n')[-2] if '\n' in stderr else stderr
-            
-            if "SyntaxError" in stderr:
-                status = SandboxResult.SYNTAX_ERROR
-            elif "AssertionError" in stderr and "Test" in stderr:
-                status = SandboxResult.TEST_FAILED
-                # Try to extract the test index
-                m = re.search(r"Test (\d+) Failed", stderr)
-                failed_test_index = int(m.group(1)) if m else None
+                elapsed = (time.time() - start_time) * 1000
+                
+                if result.returncode == 0:
+                    return SandboxReport(
+                        status=SandboxResult.SUCCESS,
+                        stdout=result.stdout,
+                        stderr=result.stderr,
+                        exit_code=0,
+                        elapsed_ms=elapsed
+                    )
+                
+                stderr = result.stderr
+                status = SandboxResult.RUNTIME_ERROR
+                error_msg = stderr.split('\n')[-2] if '\n' in stderr else stderr
+                if "SyntaxError" in stderr:
+                    status = SandboxResult.SYNTAX_ERROR
+                
                 return SandboxReport(
                     status=status, stdout=result.stdout, stderr=stderr,
                     exit_code=result.returncode, elapsed_ms=elapsed,
-                    failed_test_index=failed_test_index, error_message="Test assertion failed."
+                    error_message=error_msg
                 )
             
+            for i, tc in enumerate(test_cases):
+                result = subprocess.run(
+                    [sys.executable, temp_path],
+                    input=tc.input_data,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds
+                )
+                elapsed = (time.time() - start_time) * 1000
+                
+                if result.returncode != 0:
+                    stderr = result.stderr
+                    status = SandboxResult.RUNTIME_ERROR
+                    error_msg = stderr.split('\n')[-2] if '\n' in stderr else stderr
+                    if "SyntaxError" in stderr:
+                        status = SandboxResult.SYNTAX_ERROR
+                    return SandboxReport(
+                        status=status, stdout=result.stdout, stderr=stderr,
+                        exit_code=result.returncode, elapsed_ms=elapsed,
+                        failed_test_index=i, error_message=error_msg
+                    )
+                    
+                out_clean = result.stdout.strip()
+                exp_clean = tc.expected_output.strip()
+                
+                def norm(s): return " ".join(s.split())
+                
+                if norm(out_clean) != norm(exp_clean):
+                    return SandboxReport(
+                        status=SandboxResult.TEST_FAILED,
+                        stdout=result.stdout,
+                        stderr=f"Test {i+1} Failed.\nExpected: {exp_clean}\nGot: {out_clean}",
+                        exit_code=0,
+                        elapsed_ms=elapsed,
+                        failed_test_index=i,
+                        error_message="Test output mismatch."
+                    )
+            
+            elapsed = (time.time() - start_time) * 1000
             return SandboxReport(
-                status=status, stdout=result.stdout, stderr=stderr,
-                exit_code=result.returncode, elapsed_ms=elapsed,
-                error_message=error_msg
+                status=SandboxResult.SUCCESS,
+                stdout="All tests passed",
+                stderr="",
+                exit_code=0,
+                elapsed_ms=elapsed
             )
             
         except subprocess.TimeoutExpired:
@@ -1257,14 +1285,15 @@ class MathVerifier:
         
         is_exact = (norm_ext == norm_tgt)
         
-        # Very simple equivalence check without sympy overhead
         is_equiv = is_exact
         if not is_exact:
-            # Check numerical equivalence if both are floats
             try:
-                if abs(float(eval(norm_ext)) - float(eval(norm_tgt))) < 1e-6:
+                import sympy
+                expr1 = sympy.sympify(norm_ext)
+                expr2 = sympy.sympify(norm_tgt)
+                if sympy.simplify(expr1 - expr2) == 0:
                     is_equiv = True
-            except:
+            except Exception:
                 pass
                 
         return MathVerificationReport(is_equiv, is_equiv, extracted, target_answer)
@@ -1357,27 +1386,35 @@ class SmartHarness:
             
     def _solve_code(self, prompt: str, candidates: int, test_cases: Optional[List[TestCase]]) -> SmartHarnessResult:
         # Test-Time Compute: Generate N candidates
-        reports = []
+        all_reports = []
         best_code = None
+        best_tests_passed = -1
         
         for i in range(candidates):
             ans = self.model_callable([{"role": "user", "content": prompt}])
             code = CodeSandbox.extract_code(ans)
             
             if test_cases:
-                # We can refine it
                 refined_code, passes = self.refiner.refine_code(prompt, code, test_cases)
-                reports.extend(passes)
-                if passes and passes[-1].success:
-                    return SmartHarnessResult(refined_code, self.domain, True, len(passes), i+1, reports)
+                all_reports.extend(passes)
+                
+                if passes:
+                    last_pass = passes[-1]
+                    if last_pass.success:
+                        return SmartHarnessResult(refined_code, self.domain, True, len(passes), i+1, all_reports)
+                    
+                    passed_tests = last_pass.report.tests_passed or 0
+                    if passed_tests > best_tests_passed:
+                        best_tests_passed = passed_tests
+                        best_code = refined_code
             else:
-                # Just sandbox it to see if it syntax checks / runs without crashing
                 rep = CodeSandbox.run_python(code)
-                reports.append(rep)
+                all_reports.append(rep)
                 if rep.status == SandboxResult.SUCCESS:
                     best_code = code
+                    return SmartHarnessResult(best_code, self.domain, True, 1, i+1, all_reports)
                     
-        return SmartHarnessResult(best_code or code, self.domain, False, 1, candidates, reports)
+        return SmartHarnessResult(best_code or code, self.domain, False, 1, candidates, all_reports)
         
     def _solve_math(self, prompt: str, candidates: int) -> SmartHarnessResult:
         # Majority voting logic for math
@@ -1431,12 +1468,13 @@ def extract_codeforces_tests(problem_description: str) -> List[TestCase]:
             tests.append(TestCase(input_data=inp, expected_output=out))
     return tests
 
+@dataclass
 class SandboxResultReport:
     result: SandboxResult = SandboxResult.PASS
     tests_passed: int = 0
     tests_failed: int = 0
     syntax_error: Optional[str] = None
-    runtime_errors: List[str] = []
+    runtime_errors: List[str] = field(default_factory=list)
 
 def apply_smart_harness_code(text: str, language: Optional[str] = None, problem_description: Optional[str] = None):
     # Parse test cases
@@ -1483,17 +1521,54 @@ def apply_smart_harness_code(text: str, language: Optional[str] = None, problem_
         
     return text, rep
 
+@dataclass
+class MathVerificationResult:
+    result: SandboxResult = SandboxResult.PASS
+    steps_verified: int = 0
+    steps_failed: int = 0
+    final_answer_extracted: Optional[str] = None
+    numerical_match: bool = True
+    expected_value: Optional[str] = None
+    computed_value: Optional[str] = None
+    self_consistent: bool = True
+
 def apply_smart_harness_math(text: str):
-    class _DummyMath:
-        result = SandboxResult.PASS
-        steps_verified = 1
-        steps_failed = 0
-        final_answer_extracted = None
-        numerical_match = True
-        expected_value = None
-        computed_value = None
-        self_consistent = True
-    return text, _DummyMath()
+    import sympy
+    rep = MathVerificationResult()
+    
+    extracted, _ = extract_math_answer(text)
+    if extracted != text:
+        rep.final_answer_extracted = extracted
+        
+    equations = re.findall(r'\$\$([^\$]+)\$\$', text)
+    equations += re.findall(r'\\\[(.*?)\\\]', text, re.DOTALL)
+    
+    for eq in equations:
+        if '=' not in eq:
+            continue
+            
+        parts = [p.strip() for p in eq.split('=')]
+        if len(parts) >= 2:
+            try:
+                for i in range(len(parts)-1):
+                    p1 = MathVerifier._normalize(parts[i])
+                    p2 = MathVerifier._normalize(parts[i+1])
+                    if not p1 or not p2: continue
+                    expr1 = sympy.sympify(p1)
+                    expr2 = sympy.sympify(p2)
+                    if sympy.simplify(expr1 - expr2) != 0:
+                        rep.self_consistent = False
+                        rep.steps_failed += 1
+                        break
+                    else:
+                        rep.steps_verified += 1
+            except Exception:
+                pass
+
+    if rep.steps_failed > 0:
+        rep.result = SandboxResult.FAIL
+        
+    return text, rep
 
 def build_code_refinement_prompt(code: str, problem_description: Optional[str] = None) -> str:
     return ""
