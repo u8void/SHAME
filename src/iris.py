@@ -718,27 +718,14 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
         "brightness", "clipboard", "email", "spotify", "youtube", "terminal", "command",
         "lock screen", "sleep", "restart", "shutdown", "check storage", "free storage",
         "system info", "wifi", "bluetooth", "take note", "screenshot", "record",
-        "check memory", "check battery", "empty trash", "type text", "press key"
+        "check memory", "check battery", "empty trash", "type text", "press key",
+        "volume", "mute", "unmute", "increase volume", "decrease volume"
     }
     for kw in control_keywords:
         if q.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", q):
             # Check if it's explicitly asking "how to" which implies reasoning, not doing
             if not re.search(r"\bhow to\b", q):
                 return TaskType.CONTROL
-
-    search_keywords = {
-        "what is", "what are", "who is", "who was", "where is", "where are", 
-        "when did", "how many", "how much",
-        "ما هي", "ما هو", "من هو", "من هي", "أين يقع", "أين تقع", "أين", "متى"
-    }
-    for kw in search_keywords:
-        if q.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", q):
-            return TaskType.SEARCH
-
-    analysis_keywords = {"analyze", "analyse", "explain", "summarize", "what does this", "how does this", "walkthrough", "break down", "what is this", "what's this"}
-    for kw in analysis_keywords:
-        if re.search(rf"\b{re.escape(kw)}\b", q):
-            return TaskType.REASONING
 
     code_keywords = {
         "code", "coding", "program", "programming", "compile", "compiler",
@@ -763,7 +750,7 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
 
     math_keywords = {
         "math", "mathematics", "equation", "equations", "formula", "formulas",
-        "derivative", "derivatives", "integral", "integrals", "calculus",
+        "derivative", "derivatives", "integral", "integrals", "integrate", "integration", "calculus",
         "algebra", "geometry", "trigonometry", "matrix", "matrices", "vector",
         "vectors", "theorem", "proof", "prove", "probability", "statistics",
         "combinatorics",
@@ -774,6 +761,20 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
 
     if re.search(r'[\d\s]+[\+\-\*\/=]+[\d\s]+', q):
         return TaskType.MATH
+
+    search_keywords = {
+        "what is", "what are", "who is", "who was", "where is", "where are", 
+        "when did", "how many", "how much",
+        "ما هي", "ما هو", "من هو", "من هي", "أين يقع", "أين تقع", "أين", "متى"
+    }
+    for kw in search_keywords:
+        if q.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", q):
+            return TaskType.SEARCH
+
+    analysis_keywords = {"analyze", "analyse", "explain", "summarize", "what does this", "how does this", "walkthrough", "break down", "what is this", "what's this"}
+    for kw in analysis_keywords:
+        if re.search(rf"\b{re.escape(kw)}\b", q):
+            return TaskType.REASONING
 
     reasoning_keywords = {
         "logic", "logical", "puzzle", "puzzles", "riddle", "riddles",
@@ -799,6 +800,22 @@ def classify_task(
     result = _fallback_classify(query_for_classification)
     if result is not None:
         return result, None
+
+    # STICKY ROUTING OPTIMIZATION
+    # If the user is in a continuous chat, and we already have a massive model loaded in RAM,
+    # avoid unloading it to load the Triage router just because they didn't use a strong keyword.
+    # Keep the conversation flowing on the active model to prevent model thrashing.
+    from src.iris import _active_role
+    if _active_role is not None and history:
+        role_to_task = {
+            ModelRole.CODE: TaskType.CODING_SIMPLE,
+            ModelRole.MATH: TaskType.MATH,
+            ModelRole.CONTROL: TaskType.CONTROL,
+            ModelRole.REASONING: TaskType.REASONING,
+            ModelRole.GENERAL: TaskType.GENERAL,
+        }
+        if _active_role in role_to_task:
+            return role_to_task[_active_role], None
 
     minimized = _minimize_history(history, max_entries=2)
     triage_messages = [{"role": "system", "content": TRIAGE_SYSTEM_PROMPT}]
@@ -1450,12 +1467,10 @@ def ask_stream(
             yield {"type": "status", "content": f"Executing: {action_name}"}
             result = execute_action_by_dict(action_dict)
             yield {"type": "action_result", "content": f"Action '{action_name}' Executed.\nResult:\n{result}"}
-            web_context = f"Computer Command Execution Result:\n{result}\n\n"
         else:
             yield {"type": "status", "content": "Action failed to parse."}
-            web_context = "Computer Command Failed.\n\n"
         
-        task_type = TaskType.GENERAL
+        return
 
     if task_type is None:
         if direct_answer:
