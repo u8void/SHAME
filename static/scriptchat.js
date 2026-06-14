@@ -453,28 +453,38 @@ function renderChatList(query = '') {
             let id, html;
             if (block.type === 'thought') {
                 id = `@@@THOUGHT_${index}@@@`;
+                const tKey = 't_' + index;
+                window.toggledBlocks = window.toggledBlocks || {};
+                let isExpanded = window.toggledBlocks[tKey] !== undefined ? window.toggledBlocks[tKey] : !block.isClosed;
+                let inner = escapeHtml(block.content || '').replace(/\n/g, '<br>');
+
                 if (!block.isClosed) {
+                    const animDelay = -(Date.now() % 1000);
                     html = `
-                        <div class="thought-wrapper expanded">
-                            <div class="thought-header streaming">
-                                <div class="thought-loader"></div>
+                        <div class="thought-wrapper ${isExpanded ? 'expanded' : ''}">
+                            <div class="thought-header streaming" onclick="window.toggledBlocks['${tKey}'] = this.parentElement.classList.toggle('expanded')" style="cursor: pointer;">
+                                <div class="thought-loader" style="animation-delay: ${animDelay}ms;"></div>
                                 <span>Thinking...</span>
                             </div>
+                            <div class="thought-content">${inner}</div>
                         </div>
                     `;
                 } else {
                     html = `
-                        <div class="thought-wrapper">
-                            <div class="thought-header" onclick="this.parentElement.classList.toggle('expanded')">
+                        <div class="thought-wrapper ${isExpanded ? 'expanded' : ''}">
+                            <div class="thought-header" onclick="window.toggledBlocks['${tKey}'] = this.parentElement.classList.toggle('expanded')">
                                 <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
                                 <span>Thought Process</span>
                             </div>
-                            <div class="thought-content">${escapeHtml(block.content).replace(/\n/g, '<br>')}</div>
+                            <div class="thought-content">${inner}</div>
                         </div>
                     `;
                 }
             } else if (block.type === 'coding') {
                 id = `@@@CODING_${index}@@@`;
+                const tKey = 'c_' + index;
+                window.toggledBlocks = window.toggledBlocks || {};
+                let isExpanded = window.toggledBlocks[tKey] !== undefined ? window.toggledBlocks[tKey] : true;
                 let inner = '';
                 if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
                     const purifyConfig = { ADD_TAGS: ['math', 'mrow', 'mi', 'mo', 'mn', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mphantom', 'mpadded', 'mroot', 'mfrac', 'msub', 'msup', 'msubsup', 'munder', 'mover', 'munderover', 'mmultiscripts', 'msection', 'maction', 'annotation', 'semantics'], ADD_ATTR: ['mathvariant', 'mathcolor', 'mathsize', 'mathbackground', 'display', 'xmlns'] };
@@ -483,8 +493,8 @@ function renderChatList(query = '') {
                     inner = escapeHtml(block.content).replace(/\n/g, '<br>');
                 }
                 html = `
-                    <div class="thought-wrapper expanded">
-                        <div class="thought-header" onclick="this.parentElement.classList.toggle('expanded')">
+                    <div class="thought-wrapper ${isExpanded ? 'expanded' : ''}">
+                        <div class="thought-header" onclick="window.toggledBlocks['${tKey}'] = this.parentElement.classList.toggle('expanded')">
                             <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
                             <span>Writing Code</span>
                         </div>
@@ -493,6 +503,9 @@ function renderChatList(query = '') {
                 `;
             } else if (block.type === 'review') {
                 id = `@@@REVIEW_${index}@@@`;
+                const tKey = 'r_' + index;
+                window.toggledBlocks = window.toggledBlocks || {};
+                let isExpanded = window.toggledBlocks[tKey] !== undefined ? window.toggledBlocks[tKey] : true;
                 let inner = '';
                 if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
                     const purifyConfig = { ADD_TAGS: ['math', 'mrow', 'mi', 'mo', 'mn', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mphantom', 'mpadded', 'mroot', 'mfrac', 'msub', 'msup', 'msubsup', 'munder', 'mover', 'munderover', 'mmultiscripts', 'msection', 'maction', 'annotation', 'semantics'], ADD_ATTR: ['mathvariant', 'mathcolor', 'mathsize', 'mathbackground', 'display', 'xmlns'] };
@@ -501,8 +514,8 @@ function renderChatList(query = '') {
                     inner = escapeHtml(block.content).replace(/\n/g, '<br>');
                 }
                 html = `
-                    <div class="thought-wrapper expanded">
-                        <div class="thought-header" onclick="this.parentElement.classList.toggle('expanded')">
+                    <div class="thought-wrapper ${isExpanded ? 'expanded' : ''}">
+                        <div class="thought-header" onclick="window.toggledBlocks['${tKey}'] = this.parentElement.classList.toggle('expanded')">
                             <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
                             <span>Code Review</span>
                         </div>
@@ -569,10 +582,10 @@ function renderChatList(query = '') {
             } else if (block.type === 'code') {
                 id = `@@@CODE_${index}@@@`;
                 if (!block.finished && isStreaming) {
+                    const animDelay = -(Date.now() % 1000);
                     html = `
                         <div class="code-loading-box" style="margin: 12px 0; padding: 16px; background: rgba(30, 30, 30, 0.5); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; display: flex; align-items: center; gap: 12px;">
-                            <style>@keyframes spin-loader { to { transform: rotate(360deg); } }</style>
-                            <div style="width: 20px; height: 20px; border: 2px solid rgba(163, 133, 255, 0.3); border-top-color: #a385ff; border-radius: 50%; animation: spin-loader 1s linear infinite;"></div>
+                            <div style="width: 20px; height: 20px; border: 2px solid rgba(163, 133, 255, 0.3); border-top-color: #a385ff; border-radius: 50%; animation: spin-loader 1s linear infinite; animation-delay: ${animDelay}ms;"></div>
                             <span style="color: rgba(255, 255, 255, 0.8); font-size: 14px; font-family: 'Inter', sans-serif;">Writing ${escapeHtml(block.lang || 'code')}...</span>
                         </div>
                     `;

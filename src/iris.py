@@ -192,16 +192,18 @@ TRIAGE_SYSTEM_PROMPT = (
     "   [ROUTE: REASONING]         — how/why questions, explanations, analysis, comparisons, summaries, document reading\n"
     "   [ROUTE: GENERAL]           — casual chat, opinions, creative writing\n"
     "   [ROUTE: MATH]              — math problems, equations, proofs\n"
-    "   [ROUTE: CODE_SIMPLE]       — small code snippets, functions, or programming problems (DO NOT search for these)\n"
-    "   [ROUTE: CODE_COMPLEX]      — full projects, multi-file code, games\n"
+    "   [ROUTE: CODE_SIMPLE]       — small code snippets, functions, HTML/CSS/JS UI elements, or programming problems\n"
+    "   [ROUTE: CODE_COMPLEX]      — full projects, multi-file code, games, complete websites or web apps\n"
     "   [ROUTE: CONTROL]           — OS/PC commands: open apps, run commands, check system\n\n"
     "CRITICAL ROUTING RULE:\n"
-    "- If the user asks to 'solve in c++', 'write a script', or pastes a large algorithmic problem description, you MUST route to [ROUTE: CODE_SIMPLE], [ROUTE: CODE_COMPLEX], or [ROUTE: MATH].\n"
+    "- If the user asks to 'solve in c++', 'write a script', 'create a website', 'write html/css', or pastes a large algorithmic problem description, you MUST route to [ROUTE: CODE_SIMPLE], [ROUTE: CODE_COMPLEX], or [ROUTE: MATH].\n"
+    "- OVERRIDE RULE: If the prompt contains 'build a landing page', 'HTML', or 'Tailwind', you MUST choose [ROUTE: CODE_COMPLEX]. Do not choose [ROUTE: CONTROL] even if the website design mentions mock terminal commands.\n"
     "- NEVER use [ROUTE: SEARCH] for programming problems, competitive programming questions, or large blocks of text.\n\n"
     "EXAMPLES:\n"
     "User: what is the capital of France → [ROUTE: SEARCH: capital of France]\n"
     "User: explain how photosynthesis works → [ROUTE: REASONING]\n"
     "User: write a python hello world → [ROUTE: CODE_SIMPLE]\n"
+    "User: create a tailwind css landing page → [ROUTE: CODE_COMPLEX]\n"
     "User: 2+2 → [ROUTE: MATH]\n"
     "User: open spotify → [ROUTE: CONTROL]\n"
     "User: hi → Hello! How can I help you today?\n\n"
@@ -797,9 +799,19 @@ def classify_task(
     query_for_classification = re.sub(r'<document>[\s\S]*?</document>', '', user_query, flags=re.IGNORECASE)
     query_for_classification = re.sub(r'\[IMAGE_UPLOADED:[^\]]+\]', '', query_for_classification, flags=re.IGNORECASE)
     
+    # --- Hardcoded Intercept for Web Dev / Prompts ---
+    lower_query = query_for_classification.lower()
+    if ("tailwind" in lower_query or "html" in lower_query or "css" in lower_query) and ("build" in lower_query or "landing page" in lower_query or "website" in lower_query or "full-stack developer" in lower_query):
+        logger.info("[Triage] Hardcoded intercept: Web development query detected. Routing to CODING_COMPLEX.")
+        return TaskType.CODING_COMPLEX, None
+
     result = _fallback_classify(query_for_classification)
     if result is not None:
-        return result, None
+        # Prevent false-positive CONTROL routes for web UI tasks mentioning terminals
+        if result == TaskType.CONTROL and ("mockup" in lower_query or "terminal element" in lower_query or "terminal window" in lower_query):
+            pass
+        else:
+            return result, None
 
     # STICKY ROUTING OPTIMIZATION
     # If the user is in a continuous chat, and we already have a massive model loaded in RAM,
@@ -1853,7 +1865,7 @@ def _run_complex_coding(
     yield {"type": "status", "content": "Stage 2 \u2014 Writing code..."}
     code_msgs = optimized[:-1] + [
         {"role": "user",
-         "content": f"User Query: {user_query}\n\nArchitecture/Plan:\n{raw_reasoning[-8000:]}\n\nWrite the complete code based on the plan. You MUST wrap your internal thought process inside <think>...</think> tags. After thinking, enclose all final code inside proper ``` language blocks."}
+         "content": f"User Query: {user_query}\n\nArchitecture/Plan:\n{raw_reasoning[-8000:]}\n\nWrite the complete code based on the plan. Do NOT output any conversational filler. Enclose all final code inside proper ``` language blocks."}
     ]
     yield {"type": "token", "content": "<coding>\n"}
     full_code = "<coding>\n"
@@ -1871,7 +1883,7 @@ def _run_complex_coding(
         {"role": "assistant", "content": full_code},
         {"role": "user",
          "content": "Review the above code. Fix all syntax errors, logical bugs, edge cases, "
-         "and ensure it compiles/works correctly. You MUST wrap your internal code review thought process inside <think>...</think> tags. Return the final corrected code inside a ```python``` block, followed by a brief explanation."}
+         "and ensure it compiles/works correctly. Do NOT output conversational filler. Return the final corrected code inside a ``` language block, followed by a brief explanation."}
     ]
     final_output = ""
     for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
