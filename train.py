@@ -519,13 +519,15 @@ def run_torch_path(args, device_type: str, role: str):
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
         lora_r = 16
     else:
-        model = AutoModelForCausalLM.from_pretrained(args.model).to(device)
+        model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.bfloat16).to(device)
         lora_r = 8
 
     config = LoraConfig(r=lora_r, lora_alpha=lora_r*2, target_modules="all-linear", task_type=TaskType.CAUSAL_LM)
     model = get_peft_model(model, config)
 
     data_collator = DataCollatorForSeq2Seq(tokenizer, model=model, padding=True)
+
+    bf16_supported = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
 
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -536,7 +538,8 @@ def run_torch_path(args, device_type: str, role: str):
         logging_steps=10,
         learning_rate=args.lr,
         optim="paged_adamw_8bit" if device_type == "cuda" else "adamw_torch",
-        fp16=(device_type == "cuda"),
+        bf16=bf16_supported,
+        fp16=(device_type == "cuda" and not bf16_supported),
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={'use_reentrant': False},
         lr_scheduler_type="cosine",
@@ -725,14 +728,19 @@ def main():
     # Apply size-tier config (overrides ROLE_MODEL_MAP + ROLE_TO_GGUF)
     apply_size_config(args.size)
 
+    roles_to_train = resolve_roles(args.role)
+    if not roles_to_train:
+        print(f"[ERROR] No valid training roles resolved from: {args.role}")
+        sys.exit(1)
+
     if getattr(args, "download_only", False):
-        download_all_models()
+        download_all_models(roles_to_train)
         print("[Pre-Training] Models downloaded successfully. Exiting due to --download-only.")
         sys.exit(0)
 
     has_downloaded = False
     if getattr(args, "download_models", False):
-        download_all_models()
+        download_all_models(roles_to_train)
         has_downloaded = True
         print("[Pre-Training] Model downloading check complete. Continuing automatically...")
 
@@ -747,16 +755,11 @@ def main():
     else:
         target = "cpu"
 
-    roles_to_train = resolve_roles(args.role)
-    if not roles_to_train:
-        print(f"[ERROR] No valid training roles resolved from: {args.role}")
-        sys.exit(1)
-
     print(f"[INFO] Target training device: {target.upper()}")
     print(f"[INFO] Roles to train: {roles_to_train}")
 
     if not has_downloaded:
-        download_all_models()
+        download_all_models(roles_to_train)
 
     model_override = getattr(args, "_model_override", None)
     if model_override is None:
@@ -827,7 +830,7 @@ def main():
                 print(f"[INFO] GGUF model {final_gguf} already exists and matches base model. Skipping GGUF conversion.")
 
 
-def download_all_models():
+def download_all_models(roles_to_train: List[str] = None):
     """Download all required GGUF models from Hugging Face before training.
 
     Downloads the source-named files, then renames to iris_NNN.gguf.
@@ -846,7 +849,13 @@ def download_all_models():
         url_map = SIZE_CONFIG["download_urls"]         # source_filename → url
         target_map = SIZE_CONFIG["gguf"]               # role → target filename
         import re
-        for role, target_name in target_map.items():
+        
+        target_roles = roles_to_train if roles_to_train else list(target_map.keys())
+        
+        for role in target_roles:
+            if role not in target_map:
+                continue
+            target_name = target_map.get(role)
             src_name = source_map.get(role)
             url = url_map.get(src_name) if src_name else None
             if url and src_name:
@@ -868,9 +877,10 @@ def download_all_models():
                 else:
                     download_map[target_name] = (url, src_name)
         # Also handle clip
-        clip_src = SIZE_CONFIG.get("clip")
-        if clip_src and clip_src in url_map:
-            download_map[clip_src] = (url_map[clip_src], clip_src)
+        if not roles_to_train or "vision" in roles_to_train:
+            clip_src = SIZE_CONFIG.get("clip")
+            if clip_src and clip_src in url_map:
+                download_map[clip_src] = (url_map[clip_src], clip_src)
     else:
         # Fallback — hardcoded medium tier
         fallback = {
@@ -882,7 +892,25 @@ def download_all_models():
             "iris_006.gguf": ("https://huggingface.co/unsloth/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf", "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"),
             "iris_007.gguf": ("https://huggingface.co/unsloth/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/mmproj-F16.gguf", "mmproj-F16.gguf"),
         }
-        download_map = fallback
+        if roles_to_train:
+            needed_ggufs = set()
+            for r in roles_to_train:
+                if r in ("triage", "router", "general"):
+                    needed_ggufs.add("iris_001.gguf")
+                elif r == "control":
+                    needed_ggufs.add("iris_002.gguf")
+                elif r == "math":
+                    needed_ggufs.add("iris_003.gguf")
+                elif r == "code":
+                    needed_ggufs.add("iris_004.gguf")
+                elif r == "reasoning":
+                    needed_ggufs.add("iris_005.gguf")
+                elif r == "vision":
+                    needed_ggufs.add("iris_006.gguf")
+                    needed_ggufs.add("iris_007.gguf")
+            download_map = {k: v for k, v in fallback.items() if k in needed_ggufs}
+        else:
+            download_map = fallback
 
     print("\n" + "="*60)
     print("[Pre-Training] Checking all required GGUF models...")

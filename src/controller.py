@@ -5,6 +5,8 @@ Natural-language control of your computer, powered by Iris.
 """
 
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.logger import get_logger
 logger = get_logger('controller')
 import re
@@ -233,8 +235,12 @@ def load_config() -> dict:
             json.dump(DEFAULT_CONFIG, f, indent=2)
         logger.info(f"[INFO] Created config template at {CONFIG_FILE}")
         logger.info("       Edit it with your email credentials and app paths before sending mail.")
-    with open(CONFIG_FILE) as f:
-        return json.load(f)
+    try:
+        with open(CONFIG_FILE) as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to load {CONFIG_FILE}: {e}. Using default config.")
+        return DEFAULT_CONFIG
 
 _INTENTS = [
     (
@@ -326,6 +332,17 @@ _prompt_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "trainin
 try:
     with open(_prompt_path, "r", encoding="utf-8") as f:
         _content = f.read().strip()
+        # Dynamically locate the start of training data to exclude examples from prompt
+        _train_idx = _content.find("# TRAINING DATA")
+        if _train_idx == -1:
+            _train_idx = _content.find("#  TRAINING DATA")
+        if _train_idx == -1:
+            _train_idx = _content.find("# ═══════════")
+        if _train_idx != -1:
+            _content = _content[:_train_idx].strip()
+        else:
+            _content = "\n".join(_content.splitlines()[:144]).strip()
+            
         if _content.startswith("SYSTEM:"):
             AI_AGENT_SYSTEM_PROMPT = _content[7:].strip()
         else:
@@ -343,8 +360,8 @@ def _get_agent_system_prompt() -> str:
     Read training/control.md exactly once; only reloads when the file changes
     on disk (same mtime-guard pattern used by load_generation_config).
 
-    The prompt is capped at MAX_SYS_PROMPT_CHARS characters to keep prefill
-    fast (< 5 s on M2).  Put the most important instructions at the TOP of
+    The prompt is truncated before '# TRAINING DATA' to exclude the training examples
+    and keep prefill fast (< 5 s on M2). Put the most important instructions at the TOP of
     control.md — they will always be included.
     """
     global _agent_prompt_cache
@@ -353,9 +370,18 @@ def _get_agent_system_prompt() -> str:
         mtime = os.path.getmtime(path)
         if _agent_prompt_cache["text"] is None or mtime != _agent_prompt_cache["mtime"]:
             with open(path, "r", encoding="utf-8") as f:
-
-                lines = f.readlines()
-                content = "".join(lines[:140]).strip()
+                content = f.read().strip()
+            # Dynamically locate the start of training data to exclude examples from prompt
+            train_idx = content.find("# TRAINING DATA")
+            if train_idx == -1:
+                train_idx = content.find("#  TRAINING DATA")
+            if train_idx == -1:
+                train_idx = content.find("# ═══════════")
+            if train_idx != -1:
+                content = content[:train_idx].strip()
+            else:
+                content = "\n".join(content.splitlines()[:144]).strip()
+                
             text = content[7:].strip() if content.startswith("SYSTEM:") else content
             _agent_prompt_cache = {"text": text, "mtime": mtime}
         return _agent_prompt_cache["text"]
@@ -626,7 +652,7 @@ def execute_action_by_dict(action_dict: dict) -> str:
             state = action_dict.get("state", "on")
             return handle_bluetooth(state)
         elif action == "vpn":
-            act = action_dict.get("action", "connect")
+            act = action_dict.get("vpn_action") or action_dict.get("action", "connect")
             name = action_dict.get("name", "")
             return handle_vpn(act, name)
         elif action == "network_speed_test":
@@ -795,17 +821,22 @@ def _launch_app(cmd: str):
     try:
         if system == "Windows":
             os.startfile(cmd)
+            return True
         elif system == "Darwin":
             subprocess.Popen(["open", "-a", cmd])
+            return True
         else:
             subprocess.Popen([cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return True
-    except Exception:
+            return True
+    except Exception as e:
+        if system == "Windows":
+            logger.warning(f"  [ERROR] Could not launch on Windows: {e}")
+            return False
         try:
             subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
-        except Exception as e:
-            logger.warning(f"  [ERROR] Could not launch: {e}")
+        except Exception as e2:
+            logger.warning(f"  [ERROR] Could not launch: {e2}")
             return False
 
 def handle_app(match: re.Match, config: dict):
@@ -822,6 +853,44 @@ def handle_app_by_name(app_name: str, config: dict = None):
             if key in app_name.lower() or app_name.lower() in key:
                 cmd = val
                 break
+    
+    if not cmd and platform.system() == "Windows":
+        windows_defaults = {
+            "settings": "ms-settings:",
+            "calculator": "calc",
+            "calc": "calc",
+            "notepad": "notepad",
+            "paint": "mspaint",
+            "store": "ms-windows-store:",
+            "camera": "microsoft.windows.camera:",
+            "clock": "ms-clock:",
+            "mail": "outlookmail:",
+            "calendar": "outlookcal:",
+            "weather": "bingweather:",
+            "photos": "ms-photos:",
+            "maps": "bingmaps:",
+            "task manager": "taskmgr",
+            "control panel": "control",
+            "word": "winword",
+            "excel": "excel",
+            "powerpoint": "powerpnt"
+        }
+        cmd = windows_defaults.get(app_name.lower())
+
+        if not cmd:
+            try:
+                import subprocess, json
+                CREATE_NO_WINDOW = 0x08000000
+                safe_name = app_name.replace("'", "''")
+                ps_cmd = f"$n='{safe_name}'; Get-StartApps | Where-Object {{ $_.Name.ToLower().Contains($n.ToLower()) }} | Select-Object -First 1 AppID | ConvertTo-Json"
+                res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+                if res.returncode == 0 and res.stdout.strip():
+                    data = json.loads(res.stdout)
+                    if data and "AppID" in data:
+                        cmd = f"shell:AppsFolder\\{data['AppID']}"
+            except Exception as e:
+                logger.warning(f"  [App Search Error] {e}")
+
     if not cmd:
         cmd = app_name
     log_action("app", f"Launching: {cmd}")
@@ -1116,13 +1185,310 @@ def handle_search_files(query: str, folder: str):
         out += f"\n... and {len(results)-10} more."
     return out
 
+COMMAND_PACKAGE_MAP = {
+    "ffmpeg": {
+        "Windows": "Gyan.FFmpeg",
+        "Darwin": "ffmpeg",
+        "Linux": "ffmpeg"
+    },
+    "git": {
+        "Windows": "Git.Git",
+        "Darwin": "git",
+        "Linux": "git"
+    },
+    "node": {
+        "Windows": "OpenJS.NodeJS",
+        "Darwin": "node",
+        "Linux": "nodejs"
+    },
+    "npm": {
+        "Windows": "OpenJS.NodeJS",
+        "Darwin": "node",
+        "Linux": "npm"
+    },
+    "npx": {
+        "Windows": "OpenJS.NodeJS",
+        "Darwin": "node",
+        "Linux": "npm"
+    },
+    "curl": {
+        "Windows": "cURL.cURL",
+        "Darwin": "curl",
+        "Linux": "curl"
+    },
+    "wget": {
+        "Windows": "GNU.Wget",
+        "Darwin": "wget",
+        "Linux": "wget"
+    },
+    "jq": {
+        "Windows": "jqlang.jq",
+        "Darwin": "jq",
+        "Linux": "jq"
+    },
+    "pandoc": {
+        "Windows": "JohnMacFarlane.Pandoc",
+        "Darwin": "pandoc",
+        "Linux": "pandoc"
+    },
+    "graphviz": {
+        "Windows": "Graphviz.Graphviz",
+        "Darwin": "graphviz",
+        "Linux": "graphviz"
+    },
+    "dot": {
+        "Windows": "Graphviz.Graphviz",
+        "Darwin": "graphviz",
+        "Linux": "graphviz"
+    },
+    "nircmd": {
+        "Windows": "NirSoft.NirCmd",
+        "Darwin": None,
+        "Linux": None
+    },
+    "tesseract": {
+        "Windows": "UB-Mannheim.TesseractOCR",
+        "Darwin": "tesseract",
+        "Linux": "tesseract-ocr"
+    },
+    "python": {
+        "Windows": "Python.Python.3.11",
+        "Darwin": "python3",
+        "Linux": "python3"
+    },
+    "python3": {
+        "Windows": "Python.Python.3.11",
+        "Darwin": "python3",
+        "Linux": "python3"
+    },
+    "make": {
+        "Windows": "Ezwinports.Make",
+        "Darwin": "make",
+        "Linux": "make"
+    },
+    "docker": {
+        "Windows": "Docker.DockerDesktop",
+        "Darwin": "docker",
+        "Linux": "docker.io"
+    }
+}
+
+SHELL_BUILTINS = {
+    # Windows
+    "dir", "cd", "echo", "copy", "del", "md", "mkdir", "rd", "rmdir", "type", 
+    "ren", "rename", "move", "cls", "ver", "vol", "path", "set", "exit", "pause", 
+    "prompt", "title", "start",
+    # Unix
+    "pwd", "local", "export", "alias", "unalias", "read", "unset", "history", 
+    "builtin", "bg", "fg", "jobs", "ls"
+}
+
+def extract_executable_name(command_str: str) -> str:
+    import shlex
+    try:
+        tokens = shlex.split(command_str)
+    except Exception:
+        tokens = command_str.split()
+    
+    if not tokens:
+        return ""
+    
+    # Filter out environment variables at the start (e.g. VAR=value)
+    start_idx = 0
+    while start_idx < len(tokens) and "=" in tokens[start_idx] and not tokens[start_idx].startswith("-"):
+        start_idx += 1
+        
+    if start_idx >= len(tokens):
+        return ""
+        
+    exec_path = tokens[start_idx]
+    # Get the basename without extension
+    basename = os.path.basename(exec_path)
+    name, ext = os.path.splitext(basename)
+    return name.lower()
+
+def reload_system_path():
+    system = platform.system()
+    if system == "Windows":
+        try:
+            import winreg
+            paths = []
+            # Read user PATH
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ) as key:
+                    user_path, _ = winreg.QueryValueEx(key, "Path")
+                    paths.extend(user_path.split(";"))
+            except Exception:
+                pass
+            # Read system PATH
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"System\CurrentControlSet\Control\Session Manager\Environment", 0, winreg.KEY_READ) as key:
+                    sys_path, _ = winreg.QueryValueEx(key, "Path")
+                    paths.extend(sys_path.split(";"))
+            except Exception:
+                pass
+            
+            path_list = []
+            for p in paths:
+                p_str = os.path.expandvars(p.strip())
+                if p_str and p_str not in path_list:
+                    path_list.append(p_str)
+            if path_list:
+                os.environ["PATH"] = ";".join(path_list)
+                logger.info("[System] Windows PATH reloaded from registry.")
+        except Exception as e:
+            logger.warning(f"[Warning] Failed to reload Windows PATH from registry: {e}")
+    elif system == "Darwin":
+        # Apple Silicon Homebrew path
+        brew_bin = "/opt/homebrew/bin"
+        if brew_bin not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = brew_bin + os.path.pathsep + os.environ.get("PATH", "")
+
+def install_command(exec_name: str) -> bool:
+    system = platform.system()
+    pkg_name = exec_name
+    
+    if exec_name in COMMAND_PACKAGE_MAP:
+        pkg_name = COMMAND_PACKAGE_MAP[exec_name].get(system)
+        if not pkg_name:
+            log_action("system", f"No mapped package for '{exec_name}' on {system}.")
+            return False
+
+    log_action("system", f"Attempting to install '{pkg_name}' via platform package manager...")
+
+    if system == "Windows":
+        if not shutil.which("winget"):
+            log_action("system", "winget is not available on this system.")
+            if pkg_name == "NirSoft.NirCmd":
+                log_action("system", "Attempting manual download of NirCmd...")
+                try:
+                    import urllib.request
+                    import zipfile
+                    import io
+                    url = "https://www.nirsoft.net/utils/nircmd.zip"
+                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req, timeout=15) as response:
+                        with zipfile.ZipFile(io.BytesIO(response.read())) as z:
+                            target_dir = os.path.join(os.path.expanduser("~"), ".iris_bin")
+                            os.makedirs(target_dir, exist_ok=True)
+                            z.extract("nircmd.exe", target_dir)
+                            
+                            try:
+                                import winreg
+                                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE) as key:
+                                    user_path, _ = winreg.QueryValueEx(key, "Path")
+                                    if target_dir not in user_path.split(";"):
+                                        updated_path = user_path.rstrip(";") + ";" + target_dir
+                                        winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, updated_path)
+                            except Exception as e:
+                                log_action("system", f"Failed to update user PATH registry: {e}")
+                            
+                            os.environ["PATH"] = target_dir + os.pathsep + os.environ.get("PATH", "")
+                            log_action("system", "Successfully installed NirCmd manually.")
+                            return True
+                except Exception as e:
+                    log_action("system", f"Manual download of NirCmd failed: {e}")
+            return False
+        # Run winget install command
+        cmd = f"winget install --silent --accept-source-agreements --accept-package-agreements {pkg_name}"
+        log_action("system", f"Running: {cmd}")
+        res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if res.returncode == 0:
+            log_action("system", f"Successfully installed '{pkg_name}' via winget.")
+            reload_system_path()
+            return True
+        else:
+            log_action("system", f"winget installation failed (Exit {res.returncode}): {res.stderr or res.stdout}")
+            return False
+
+    elif system == "Darwin":
+        if not shutil.which("brew"):
+            log_action("system", "brew (Homebrew) is not available on this system.")
+            return False
+        cmd = f"brew install {pkg_name}"
+        log_action("system", f"Running: {cmd}")
+        res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if res.returncode == 0:
+            log_action("system", f"Successfully installed '{pkg_name}' via brew.")
+            reload_system_path()
+            return True
+        else:
+            log_action("system", f"brew installation failed (Exit {res.returncode}): {res.stderr or res.stdout}")
+            return False
+
+    elif system == "Linux":
+        # Check package managers
+        if shutil.which("apt-get"):
+            cmd = f"sudo apt-get update && sudo apt-get install -y {pkg_name}"
+        elif shutil.which("dnf"):
+            cmd = f"sudo dnf install -y {pkg_name}"
+        elif shutil.which("yum"):
+            cmd = f"sudo yum install -y {pkg_name}"
+        elif shutil.which("pacman"):
+            cmd = f"sudo pacman -S --noconfirm {pkg_name}"
+        else:
+            log_action("system", "No supported Linux package manager found (apt, dnf, yum, pacman).")
+            return False
+
+        log_action("system", f"Running: {cmd}")
+        res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if res.returncode == 0:
+            log_action("system", f"Successfully installed '{pkg_name}'.")
+            return True
+        else:
+            log_action("system", f"Linux installation failed (Exit {res.returncode}): {res.stderr or res.stdout}")
+            return False
+
+    return False
+
+def is_command_missing_error(code: int, stderr: str, exec_name: str) -> bool:
+    if code in (9009, 127):
+        return True
+    lower_err = stderr.lower()
+    if "not recognized as an internal or external command" in lower_err:
+        return True
+    if "command not found" in lower_err:
+        return True
+    if exec_name and "no such file or directory" in lower_err and exec_name in lower_err:
+        return True
+    return False
+
 def handle_run_command(command: str):
+    cmd_lower = command.strip().lower()
+    if platform.system() == "Windows" and (cmd_lower.startswith("open ") or cmd_lower.startswith("start ")):
+        app_name = command.strip()[command.strip().find(" ")+1:].strip()
+        log_action("intercept", f"Redirecting shell command '{command}' to native Windows app launcher.")
+        return handle_app_by_name(app_name, load_config())
+        
     log_action("terminal", f"Running: {command}")
+    
+    exec_name = extract_executable_name(command)
+    is_missing = False
+    if exec_name and exec_name not in SHELL_BUILTINS:
+        if shutil.which(exec_name) is None:
+            is_missing = True
+            
+    if is_missing:
+        log_action("system", f"Command '{exec_name}' appears to be missing. Attempting automatic installation...")
+        installed = install_command(exec_name)
+        if not installed:
+            return f"Error: Command '{exec_name}' is missing and automatic installation failed."
+
     try:
         result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
         stdout = result.stdout.strip()
         stderr = result.stderr.strip()
         code = result.returncode
+
+        if code != 0 and is_command_missing_error(code, stderr, exec_name) and not is_missing:
+            log_action("system", f"Command failed with missing executable error (Exit {code}). Attempting automatic installation...")
+            installed = install_command(exec_name)
+            if installed:
+                log_action("terminal", f"Retrying: {command}")
+                result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
+                stdout = result.stdout.strip()
+                stderr = result.stderr.strip()
+                code = result.returncode
 
         if code == 0:
             return f"Success (Exit 0):\n{stdout or '(No output)'}"[:1500]
@@ -1131,6 +1497,22 @@ def handle_run_command(command: str):
     except subprocess.TimeoutExpired:
         return "Command timed out after 30 seconds."
     except Exception as e:
+        if exec_name and not is_missing:
+            log_action("system", f"Execution failed: {e}. Attempting automatic installation...")
+            installed = install_command(exec_name)
+            if installed:
+                try:
+                    log_action("terminal", f"Retrying: {command}")
+                    result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
+                    stdout = result.stdout.strip()
+                    stderr = result.stderr.strip()
+                    code = result.returncode
+                    if code == 0:
+                        return f"Success (Exit 0):\n{stdout or '(No output)'}"[:1500]
+                    else:
+                        return f"Error (Exit {code}):\n{stderr or stdout or '(No error message)'}"[:1500]
+                except Exception as retry_e:
+                    return f"Execution failed after retry: {retry_e}"
         return f"Execution failed: {e}"
 
 def handle_open_terminal(command: str = None):
@@ -1180,17 +1562,25 @@ def handle_volume(action: str):
             return "Unknown volume action."
     elif system == "Windows":
 
-        nircmd = shutil.which("nircmd")
-        if not nircmd:
-            return "Volume control on Windows needs nircmd (https://www.nirsoft.net/utils/nircmd.html)"
+        import ctypes
+        VK_VOLUME_MUTE = 0xAD
+        VK_VOLUME_DOWN = 0xAE
+        VK_VOLUME_UP = 0xAF
+        
+        def send_key(vk):
+            ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
+            ctypes.windll.user32.keybd_event(vk, 0, 2, 0)
+
         if action == "up":
-            cmd = f"{nircmd} changesysvolume 2000"
+            send_key(VK_VOLUME_UP)
         elif action == "down":
-            cmd = f"{nircmd} changesysvolume -2000"
+            send_key(VK_VOLUME_DOWN)
         elif action == "mute":
-            cmd = f"{nircmd} mutesysvolume 2"
+            send_key(VK_VOLUME_MUTE)
         else:
             return "Unknown volume action."
+        log_action("system", f"Adjusting volume: {action}")
+        return f"Success: Volume adjusted ({action})."
     else:
         if action == "up":
             cmd = "amixer -D pulse sset Master 5%+"
@@ -1208,14 +1598,266 @@ def handle_volume_set(pct: int):
     if system == "Darwin":
         cmd = f"osascript -e 'set volume output volume {pct}'"
     elif system == "Windows":
-        nircmd = shutil.which("nircmd")
-        if not nircmd:
-            return "Needs nircmd for Windows volume control."
-        cmd = f"{nircmd} setsysvolume {pct*655.35:.0f}"
+        pct = max(0, min(100, pct))
+        level = pct / 100.0
+        ps_script = f"""
+$code = @"
+using System.Runtime.InteropServices;
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IAudioEndpointVolume {{
+    int f(); int g(); int h(); int i();
+    int SetMasterVolumeLevelScalar(float fLevel, System.Guid pguidEventContext);
+    int j(); int GetMasterVolumeLevelScalar(out float pfLevel);
+}}
+[Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IMMDevice {{
+    int Activate(ref System.Guid id, int clsCtx, int activationParams, out IAudioEndpointVolume aev);
+}}
+[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IMMDeviceEnumerator {{
+    int f();
+    int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice endpoint);
+}}
+[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] public class MMDeviceEnumeratorComObject {{ }}
+public class Audio {{
+    public static void SetVolume(float level) {{
+        IMMDeviceEnumerator de = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
+        IMMDevice dev; de.GetDefaultAudioEndpoint(0, 1, out dev);
+        IAudioEndpointVolume aev; System.Guid guid = typeof(IAudioEndpointVolume).GUID;
+        dev.Activate(ref guid, 23, 0, out aev);
+        aev.SetMasterVolumeLevelScalar(level, System.Guid.Empty);
+    }}
+}}
+"@
+Add-Type -TypeDefinition $code
+[Audio]::SetVolume({level})
+"""
+        try:
+            import subprocess
+            CREATE_NO_WINDOW = 0x08000000
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], creationflags=CREATE_NO_WINDOW)
+            log_action("system", f"Setting volume to {pct}%")
+            return f"Success: Set volume to {pct}%"
+        except Exception as e:
+            return f"Failed to set volume: {e}"
     else:
         cmd = f"amixer -D pulse sset Master {pct}%"
     log_action("system", f"Setting volume to {pct}%")
     return handle_run_command(cmd)
+
+def linux_get_brightness() -> int:
+    import shutil
+    import subprocess
+    import re
+    import os
+
+    # 1. Try brightnessctl
+    if shutil.which("brightnessctl"):
+        res = subprocess.run("brightnessctl g", shell=True, capture_output=True, text=True)
+        res_max = subprocess.run("brightnessctl m", shell=True, capture_output=True, text=True)
+        if res.returncode == 0 and res_max.returncode == 0:
+            try:
+                curr = int(res.stdout.strip())
+                mx = int(res_max.stdout.strip())
+                return int((curr / mx) * 100)
+            except:
+                pass
+
+    # 2. Try xbacklight
+    if shutil.which("xbacklight"):
+        res = subprocess.run("xbacklight -get", shell=True, capture_output=True, text=True)
+        if res.returncode == 0:
+            try:
+                return int(float(res.stdout.strip()))
+            except:
+                pass
+
+    # 3. Try GNOME D-Bus
+    if shutil.which("busctl"):
+        res = subprocess.run(
+            'busctl --user get-property org.gnome.SettingsDaemon.Power /org/gnome/SettingsDaemon/Power org.gnome.SettingsDaemon.Power.Screen Brightness',
+            shell=True, capture_output=True, text=True
+        )
+        if res.returncode == 0:
+            match = re.search(r'(\d+)', res.stdout)
+            if match:
+                return int(match.group(1))
+
+    if shutil.which("gdbus"):
+        res = subprocess.run(
+            'gdbus call --session --dest org.gnome.SettingsDaemon.Power --object-path /org/gnome/SettingsDaemon/Power --method org.freedesktop.DBus.Properties.Get org.gnome.SettingsDaemon.Power.Screen Brightness',
+            shell=True, capture_output=True, text=True
+        )
+        if res.returncode == 0:
+            cleaned = res.stdout.replace("int32", "")
+            match = re.search(r'(\d+)', cleaned)
+            if match:
+                return int(match.group(1))
+
+    # 4. Try KDE D-Bus
+    if shutil.which("qdbus"):
+        res = subprocess.run(
+            'qdbus org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement/Actions/BrightnessControl org.kde.Solid.PowerManagement.Actions.BrightnessControl.brightness',
+            shell=True, capture_output=True, text=True
+        )
+        if res.returncode == 0:
+            try:
+                return int(res.stdout.strip())
+            except:
+                pass
+
+    # 5. Try ddcutil (for external monitors / desktops)
+    if shutil.which("ddcutil"):
+        res = subprocess.run("ddcutil getvcp 10", shell=True, capture_output=True, text=True)
+        if res.returncode == 0:
+            match = re.search(r'current value\s*=\s*(\d+)', res.stdout)
+            if match:
+                return int(match.group(1))
+
+    # 6. Try xrandr (only if not on Wayland)
+    is_wayland = os.environ.get("XDG_SESSION_TYPE") == "wayland" or os.environ.get("WAYLAND_DISPLAY") is not None
+    if not is_wayland and shutil.which("xrandr"):
+        res = subprocess.run("xrandr --verbose", shell=True, capture_output=True, text=True)
+        if res.returncode == 0:
+            display = None
+            for line in res.stdout.splitlines():
+                if " connected " in line:
+                    match = re.match(r"^(\S+)\s+connected", line)
+                    if match:
+                        display = match.group(1)
+                elif "Brightness:" in line and display:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        try:
+                            val = float(parts[1])
+                            return int(val * 100)
+                        except:
+                            pass
+
+    # 7. Try direct sysfs read
+    sysfs_dir = "/sys/class/backlight"
+    if os.path.exists(sysfs_dir):
+        for dev in os.listdir(sysfs_dir):
+            try:
+                with open(os.path.join(sysfs_dir, dev, "max_brightness"), "r") as f:
+                    mx = int(f.read().strip())
+                with open(os.path.join(sysfs_dir, dev, "brightness"), "r") as f:
+                    curr = int(f.read().strip())
+                if mx > 0:
+                    return int((curr / mx) * 100)
+            except:
+                continue
+
+    return -1
+
+def linux_set_brightness(pct: int) -> bool:
+    import shutil
+    import subprocess
+    import re
+    import os
+    
+    pct = max(0, min(100, pct))
+    
+    # 1. Try brightnessctl
+    if shutil.which("brightnessctl"):
+        res = subprocess.run(f"brightnessctl s {pct}%", shell=True, capture_output=True)
+        if res.returncode == 0:
+            return True
+            
+    # 2. Try xbacklight
+    if shutil.which("xbacklight"):
+        res = subprocess.run(f"xbacklight -set {pct}", shell=True, capture_output=True)
+        if res.returncode == 0:
+            return True
+            
+    # 3. Try GNOME D-Bus
+    if shutil.which("busctl"):
+        res = subprocess.run(
+            f"busctl --user set-property org.gnome.SettingsDaemon.Power /org/gnome/SettingsDaemon/Power org.gnome.SettingsDaemon.Power.Screen Brightness i {pct}",
+            shell=True, capture_output=True
+        )
+        if res.returncode == 0:
+            return True
+            
+    if shutil.which("gdbus"):
+        res = subprocess.run(
+            f'gdbus call --session --dest org.gnome.SettingsDaemon.Power --object-path /org/gnome/SettingsDaemon/Power --method org.freedesktop.DBus.Properties.Set org.gnome.SettingsDaemon.Power.Screen Brightness "<int32 {pct}>"',
+            shell=True, capture_output=True
+        )
+        if res.returncode == 0:
+            return True
+            
+    # 4. Try KDE D-Bus
+    if shutil.which("qdbus"):
+        res = subprocess.run(
+            f'qdbus org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement/Actions/BrightnessControl org.kde.Solid.PowerManagement.Actions.BrightnessControl.setBrightness {pct}',
+            shell=True, capture_output=True
+        )
+        if res.returncode == 0:
+            return True
+            
+    # 5. Try 'light' utility (handles permissions via setuid or udev)
+    if shutil.which("light"):
+        res = subprocess.run(f"light -S {pct}", shell=True, capture_output=True)
+        if res.returncode == 0:
+            return True
+
+    # 6. Try ddcutil (for external monitors / desktops)
+    if shutil.which("ddcutil"):
+        res = subprocess.run(f"ddcutil setvcp 10 {pct}", shell=True, capture_output=True)
+        if res.returncode == 0:
+            return True
+
+    # 7. Try xrandr (only if not on Wayland)
+    is_wayland = os.environ.get("XDG_SESSION_TYPE") == "wayland" or os.environ.get("WAYLAND_DISPLAY") is not None
+    if not is_wayland and shutil.which("xrandr"):
+        res = subprocess.run("xrandr --verbose", shell=True, capture_output=True, text=True)
+        if res.returncode == 0:
+            displays = []
+            for line in res.stdout.splitlines():
+                if " connected " in line:
+                    match = re.match(r"^(\S+)\s+connected", line)
+                    if match:
+                        displays.append(match.group(1))
+            if displays:
+                val = pct / 100.0
+                success = False
+                for display in displays:
+                    res2 = subprocess.run(f"xrandr --output {display} --brightness {val:.2f}", shell=True, capture_output=True)
+                    if res2.returncode == 0:
+                        success = True
+                if success:
+                    return True
+
+    # 8. Try sysfs write via sudo tee (works if user has NOPASSWD sudo or polkit rule)
+    sysfs_dir = "/sys/class/backlight"
+    if os.path.exists(sysfs_dir):
+        for dev in os.listdir(sysfs_dir):
+            try:
+                br_path = os.path.join(sysfs_dir, dev, "brightness")
+                mx_path = os.path.join(sysfs_dir, dev, "max_brightness")
+                if not os.path.exists(br_path) or not os.path.exists(mx_path):
+                    continue
+                with open(mx_path, "r") as f:
+                    mx = int(f.read().strip())
+                val = int((pct / 100.0) * mx)
+                # Try direct write first (works if user is in 'video' group with udev rule)
+                if os.access(br_path, os.W_OK):
+                    with open(br_path, "w") as f:
+                        f.write(str(val))
+                    return True
+                # Fallback: sudo tee (passwordless if configured)
+                res = subprocess.run(
+                    f"echo {val} | sudo -n tee {br_path}",
+                    shell=True, capture_output=True, text=True
+                )
+                if res.returncode == 0:
+                    return True
+            except Exception:
+                continue
+
+    return False
+
 
 def handle_brightness(action: str):
     system = platform.system()
@@ -1253,33 +1895,67 @@ def handle_brightness(action: str):
             log_action("system", f"Adjusting brightness via CLI fallback: {action}")
             return handle_run_command(cmd)
     elif system == "Windows":
-        import ctypes, ctypes.wintypes
-
-        try:
-            import wmi
-        except ImportError:
-            return "Brightness control on Windows requires 'wmi' (pip install wmi)."
-        c = wmi.WMI(namespace='wmi')
-        methods = c.WmiMonitorBrightnessMethods()[0]
+        script = """
+$monitor = Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness
+$methods = Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods
+$current = $monitor.CurrentBrightness
+$step = 10
+"""
         if action == "up":
-            methods.WmiSetBrightness(10, 0)
+            script += "$new = $current + $step\n"
         elif action == "down":
-            methods.WmiSetBrightness(-10, 0)
+            script += "$new = $current - $step\n"
         else:
             return "Unknown brightness action."
-        return "Brightness adjusted."
-    else:
+            
+        script += """
+if ($new -gt 100) { $new = 100 }
+if ($new -lt 0) { $new = 0 }
+$methods.WmiSetBrightness(1, $new)
+"""
         try:
             import subprocess
-            if action == "up":
-                subprocess.run("xbacklight -inc 10", shell=True)
-            elif action == "down":
-                subprocess.run("xbacklight -dec 10", shell=True)
-            else:
-                return "Unknown brightness action."
-        except Exception:
-            return "xbacklight not found. Install xbacklight for brightness control."
-        return "Brightness adjusted."
+            CREATE_NO_WINDOW = 0x08000000
+            subprocess.run(["powershell", "-NoProfile", "-Command", script], creationflags=CREATE_NO_WINDOW)
+            log_action("system", f"Adjusted brightness: {action}")
+            return f"Brightness adjusted {action}."
+        except Exception as e:
+            return f"Failed to adjust brightness: {e}"
+    else:
+        # Linux branch
+        curr = linux_get_brightness()
+        if curr == -1:
+            # If we can't read current brightness, check if we can do direct relative adjustments
+            import shutil
+            import subprocess
+            import os
+            if shutil.which("brightnessctl"):
+                cmd = "brightnessctl s 10%+" if action == "up" else "brightnessctl s 10%-"
+                res = subprocess.run(cmd, shell=True, capture_output=True)
+                if res.returncode == 0:
+                    return f"Brightness adjusted {action}."
+            if shutil.which("xbacklight"):
+                cmd = "xbacklight -inc 10" if action == "up" else "xbacklight -dec 10"
+                res = subprocess.run(cmd, shell=True, capture_output=True)
+                if res.returncode == 0:
+                    return f"Brightness adjusted {action}."
+            if shutil.which("gdbus") and "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", ""):
+                method = "StepUp" if action == "up" else "StepDown"
+                res = subprocess.run(
+                    f'gdbus call --session --dest org.gnome.SettingsDaemon.Power --object-path /org/gnome/SettingsDaemon/Power --method org.gnome.SettingsDaemon.Power.Screen.{method}',
+                    shell=True, capture_output=True
+                )
+                if res.returncode == 0:
+                    return f"Brightness adjusted {action} via GNOME D-Bus."
+            curr = 50 # Default fallback if we cannot query it
+
+        step = 10
+        new_val = curr + step if action == "up" else curr - step
+        new_val = max(0, min(100, new_val))
+        if linux_set_brightness(new_val):
+            return f"Brightness adjusted {action} (to {new_val}%)."
+        else:
+            return "Failed to adjust brightness. Please make sure brightnessctl, xbacklight, xrandr, or a desktop environment D-Bus service is available."
 
 def handle_brightness_set(pct: int):
     system = platform.system()
@@ -1302,20 +1978,21 @@ def handle_brightness_set(pct: int):
             log_action("system", f"Setting brightness via CLI fallback to {pct}%")
             return handle_run_command(cmd)
     elif system == "Windows":
+        cmd = f'powershell -NoProfile -Command "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, {pct})"'
         try:
-            import wmi
-        except ImportError:
-            return "Needs 'wmi' for brightness control on Windows."
-        c = wmi.WMI(namespace='wmi')
-        methods = c.WmiMonitorBrightnessMethods()[0]
-        methods.WmiSetBrightness(pct, 0)
-        return f"Brightness set to {pct}%."
-    else:
-        try:
-            subprocess.run(f"xbacklight -set {pct}", shell=True)
+            import subprocess
+            CREATE_NO_WINDOW = 0x08000000
+            subprocess.run(cmd, shell=True, creationflags=CREATE_NO_WINDOW)
+            log_action("system", f"Setting brightness to {pct}% natively via PowerShell")
             return f"Brightness set to {pct}%."
-        except Exception:
-            return "xbacklight not found."
+        except Exception as e:
+            return f"Failed to set brightness: {e}"
+    else:
+        # Linux branch
+        if linux_set_brightness(pct):
+            return f"Brightness set to {pct}%."
+        else:
+            return f"Failed to set brightness to {pct}%. Run this once to fix it permanently:\n\n  sudo apt install brightnessctl\n\nThen try again — no restart needed."
 
 def get_system_info(what: str = "all"):
     import platform as pf
@@ -1330,10 +2007,29 @@ def get_system_info(what: str = "all"):
             mem = psutil.virtual_memory()
             add("RAM", f"{mem.total / (1024**3):.1f} GB total, {mem.percent}% used")
         except ImportError:
-            add("RAM", "Install psutil for memory info")
+            if pf.system() == "Windows":
+                try:
+                    import subprocess, json
+                    CREATE_NO_WINDOW = 0x08000000
+                    res = subprocess.run(
+                        ["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize, FreePhysicalMemory | ConvertTo-Json"],
+                        capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
+                    )
+                    data = json.loads(res.stdout)
+                    total_kb = float(data["TotalVisibleMemorySize"])
+                    free_kb = float(data["FreePhysicalMemory"])
+                    used_kb = total_kb - free_kb
+                    percent = (used_kb / total_kb) * 100
+                    add("RAM", f"{total_kb / (1024**2):.1f} GB total, {percent:.1f}% used")
+                except:
+                    add("RAM", "Install psutil for memory info")
+            else:
+                add("RAM", "Install psutil for memory info")
     if what in ("disk", "all"):
         try:
-            total, used, free = shutil.disk_usage("/")
+            import shutil
+            path = "C:\\" if pf.system() == "Windows" else "/"
+            total, used, free = shutil.disk_usage(path)
             add("Disk", f"{free / (1024**3):.1f} GB free / {total / (1024**3):.1f} GB")
         except:
             add("Disk", "Unknown")
@@ -1373,29 +2069,41 @@ def handle_window_close():
     system = platform.system()
     if system == "Darwin":
         subprocess.run("osascript -e 'tell application \"System Events\" to keystroke \"w\" using command down'", shell=True)
-        return "Closed window."
-    return f"Window close not supported on {system}."
+    elif system == "Windows":
+        subprocess.run('powershell -Command "(New-Object -ComObject WScript.Shell).SendKeys(\'%{F4}\')"', shell=True)
+    else:
+        subprocess.run("xdotool getactivewindow windowclose", shell=True)
+    return "Closed window."
 
 def handle_window_minimize():
     system = platform.system()
     if system == "Darwin":
         subprocess.run("osascript -e 'tell application \"System Events\" to keystroke \"m\" using command down'", shell=True)
-        return "Minimized window."
-    return f"Window minimize not supported on {system}."
+    elif system == "Windows":
+        subprocess.run('powershell -Command "(New-Object -ComObject Shell.Application).MinimizeAll()"', shell=True)
+    else:
+        subprocess.run("xdotool getactivewindow windowminimize", shell=True)
+    return "Minimized window."
 
 def handle_window_maximize():
     system = platform.system()
     if system == "Darwin":
         subprocess.run("osascript -e 'tell application \"System Events\" to tell process (name of first application process whose frontmost is true) to click (first button whose subrole is \"AXZoomButton\") of first window'", shell=True)
-        return "Maximized window."
-    return f"Window maximize not supported on {system}."
+    elif system == "Windows":
+        subprocess.run('powershell -Command "$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys(\'% {MAXIMIZE}\')"', shell=True)
+    else:
+        subprocess.run("xdotool getactivewindow windowsize 100% 100%", shell=True)
+    return "Maximized window."
 
 def handle_window_fullscreen():
     system = platform.system()
     if system == "Darwin":
         subprocess.run("osascript -e 'tell application \"System Events\" to keystroke \"f\" using {command down, control down}'", shell=True)
-        return "Toggled fullscreen."
-    return f"Fullscreen toggle not supported on {system}."
+    elif system == "Windows":
+        subprocess.run('powershell -Command "(New-Object -ComObject WScript.Shell).SendKeys(\'{F11}\')"', shell=True)
+    else:
+        subprocess.run("xdotool key F11", shell=True)
+    return "Toggled fullscreen."
 
 def handle_switch_tab(direction: str):
     system = platform.system()
@@ -1404,8 +2112,13 @@ def handle_switch_tab(direction: str):
             subprocess.run("osascript -e 'tell application \"System Events\" to key code 48 using control down'", shell=True)
         else:
             subprocess.run("osascript -e 'tell application \"System Events\" to key code 48 using {control down, shift down}'", shell=True)
-        return f"Switched tab {direction}."
-    return f"Tab switching not supported on {system}."
+    elif system == "Windows":
+        keys = "^{TAB}" if direction == "next" else "^+{TAB}"
+        subprocess.run(f'powershell -Command "(New-Object -ComObject WScript.Shell).SendKeys(\'{keys}\')"', shell=True)
+    else:
+        keys = "ctrl+Tab" if direction == "next" else "ctrl+shift+Tab"
+        subprocess.run(f"xdotool key {keys}", shell=True)
+    return f"Switched tab {direction}."
 
 def handle_wifi(state: str) -> str:
     system = platform.system()
@@ -1535,6 +2248,15 @@ def handle_shutdown() -> str:
     return "Shutting down computer..."
 
 def handle_dnd(state: str) -> str:
+    system = platform.system()
+    if system == "Darwin":
+        pass
+    elif system == "Windows":
+        subprocess.run('start ms-settings:quietmoments', shell=True)
+        return f"Opened Focus Assist settings to turn {state}."
+    else:
+        val = "true" if state == "on" else "false"
+        subprocess.run(f"gsettings set org.gnome.desktop.notifications show-banners {val}", shell=True)
     return f"Do Not Disturb set to {state}."
 
 def handle_dark_mode(state: str) -> str:
@@ -1543,9 +2265,30 @@ def handle_dark_mode(state: str) -> str:
         val = "true" if state == "on" else "false"
         subprocess.run(f"osascript -e 'tell application \"System Events\" to tell appearance preferences to set dark mode to {val}'", shell=True)
         return f"Dark mode turned {state}."
-    return f"Dark mode not supported on {system}."
+    elif system == "Windows":
+        try:
+            import winreg
+            val = 0 if state == "on" else 1
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", 0, winreg.KEY_SET_VALUE)
+            winreg.SetValueEx(key, "AppsUseLightTheme", 0, winreg.REG_DWORD, val)
+            winreg.SetValueEx(key, "SystemUsesLightTheme", 0, winreg.REG_DWORD, val)
+            winreg.CloseKey(key)
+            return f"Dark mode turned {state}."
+        except Exception as e:
+            return f"Failed to set dark mode: {e}"
+    else:
+        val = "prefer-dark" if state == "on" else "default"
+        subprocess.run(f"gsettings set org.gnome.desktop.interface color-scheme '{val}'", shell=True)
+        return f"Dark mode turned {state}."
 
 def handle_night_shift(state: str) -> str:
+    system = platform.system()
+    if system == "Windows":
+        subprocess.run('start ms-settings:nightlight', shell=True)
+        return f"Opened Night Light settings to turn {state}."
+    elif system == "Linux":
+        val = "true" if state == "on" else "false"
+        subprocess.run(f"gsettings set org.gnome.settings-daemon.plugins.color night-light-enabled {val}", shell=True)
     return f"Night Shift turned {state}."
 
 def handle_set_wallpaper(path: str) -> str:
@@ -1554,6 +2297,13 @@ def handle_set_wallpaper(path: str) -> str:
     if system == "Darwin":
         cmd = f"osascript -e 'tell application \"Finder\" to set desktop picture to POSIX file \"{resolved_path}\"'"
         subprocess.run(cmd, shell=True)
+        return f"Wallpaper set to {resolved_path}."
+    elif system == "Windows":
+        import ctypes
+        SPI_SETDESKWALLPAPER = 20
+        SPIF_UPDATEINIFILE = 1
+        SPIF_SENDWININICHANGE = 2
+        ctypes.windll.user32.SystemParametersInfoW(SPI_SETDESKWALLPAPER, 0, resolved_path, SPIF_UPDATEINIFILE | SPIF_SENDWININICHANGE)
         return f"Wallpaper set to {resolved_path}."
     return f"Wallpaper setting not supported on {system}."
 
@@ -1587,7 +2337,28 @@ def handle_media(action: str) -> str:
                 subprocess.run(f"osascript -e 'tell application \"{app}\" to {apple_action}'", shell=True)
                 return f"Media command '{action}' sent to {app}."
         return f"Media command '{action}' executed."
-    return f"Media command '{action}' not supported on {system}."
+    elif system == "Windows":
+        import ctypes
+        VK_MEDIA_NEXT_TRACK = 0xB0
+        VK_MEDIA_PREV_TRACK = 0xB1
+        VK_MEDIA_STOP = 0xB2
+        VK_MEDIA_PLAY_PAUSE = 0xB3
+        
+        vk = None
+        if action == "play_pause": vk = VK_MEDIA_PLAY_PAUSE
+        elif action == "next": vk = VK_MEDIA_NEXT_TRACK
+        elif action == "previous": vk = VK_MEDIA_PREV_TRACK
+        elif action == "stop": vk = VK_MEDIA_STOP
+        
+        if vk:
+            ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
+            ctypes.windll.user32.keybd_event(vk, 0, 2, 0)
+        return f"Media command '{action}' executed."
+    else:
+        linux_action = action
+        if action == "play_pause": linux_action = "play-pause"
+        subprocess.run(f"playerctl {linux_action}", shell=True)
+        return f"Media command '{action}' executed."
 
 def handle_say(text: str) -> str:
     system = platform.system()
@@ -1621,8 +2392,19 @@ def handle_notification(title: str, body: str) -> str:
     if system == "Darwin":
         cmd = f"osascript -e 'display notification \"{body}\" with title \"{title}\"'"
         subprocess.run(cmd, shell=True)
-        return "Notification displayed."
-    return f"Notification '{title}: {body}' logged."
+    elif system == "Windows":
+        ps = f'''
+[reflection.assembly]::loadwithpartialname("System.Windows.Forms")
+[reflection.assembly]::loadwithpartialname("System.Drawing")
+$notify = new-object system.windows.forms.notifyicon
+$notify.icon = [System.Drawing.SystemIcons]::Information
+$notify.visible = $true
+$notify.showballoontip(10,"{title}","{body}",[system.windows.forms.tooltipicon]::None)
+'''
+        subprocess.run(["powershell", "-Command", ps], shell=True)
+    else:
+        subprocess.run(["notify-send", title, body])
+    return "Notification displayed."
 
 def handle_take_note(content: str) -> str:
     import datetime
@@ -1639,16 +2421,23 @@ def handle_empty_trash() -> str:
     system = platform.system()
     if system == "Darwin":
         subprocess.run("osascript -e 'tell application \"Finder\" to empty trash'", shell=True)
-        return "Trash emptied."
-    return "Emptying trash not supported on this OS."
+    elif system == "Windows":
+        subprocess.run("powershell -Command Clear-RecycleBin -Force", shell=True)
+    else:
+        subprocess.run("rm -rf ~/.local/share/Trash/files/* || gio trash --empty", shell=True)
+    return "Trash emptied."
 
 def handle_type_text(text: str) -> str:
     system = platform.system()
     if system == "Darwin":
         escaped = text.replace('"', '\\"')
         subprocess.run(f"osascript -e 'tell application \"System Events\" to keystroke \"{escaped}\"'", shell=True)
-        return f"Typed text: '{text}'"
-    return "Typing text not supported on this OS."
+    elif system == "Windows":
+        escaped = text.replace("'", "''")
+        subprocess.run(f"powershell -Command \"Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{escaped}')\"", shell=True)
+    else:
+        subprocess.run(["xdotool", "type", text])
+    return f"Typed text: '{text}'"
 
 def handle_press_keys(keys: str) -> str:
     system = platform.system()
@@ -1669,16 +2458,27 @@ def handle_press_keys(keys: str) -> str:
         else:
             cmd = f"osascript -e 'tell application \"System Events\" to keystroke \"{key}\"'"
         subprocess.run(cmd, shell=True)
-        return f"Pressed keys: {keys}."
-    return "Pressing keys not supported on this OS."
+    elif system == "Windows":
+        import re
+        ps_keys = keys.lower()
+        ps_keys = re.sub(r'ctrl\+', '^', ps_keys)
+        ps_keys = re.sub(r'shift\+', '+', ps_keys)
+        ps_keys = re.sub(r'alt\+', '%', ps_keys)
+        subprocess.run(f"powershell -Command \"Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{{{ps_keys}}}')\"", shell=True)
+    else:
+        subprocess.run(["xdotool", "key", keys])
+    return f"Pressed keys: {keys}."
 
 def handle_focus_app(name: str) -> str:
     system = platform.system()
     if system == "Darwin":
         cmd = f"osascript -e 'tell application \"{name}\" to activate'"
         subprocess.run(cmd, shell=True)
-        return f"Focused app '{name}'."
-    return "Focus app not supported on this OS."
+    elif system == "Windows":
+        subprocess.run(f"powershell -Command \"(New-Object -ComObject WScript.Shell).AppActivate('{name}')\"", shell=True)
+    else:
+        subprocess.run(["wmctrl", "-a", name])
+    return f"Focused app '{name}'."
 
 def handle_fix_file(path: str, instructions: str, model=None, tokenizer=None, device=None):
     if not path:
@@ -1828,7 +2628,8 @@ def log_action(action_type: str, message: str):
     }
     prefix = icon_map.get(action_type.lower(), f"[bold cyan]{action_type}[/bold cyan]")
     if RICH_AVAILABLE:
-        console.print(f"  [dim]❯[/dim] {prefix}: {message}")
+        chevron = ">" if platform.system() == "Windows" else "❯"
+        console.print(f"  [dim]{chevron}[/dim] {prefix}: {message}")
     else:
         logger.info(f"  [→ {action_type.capitalize()}] {message}")
 def print_banner():
@@ -1991,7 +2792,7 @@ def draw_layout(model, tokenizer, retriever, history, status_text=None):
 
     divider = "─" * cols
 
-    footer_msg = " Type '/help' for commands │ '/exit' to quit │ Ask anything in natural language"
+    footer_msg = " Type '/help' for commands │ '/exit' to quit │ '/restart' to restart │ Ask anything in natural language"
     if status_text:
         footer_msg = f" [bold yellow]Status: {status_text}[/bold yellow] │{footer_msg}"
 
@@ -2074,7 +2875,8 @@ SLASH_COMMANDS = {
     "/history": "Print recent chat history in this session",
     "/model": "Show details of the active model and config parameters",
     "/exit": "Quit the controller",
-    "/quit": "Quit the controller"
+    "/quit": "Quit the controller",
+    "/restart": "Restart the controller and model"
 }
 
 def show_help_menu():
@@ -2089,6 +2891,7 @@ def show_help_menu():
         table.add_row(cmd, desc)
         
     table.add_row("exit / quit", "Quit the controller")
+    table.add_row("restart", "Restart the controller and model")
     table.add_row("help", "Show this help menu")
     table.add_row("clear", "Clear the screen")
     
@@ -2381,10 +3184,16 @@ def main():
 
             lower = raw.lower()
             
-            if raw.startswith("/") or lower in ("help", "clear", "exit", "quit", "status", "config", "history", "model"):
+            if raw.startswith("/") or lower in ("help", "clear", "exit", "quit", "status", "config", "history", "model", "restart"):
                 cmd = raw.split()[0].lower()
                 if cmd == "/exit" or cmd == "/quit" or cmd in ("exit", "quit"):
                     break
+                elif cmd == "/restart" or cmd == "restart":
+                    if RICH_AVAILABLE:
+                        console.print("[bold yellow]Restarting Iris...[/bold yellow]")
+                    else:
+                        logger.info("Restarting Iris...")
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
                 elif cmd == "/help" or cmd in ("help", "?"):
                     show_help_menu()
                     if RICH_AVAILABLE:
@@ -2432,7 +3241,7 @@ def main():
                 
                 reply_parts = []
                 final_reply = None
-                for event in ai_agent_handle(raw, model, tokenizer, device, retriever, history):
+                for event in ai_agent_handle(raw, retriever, history):
                     ev_type = event.get("type")
                     content = event.get("content", "")
                     
@@ -2465,7 +3274,6 @@ def main():
                 
                 # Auto-save code blocks
                 try:
-                    import re, os
                     code_blocks = re.findall(r'```(\w*)\n([\s\S]*?)```', final_reply)
                     for i, (lang, code) in enumerate(code_blocks):
                         filename = None
