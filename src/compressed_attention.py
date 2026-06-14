@@ -206,8 +206,9 @@ def _score_block_with_model(
     This is the DeepSeek FP4 indexer equivalent: a lightweight scoring pass
     that runs on the smallest model to determine which blocks deserve full attention.
     """
-    if llm is None:
+    if True: # Always use keyword score; LLM scoring destroys KV cache and adds massive latency
         keyword_score = _keyword_score(block_text, query)
+        return keyword_score * 5.0
         return keyword_score * 5.0
 
     prompt = CSA_SCORING_PROMPT.format(query=query, block_text=block_text[:1200])
