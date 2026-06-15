@@ -13,3 +13,4 @@ node_modules/
 scratch/
 mlx_data/
 models/
+*.pkl

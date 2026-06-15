@@ -539,14 +539,16 @@ def _unload_locked(role_to_evict: str = None) -> None:
         _model_paths.pop(role_to_evict, None)
         if llm:
             try:
-                llm.reset()
+                if hasattr(llm, "close"): llm.close()
+                else: llm.reset()
             except Exception:
                 pass
             del llm
     else:
         for r, llm in list(_model_pool.items()):
             try:
-                llm.reset()
+                if hasattr(llm, "close"): llm.close()
+                else: llm.reset()
             except Exception:
                 pass
             del llm
@@ -562,7 +564,7 @@ def _unload_locked(role_to_evict: str = None) -> None:
             pass
 
 
-def load_model(role: ModelRole) -> 'Llama':
+def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama':
     """Load a model by role. Uses LRU Cache pool to keep models alive."""
     global _model_pool, _model_paths
 
@@ -572,9 +574,15 @@ def load_model(role: ModelRole) -> 'Llama':
         
         # Fast path: If the requested role is ALREADY loaded, just reuse it!
         if role.value in _model_pool and _model_paths.get(role.value) == path:
-            # Move to end to mark as recently used
-            _model_pool.move_to_end(role.value)
-            return _model_pool[role.value]
+            cached_llm = _model_pool[role.value]
+            cached_n_ctx = cached_llm.n_ctx() if callable(getattr(cached_llm, "n_ctx", None)) else getattr(cached_llm, "n_ctx", 1024)
+            if override_n_ctx is None or cached_n_ctx >= override_n_ctx:
+                # Move to end to mark as recently used
+                _model_pool.move_to_end(role.value)
+                return cached_llm
+            else:
+                logger.info(f"[Iris] Evicting cached {role.value} model because n_ctx {cached_n_ctx} < {override_n_ctx}")
+                _unload_locked(role.value)
 
         if not os.path.exists(path):
             raise FileNotFoundError(
@@ -586,20 +594,23 @@ def load_model(role: ModelRole) -> 'Llama':
         
         hw = get_hardware_profile()
 
-        # n_ctx: role-specific ceiling, capped by what hardware can afford
-        _ctx_raw = cfg.get("n_ctx_allocation", "auto")
-        if str(_ctx_raw).lower() == "auto":
-            n_ctx = ctx_for_role(role.value, hw)
+        if override_n_ctx is not None:
+            n_ctx = override_n_ctx
         else:
-            try:
-                n_ctx = int(_ctx_raw)
-            except (ValueError, TypeError):
+            # n_ctx: role-specific ceiling, capped by what hardware can afford
+            _ctx_raw = cfg.get("n_ctx_allocation", "auto")
+            if str(_ctx_raw).lower() == "auto":
                 n_ctx = ctx_for_role(role.value, hw)
+            else:
+                try:
+                    n_ctx = int(_ctx_raw)
+                except (ValueError, TypeError):
+                    n_ctx = ctx_for_role(role.value, hw)
 
-        # Honour per-role maximums from ROLE_CTX if they're tighter
-        n_ctx = min(n_ctx, ROLE_CTX.get(role, n_ctx))
-        if not n_ctx:
-            n_ctx = hw.ctx_default
+            # Honour per-role maximums from ROLE_CTX if they're tighter
+            n_ctx = min(n_ctx, ROLE_CTX.get(role, n_ctx))
+            if not n_ctx:
+                n_ctx = hw.ctx_default
 
         n_gpu_layers = cfg.get("n_gpu_layers", hw.n_gpu_layers)
         n_threads    = cfg.get("n_threads",    hw.n_threads)
@@ -646,7 +657,7 @@ def load_model(role: ModelRole) -> 'Llama':
                         _draft_role = ModelRole(_draft_role_str)
                         if _draft_role != role: # Avoid recursive loop
                             logger.info(f"[Iris] Speculative decoding: Loading draft model '{_draft_role.value}'...")
-                            _draft_llm = load_model(_draft_role)
+                            _draft_llm = load_model(_draft_role, override_n_ctx=n_ctx)
                             
                             # Check Vocab Match
                             if _draft_llm.n_vocab() != _new_llm_vocab if '_new_llm_vocab' in locals() else 0:
@@ -719,6 +730,7 @@ def load_model(role: ModelRole) -> 'Llama':
             n_batch=_n_batch,
             n_ubatch=_n_ubatch,
             verbose=False,
+            logits_all=(draft_model is not None),
         )
         
         if draft_model is not None:
