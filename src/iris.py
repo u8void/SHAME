@@ -258,7 +258,7 @@ GENERAL_SYSTEM_PROMPT = (
     "ACCURACY RULES (HIGHEST PRIORITY):\n"
     "1. NEVER invent facts, statistics, dates, names, or specific details you are uncertain about. "
     "If you are unsure, say so clearly: 'I'm not certain, but...' or 'I don't have reliable data on that.'\n"
-    "2. When search results are provided in the query, base your factual claims on those results only.\n"
+    "2. When search results are provided, trust that they are highly relevant to the user's query. Do NOT dismiss them just because the exact keywords are missing. Synthesize the search results into a confident answer. NEVER invent external facts to fill in the gaps.\n"
     "RESPONSE RULES:\n"
     "3. Give clear, complete answers — not one-liners, but also not padded filler.\n"
     "4. Use examples and analogies to explain concepts clearly.\n"
@@ -293,9 +293,12 @@ REASONING_SYSTEM_PROMPT = (
     "ACCURACY RULES (HIGHEST PRIORITY):\n"
     "1. NEVER invent facts, statistics, names, dates, or specific details you are not certain about. "
     "If you do not know something, say 'I'm not certain, but...' or 'Based on my training data...' clearly.\n"
-    "2. For factual questions (history, science, people, places), web search results will be provided in the query. "
-    "Use ONLY the provided search context for specific facts. Do NOT add unsourced numbers or claims.\n"
-    "3. Prefer saying 'I don't have reliable information on that specific detail' over guessing.\n"
+    "2. If you are writing or showing ANY code (HTML, Python, etc.), you MUST wrap it in standard markdown triple backticks (```html ... ```). "
+    "CRITICAL: NEVER wrap your <think>...</think> tags inside triple backticks! <think> tags must be at the very top level, OUTSIDE of any code blocks.\n"
+    "3. NEVER output raw HTML or code without backticks, as it will break the chat UI.\n"
+    "4. When web search results are provided, trust that they are highly relevant to the query. "
+    "Do NOT dismiss a search result just because it doesn't contain the exact keywords. Synthesize the search results into a confident answer without hallucinating fake external information. If the results show a specific entity (like a game character), logically connect it to the user's query.\n"
+    "5. Prefer saying 'I don't have reliable information' over guessing wildly.\n"
     "DEPTH RULES:\n"
     "4. Structure your reasoning: problem definition → analysis → approach → solution → verification.\n"
     "5. For explanations: cover mechanics, context, and real-world examples.\n"
@@ -876,8 +879,10 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
 
     search_keywords = {
         "what is", "what are", "who is", "who was", "where is", "where are", 
-        "when did", "how many", "how much",
-        "ما هي", "ما هو", "من هو", "من هي", "أين يقع", "أين تقع", "أين", "متى"
+        "when did", "how many", "how much", "tell me about", "what do you know about",
+        "do you know about", "what's the", "what was", "who are", "explain what",
+        "ما هي", "ما هو", "من هو", "من هي", "أين يقع", "أين تقع", "أين", "متى",
+        "أخبرني عن", "ماذا تعرف عن"
     }
     for kw in search_keywords:
         if q.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", q):
@@ -927,9 +932,14 @@ def classify_task(
     # If the user is in a continuous chat, and we already have a massive model loaded in RAM,
     # avoid unloading it to load the Triage router just because they didn't use a strong keyword.
     # Keep the conversation flowing on the active model to prevent model thrashing.
+    # CRITICAL: NEVER apply sticky routing for SEARCH/factual queries — they must always get web results.
     from src.iris import get_active_role
     active_role = get_active_role()
-    if active_role is not None and history:
+    _search_signals = (
+        r'\b(what|who|when|where|which|tell me about|do you know|what do you know)\b',
+    )
+    _looks_like_search = any(re.search(p, lower_query, re.IGNORECASE) for p in _search_signals)
+    if active_role is not None and history and not _looks_like_search:
         role_to_task = {
             ModelRole.CODE: TaskType.CODING_SIMPLE,
             ModelRole.MATH: TaskType.MATH,

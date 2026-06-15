@@ -350,10 +350,15 @@ function renderChatList(query = '') {
             }
             return false;
         }
+        // Auto-wrap raw HTML in backticks if the model forgot them (Browser Markdown Chokehold prevention)
+        if (!work.includes("```html") && !work.includes("```\n<!DOCTYPE") && !work.includes("```\n<html")) {
+            work = work.replace(/(?:^|\n)(?:html\s*\n)?(<!DOCTYPE html>[\s\S]*?(?:<\/html>|$)|<html[\s\S]*?(?:<\/html>|$))/gi, '\n```html\n$1\n```\n');
+        }
 
         work = work.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
             const id = `@@@CODE_${blocks.length}@@@`;
-            const detectedLang = lang.trim() || 'code';
+            // Strip any @@@ placeholders that might have leaked into the lang definition
+            const detectedLang = (lang || '').trim().replace(/@@@[A-Z0-9_]+@@@/gi, '') || 'code';
             const contentTrimmed = codeContent.trim();
             const isCmdOrShort = isCommandOrShortBlock(detectedLang, contentTrimmed);
             const isFinished = match.endsWith('```');
@@ -377,18 +382,18 @@ function renderChatList(query = '') {
                 const filename      = filenameMatch ? filenameMatch[1] : 'file.txt';
                 const lang          = langMatch ? langMatch[1] : 'text';
 
-                // Find the closest unclaimed code block physically preceding this tag in the string
-                const beforeSub = work.substring(0, offset);
+                // Find the closest unclaimed code block physically succeeding this tag in the string
+                const afterSub = work.substring(offset);
                 const placeholderRegex = /@@@CODE_(\d+)@@@/g;
                 let matchPlaceholder;
                 const blockIndices = [];
-                while ((matchPlaceholder = placeholderRegex.exec(beforeSub)) !== null) {
+                while ((matchPlaceholder = placeholderRegex.exec(afterSub)) !== null) {
                     blockIndices.push(parseInt(matchPlaceholder[1], 10));
                 }
 
                 let codeIndex = -1;
                 // 1. Try to find a non-command/non-short block first
-                for (let j = blockIndices.length - 1; j >= 0; j--) {
+                for (let j = 0; j < blockIndices.length; j++) {
                     const idx = blockIndices[j];
                     const block = blocks[idx];
                     if (block && block.type === 'code' && !block.claimed) {
@@ -402,7 +407,7 @@ function renderChatList(query = '') {
 
                 // 2. Fallback to the closest unclaimed code block if no non-command block is found
                 if (codeIndex === -1) {
-                    for (let j = blockIndices.length - 1; j >= 0; j--) {
+                    for (let j = 0; j < blockIndices.length; j++) {
                         const idx = blockIndices[j];
                         const block = blocks[idx];
                         if (block && block.type === 'code' && !block.claimed) {
@@ -597,7 +602,7 @@ function renderChatList(query = '') {
                     `;
                 } else if (block.hidden) {
                     // Auto-generate a file card for hidden blocks that weren't claimed by an explicit <file_card> tag
-                    if (block.autoCard && block.content) {
+                    if (block.autoCard && block.content && !block.claimed) {
                         const autoLang = block.lang || 'code';
                         const ext      = normaliseExt(autoLang);
                         const autoFilename = window.extractFilenameFromCode ? window.extractFilenameFromCode(block.content, ext) : `snippet.${ext}`;
