@@ -319,9 +319,20 @@ from collections import OrderedDict
 # LRU Cache: role.value -> Llama
 _model_pool: OrderedDict[str, 'Llama'] = OrderedDict()
 _model_paths: dict[str, str] = {}
-_MAX_MODELS_IN_POOL = 2
+_MAX_MODELS_IN_POOL = 1
 _keep_loaded: bool = False  # Set True during benchmarks to skip unload
 _model_lock = threading.RLock()
+
+def get_active_role() -> Optional[ModelRole]:
+    """Returns the most recently used ModelRole from the pool."""
+    with _model_lock:
+        if not _model_pool:
+            return None
+        last_role_value = next(reversed(_model_pool))
+        try:
+            return ModelRole(last_role_value)
+        except ValueError:
+            return None
 
 # ── MLX Text Backend: swap llama.cpp for Metal-accelerated mlx_lm when available ──
 _mlx_backend_cache: dict = {}
@@ -916,8 +927,9 @@ def classify_task(
     # If the user is in a continuous chat, and we already have a massive model loaded in RAM,
     # avoid unloading it to load the Triage router just because they didn't use a strong keyword.
     # Keep the conversation flowing on the active model to prevent model thrashing.
-    from src.iris import _active_role
-    if _active_role is not None and history:
+    from src.iris import get_active_role
+    active_role = get_active_role()
+    if active_role is not None and history:
         role_to_task = {
             ModelRole.CODE: TaskType.CODING_SIMPLE,
             ModelRole.MATH: TaskType.MATH,
@@ -925,8 +937,8 @@ def classify_task(
             ModelRole.REASONING: TaskType.REASONING,
             ModelRole.GENERAL: TaskType.GENERAL,
         }
-        if _active_role in role_to_task:
-            return role_to_task[_active_role], None
+        if active_role in role_to_task:
+            return role_to_task[active_role], None
 
     minimized = _minimize_history(history, max_entries=2)
     triage_messages = [{"role": "system", "content": TRIAGE_SYSTEM_PROMPT}]

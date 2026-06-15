@@ -701,12 +701,13 @@ def save_settings():
 
 @app.route("/model_status", methods=["GET"])
 def model_status():
-    from src.iris import _active_role, load_generation_config, ModelRole, DEFAULT_MODEL_FILES
+    from src.iris import get_active_role, load_generation_config, ModelRole, DEFAULT_MODEL_FILES
 
     active_role = None
     active_file = None
-    if _active_role is not None:
-        active_role = _active_role.value
+    role_obj = get_active_role()
+    if role_obj is not None:
+        active_role = role_obj.value
         cfg = load_generation_config()
         models_dict = cfg.get("models", {})
         active_file = models_dict.get(active_role) or DEFAULT_MODEL_FILES.get(active_role)
