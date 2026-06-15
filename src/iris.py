@@ -1571,7 +1571,7 @@ def ask_stream(
         try:
             from src.web_search import WebSearch
             ws = WebSearch()
-            web_context = ws.search_to_context(search_term, max_results=3)
+            web_context = ws.search_to_context(search_term, max_results=5)
             if not web_context:
                 yield {"type": "status", "content": "Web search returned no results."}
         except Exception as e:
