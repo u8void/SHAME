@@ -17,6 +17,11 @@ import shutil
 import tempfile
 from typing import List, Tuple
 
+try:
+    import torch
+except ImportError:
+    torch = None
+
 from src.iris import (
     load_blended_skill_talk,
     load_daily_dialog,
@@ -763,7 +768,7 @@ def main():
         target = args.device
     elif platform.system() == "Darwin" and platform.machine() == "arm64":
         target = "mps"
-    elif torch.cuda.is_available():
+    elif torch is not None and torch.cuda.is_available():
         target = "cuda"
     else:
         target = "cpu"

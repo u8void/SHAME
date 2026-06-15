@@ -3,7 +3,7 @@ iris.py — Iris AI Base Model with MRA (Multi-Role Architecture)
 ===============================================================
 """
 
-total_time_spent = 256 #hours (update after working)
+total_time_spent = 294 #hours (update after working)
 
 import os
 from .logger import get_logger
@@ -24,11 +24,51 @@ from typing import Optional, Tuple, Dict, Any, Generator, List, Union
 
 warnings.filterwarnings("ignore")
 
+import math
+from contextlib import asynccontextmanager
+from src.hardware_profile import get_hardware_profile
+
+try:
+    from llama_cpp.llama_speculative import LlamaDraftModel
+except ImportError:
+    class LlamaDraftModel:
+        pass
+
+class DualLlamaDraftModel(LlamaDraftModel):
+    """
+    Implements True Speculative Decoding using a smaller secondary draft model.
+    Synchronizes the KV cache of the draft model natively in Python.
+    """
+    def __init__(self, draft_llm, num_pred_tokens: int = 4):
+        import numpy as np
+        self.draft_llm = draft_llm
+        self.num_pred_tokens = num_pred_tokens
+        self.np = np
+
+    def __call__(self, input_ids, /, **kwargs):
+        input_list = input_ids.tolist()
+        # Rollback KV cache if the target model rejected tokens
+        if self.draft_llm.n_tokens > len(input_list):
+            self.draft_llm.n_tokens = len(input_list)
+            
+        new_tokens = input_list[self.draft_llm.n_tokens:]
+        if new_tokens:
+            self.draft_llm.eval(new_tokens)
+            
+        drafts = []
+        for _ in range(self.num_pred_tokens):
+            next_token = self.draft_llm.sample()
+            drafts.append(next_token)
+            self.draft_llm.eval([next_token])
+            
+        return self.np.array(drafts, dtype=self.np.intc)
+
 from src.context_compactor import auto_compact_for_role
 from src.compressed_attention import (
     select_kv_quant, _get_ftype, estimate_kv_cache_ram,
     smart_compress, KVQuantLevel,
 )
+from .hardware_profile import get_hardware_profile, apply_to_config, ctx_for_role, summary as hw_summary
 
 try:
     from sentence_transformers import SentenceTransformer, util
@@ -65,6 +105,9 @@ except ImportError:
 
 import llama_cpp
 from llama_cpp import Llama
+
+import threading as _hw_thread
+_hw_thread.Thread(target=lambda: __import__('src.hardware_profile', fromlist=['summary']).summary(), daemon=True).start()
 
 import ctypes
 def _llama_log_callback(level, text, user_data):
@@ -156,7 +199,7 @@ _MODEL_SOURCES: Dict[str, list] = {
 ROLE_CTX: Dict[ModelRole, int] = {
     ModelRole.TRIAGE:    1024,   # triage only needs to output a routing tag
     ModelRole.ROUTER:    1024,
-    ModelRole.CONTROL:   2048,
+    ModelRole.CONTROL:   8192,
     ModelRole.MATH:      4096,
     ModelRole.CODE:      8192,
     ModelRole.REASONING: 8192,
@@ -176,7 +219,6 @@ DEFAULT_THREADS_BATCH = 4   # Separate thread count for prompt processing
 IRIS_IDENTITY = (
     "You are Iris AI, a powerful AI assistant created entirely by Ahmed Barakat. "
     "If asked who made you, who created you, or who you are, you MUST answer that you are Iris AI, created by Ahmed Barakat. "
-    "However, if the user asks for recommendations, comparisons, or general information about other AI models (like GPT-4, Claude, DeepSeek, etc.), you should answer normally, accurately, and objectively. "
     "If you use <think> or similar tags for internal reasoning, you MUST always close them properly (e.g. </think>) before providing your final response. "
     "Answer directly without introducing yourself with 'I am Iris AI' at the start of every message. "
     "CRITICAL LANGUAGE RULE: You MUST always respond in the EXACT SAME LANGUAGE as the user's input. If the user speaks Arabic, you MUST reply entirely in Arabic. This includes your internal <think> process: if the user speaks Arabic, your <think> block MUST ALSO be in Arabic to prevent cross-lingual hallucinations and degradation of depth."
@@ -272,11 +314,14 @@ REVIEWER_SYSTEM_PROMPT = (
 )
 
 
-_active_role: Optional[ModelRole] = None
-_active_llm: Optional[Llama] = None
-_active_model_path: Optional[str] = None
+from collections import OrderedDict
+
+# LRU Cache: role.value -> Llama
+_model_pool: OrderedDict[str, 'Llama'] = OrderedDict()
+_model_paths: dict[str, str] = {}
+_MAX_MODELS_IN_POOL = 2
 _keep_loaded: bool = False  # Set True during benchmarks to skip unload
-_model_lock = threading.Lock()
+_model_lock = threading.RLock()
 
 # ── MLX Text Backend: swap llama.cpp for Metal-accelerated mlx_lm when available ──
 _mlx_backend_cache: dict = {}
@@ -485,44 +530,51 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
         logger.warning(f"[Iris] Failed to download {filename}: {last_error}")
     return False
 
-def _unload_locked() -> None:
-    """Internal: unload without acquiring lock (caller holds _model_lock)."""
-    global _active_role, _active_llm, _active_model_path
-    if _active_llm is not None:
-        role_val = _active_role.value if _active_role else "unknown"
-        #print(f"[Iris] Unloaded {role_val}.")
-        try:
-            _active_llm.reset()
-        except Exception:
-            pass
-        llm = _active_llm
-        _active_llm = None
-        _active_role = None
-        _active_model_path = None
-        del llm
-        gc.collect()
-        if platform.system() == "Linux":
+def _unload_locked(role_to_evict: str = None) -> None:
+    """Internal: unload a specific model, or clear the pool if None."""
+    global _model_pool, _model_paths
+    
+    if role_to_evict:
+        llm = _model_pool.pop(role_to_evict, None)
+        _model_paths.pop(role_to_evict, None)
+        if llm:
             try:
-                import ctypes
-                ctypes.CDLL(None).malloc_trim(0)
+                llm.reset()
             except Exception:
                 pass
+            del llm
+    else:
+        for r, llm in list(_model_pool.items()):
+            try:
+                llm.reset()
+            except Exception:
+                pass
+            del llm
+        _model_pool.clear()
+        _model_paths.clear()
+        
+    gc.collect()
+    if platform.system() == "Linux":
+        try:
+            import ctypes
+            ctypes.CDLL(None).malloc_trim(0)
+        except Exception:
+            pass
 
 
-def load_model(role: ModelRole) -> Llama:
-    """Load a model by role. Unloads any currently active model first. Only one in RAM."""
-    global _active_role, _active_llm, _active_model_path
+def load_model(role: ModelRole) -> 'Llama':
+    """Load a model by role. Uses LRU Cache pool to keep models alive."""
+    global _model_pool, _model_paths
 
     with _model_lock:
         filename = _get_model_filename(role)
         path = _model_path(filename)
         
-        # Fast path: If the requested file is ALREADY loaded (even under a different role), just reuse it!
-        if _active_llm is not None and _active_model_path == path:
-            _active_role = role
-            return _active_llm
-
-        _unload_locked()
+        # Fast path: If the requested role is ALREADY loaded, just reuse it!
+        if role.value in _model_pool and _model_paths.get(role.value) == path:
+            # Move to end to mark as recently used
+            _model_pool.move_to_end(role.value)
+            return _model_pool[role.value]
 
         if not os.path.exists(path):
             raise FileNotFoundError(
@@ -532,63 +584,29 @@ def load_model(role: ModelRole) -> Llama:
             )
         cfg = load_generation_config()
         
-        n_ctx_allocation = cfg.get("n_ctx_allocation", "auto")
-        if str(n_ctx_allocation).lower() == "auto":
-            try:
-                # Basic cross-platform RAM calc using os.sysconf if posix
-                if os.name == 'posix':
-                    ram_bytes = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
-                    ram_gb = ram_bytes / (1024**3)
-                    if ram_gb < 16:
-                        n_ctx = 4096
-                    elif ram_gb < 32:
-                        n_ctx = 8192
-                    elif ram_gb < 64:
-                        n_ctx = 16384
-                    else:
-                        n_ctx = 32768
-                else:
-                    n_ctx = 8192
-            except Exception:
-                n_ctx = 4096
+        hw = get_hardware_profile()
+
+        # n_ctx: role-specific ceiling, capped by what hardware can afford
+        _ctx_raw = cfg.get("n_ctx_allocation", "auto")
+        if str(_ctx_raw).lower() == "auto":
+            n_ctx = ctx_for_role(role.value, hw)
         else:
             try:
-                n_ctx = int(n_ctx_allocation)
-            except ValueError:
-                n_ctx = 4096
+                n_ctx = int(_ctx_raw)
+            except (ValueError, TypeError):
+                n_ctx = ctx_for_role(role.value, hw)
 
+        # Honour per-role maximums from ROLE_CTX if they're tighter
+        n_ctx = min(n_ctx, ROLE_CTX.get(role, n_ctx))
         if not n_ctx:
-            n_ctx = ROLE_CTX.get(role, DEFAULT_CTX)
+            n_ctx = hw.ctx_default
 
-        n_gpu_layers = cfg.get("n_gpu_layers", DEFAULT_GPU_LAYERS)
-        n_threads = cfg.get("n_threads", DEFAULT_THREADS)
+        n_gpu_layers = cfg.get("n_gpu_layers", hw.n_gpu_layers)
+        n_threads    = cfg.get("n_threads",    hw.n_threads)
+        if str(n_threads).lower() == "auto":
+            n_threads = hw.n_threads
 
         #print(f"[Iris] Loading {role.value} ({filename}) [ctx={n_ctx}]...")
-
-        draft_model = None
-        # ── Speculative Decoding (DeepSeek-V4 style draft-target parallelism) ──
-        _sd_cfg = cfg.get("speculative_decoding", {})
-        if _sd_cfg.get("enabled", False):
-            _draft_file = _sd_cfg.get("draft_model", "iris_002.gguf")
-            _draft_path = os.path.join(os.path.dirname(_HERE), "models", _draft_file)
-            if os.path.exists(_draft_path):
-                try:
-                    _draft = Llama(
-                        model_path=_draft_path,
-                        n_ctx=n_ctx,
-                        n_gpu_layers=0,
-                        n_threads=2,
-                        n_threads_batch=2,
-                        type_k=_selected_kv_type,
-                        type_v=_selected_kv_type,
-                        verbose=False,
-                    )
-                    draft_model = _draft
-                    logger.info(f"[Iris] Speculative decoding: draft={_draft_file} n_ctx={n_ctx}")
-                except Exception as _e:
-                    logger.warning(f"[Iris] Speculative decoding failed to load draft: {_e}")
-            else:
-                logger.warning(f"[Iris] Draft model not found: {_draft_path}")
 
         # ── DeepSeek-V4 style KV cache quantization ──
         _ca_cfg = cfg.get("compressed_attention", {})
@@ -600,16 +618,52 @@ def load_model(role: ModelRole) -> Llama:
                 _ram_gb = (os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')) / (1024**3)
         except Exception:
             pass
+        try:
+            _kv_pref_enum = KVQuantLevel(_kv_pref.lower())
+        except ValueError:
+            _kv_pref_enum = KVQuantLevel.AUTO
+
         _kv_quant = select_kv_quant(
             model_size_gb=os.path.getsize(path) / (1024**3),
             n_ctx=n_ctx,
             ram_gb=_ram_gb,
-            preference=KVQuantLevel(_kv_pref) if _kv_pref in KVQuantLevel.__members__ else KVQuantLevel.AUTO,
+            preference=_kv_pref_enum,
             profile=_profile,
         )
         _selected_kv_type = _get_ftype(_kv_quant)
         _kv_ram_mb = estimate_kv_cache_ram(os.path.getsize(path) / (1024**3), n_ctx, _kv_quant)
         logger.info(f"[Iris] KV cache: {_kv_quant.value.upper()} → ~{_kv_ram_mb:.0f} MB @ n_ctx={n_ctx}")
+
+        draft_model = None
+        # ── Speculative Decoding (Draft Model & N-Gram) ──
+        _sd_cfg = cfg.get("speculative_decoding", {})
+        if _sd_cfg.get("enabled", False):
+            try:
+                _sd_type = _sd_cfg.get("type", "model")
+                if _sd_type == "model":
+                    _draft_role_str = _sd_cfg.get("draft_model_role", "triage")
+                    try:
+                        _draft_role = ModelRole(_draft_role_str)
+                        if _draft_role != role: # Avoid recursive loop
+                            logger.info(f"[Iris] Speculative decoding: Loading draft model '{_draft_role.value}'...")
+                            _draft_llm = load_model(_draft_role)
+                            
+                            # Check Vocab Match
+                            if _draft_llm.n_vocab() != _new_llm_vocab if '_new_llm_vocab' in locals() else 0:
+                                pass
+                                
+                            draft_model = DualLlamaDraftModel(_draft_llm, num_pred_tokens=_sd_cfg.get("num_pred_tokens", 4))
+                            logger.info(f"[Iris] Speculative decoding: Draft model '{_draft_role.value}' injected.")
+                    except ValueError:
+                        logger.warning(f"[Iris] Invalid draft_model_role: '{_draft_role_str}'")
+                else:
+                    from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
+                    draft_model = LlamaPromptLookupDecoding(max_ngram_size=2, num_pred_tokens=10)
+                    logger.info(f"[Iris] Speculative decoding: N-Gram Prompt Lookup enabled")
+            except ImportError:
+                logger.warning(f"[Iris] Speculative decoding requested, but dependencies missing.")
+            except Exception as _e:
+                logger.warning(f"[Iris] Speculative decoding failed to initialize: {_e}")
 
         # ── MLX Metal GPU backend: only when explicitly requested via IRIS_BACKEND=mlx ──
         # Requires models/ dir to contain MLX-format model directories (not GGUF files).
@@ -623,41 +677,74 @@ def load_model(role: ModelRole) -> Llama:
                     _mlx_temp = cfg.get("temperature", 0.7)
                     _mlx_llm = _get_mlx_model(_mlx_dir, _mlx_temp)
                     if _mlx_llm is not None:
-                        _active_llm = _mlx_llm
-                        _active_role = role
-                        _active_model_path = path
+                        # Evict LRU if full
+                        if len(_model_pool) >= _MAX_MODELS_IN_POOL:
+                            oldest = next(iter(_model_pool))
+                            _unload_locked(oldest)
+                            
+                        _model_pool[role.value] = _mlx_llm
+                        _model_paths[role.value] = path
                         logger.info(f"[Iris] Using MLX Metal GPU backend for {role.value}")
-                        return _active_llm
+                        return _mlx_llm
                 else:
                     logger.warning(f"[Iris] MLX model dir not found: {_mlx_dir}. Falling back to llama.cpp (GGUF).")
             except Exception as _mlx_e:
                 logger.warning(f"[Iris] MLX backend failed, falling back to llama.cpp: {_mlx_e}")
 
-        _active_llm = Llama(
+        _n_threads_batch = cfg.get("n_threads_batch", hw.n_threads_batch)
+        if str(_n_threads_batch).lower() == "auto":
+            _n_threads_batch = hw.n_threads_batch
+
+        _n_batch = cfg.get("n_batch", hw.n_batch)
+        if str(_n_batch).lower() == "auto":
+            _n_batch = hw.n_batch
+
+        _n_ubatch = cfg.get("n_ubatch", hw.n_ubatch)
+        if str(_n_ubatch).lower() == "auto":
+            _n_ubatch = hw.n_ubatch
+
+        _flash_attn = hw.flash_attn  # hardware_profile sets this correctly per backend
+
+        _new_llm = Llama(
             model_path=path,
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
             n_threads=n_threads,
-            n_threads_batch=cfg.get("n_threads_batch", DEFAULT_THREADS_BATCH),
-            use_mmap=True,
-            use_mlock=False,
-            flash_attn=True,
+            n_threads_batch=_n_threads_batch,
+            use_mmap=hw.use_mmap,
+            use_mlock=hw.use_mlock,
+            flash_attn=_flash_attn,
             type_k=_selected_kv_type,
             type_v=_selected_kv_type,
-            n_batch=cfg.get("n_batch", DEFAULT_BATCH),
-            n_ubatch=cfg.get("n_ubatch", DEFAULT_UBATCH),
+            n_batch=_n_batch,
+            n_ubatch=_n_ubatch,
             verbose=False,
-            draft_model=draft_model,
         )
-        _active_role = role
-        _active_model_path = path
-        return _active_llm
+        
+        if draft_model is not None:
+            _new_llm.draft_model = draft_model
+        
+        # Evict LRU if full
+        if len(_model_pool) >= _MAX_MODELS_IN_POOL:
+            oldest = next(iter(_model_pool))
+            _unload_locked(oldest)
+            
+        _model_pool[role.value] = _new_llm
+        _model_paths[role.value] = path
+        
+        # Vocab Check for draft model
+        if isinstance(draft_model, DualLlamaDraftModel):
+            if draft_model.draft_llm.n_vocab() != _new_llm.n_vocab():
+                logger.warning(f"[Iris] Disabling draft model! Vocab mismatch: Draft({draft_model.draft_llm.n_vocab()}) != Target({_new_llm.n_vocab()})")
+                _new_llm.draft_model = None
+                
+        return _new_llm
 
 
 def unload_model() -> None:
-    """Fully unload the currently active model and free RAM."""
+    """Fully unload all models and free RAM."""
     with _model_lock:
-        _unload_locked()
+        _unload_locked(None)
 
 
 
@@ -1001,7 +1088,7 @@ def _stream_tokens(
         # Ensure we never crash during auto-continuation by compacting context
         # ── DeepSeek-V4 style hybrid compression ──
         _ca_cfg = load_generation_config().get("compressed_attention", {})
-        if _ca_cfg.get("enabled", True) and len(full_messages) > 4:
+        if _ca_cfg.get("enabled", False) and len(full_messages) > 4:
             _query = messages[-1].get("content", "") if messages else ""
             _compressed = smart_compress(
                 full_messages, query=_query,
@@ -1507,13 +1594,13 @@ def ask_stream(
         context = retriever.retrieve(user_query, top_k=3, category=rag_cats.get(task_type, "general"))
 
     final_query = user_query
-    if web_context:
+    if web_context and "(No web results found" not in web_context and "Web search unavailable" not in web_context:
         final_query = (
             f"[WEB SEARCH RESULTS]\n{web_context}\n[END WEB SEARCH RESULTS]\n\n"
             f"User Query: {user_query}\n\n"
-            f"INSTRUCTIONS: Answer the user's question using ONLY the search results above. "
-            f"Do NOT add facts, statistics, or details that are not in the search results. "
-            f"If the search results don't contain enough information to answer, say so clearly. "
+            f"INSTRUCTIONS: You MUST think step-by-step inside a <think> block before answering. "
+            f"Use the search results above to inform your answer, especially for recent events or specific facts. "
+            f"If the search results are incomplete, you may use your internal knowledge to supplement the answer. "
             f"Respond in the SAME LANGUAGE as the user's query."
         )
         
@@ -2499,10 +2586,12 @@ def load_generation_config() -> dict:
                     merged_models = {**defaults.get("models", {}), **loaded.pop("models", {})}
                     _gen_config_cache = {**defaults, **loaded}
                     _gen_config_cache["models"] = merged_models
+                    apply_to_config(_gen_config_cache)
                 _gen_config_mtime = mtime
             return _gen_config_cache
         except Exception:
             pass
+    apply_to_config(defaults)
     return defaults
 
 

@@ -39,9 +39,15 @@ document.addEventListener("DOMContentLoaded", () => {
         temperature: 0.6,
         top_p: 0.9,
         top_k: 40,
-        repetition_penalty: 1.3,
+        repetition_penalty: 1.05,
         code_review: false
     };
+
+    // Force migrate old bad default of 1.3 down to 1.05
+    if (chatSettings.repetition_penalty === 1.3) {
+        chatSettings.repetition_penalty = 1.05;
+        localStorage.setItem('iris_chat_settings', JSON.stringify(chatSettings));
+    }
 
     fetch('/get_settings')
         .then(res => res.json())
@@ -881,16 +887,17 @@ window.downloadCode = (btn, ext) => {
 
             let currentResponseText = "";
             let rawResponseText = "";
-            let renderPending = false;  // rAF debounce flag
-            let renderFrameId = null;
+            let lastRenderTime = 0;
+            let renderTimer = null;
             let firstTokenReceived = false;
 
-            // Flush accumulated tokens to the DOM at display frame rate (≤60fps),
-            // not at token-generation rate (potentially 100s/sec).
+            // Throttle accumulated tokens to the DOM to max 15fps
+            // This prevents "The Browser Markdown Chokehold" where marked.parse+DOMPurify freezes the main thread
             function scheduleRender() {
-                if (renderPending) return;
-                renderPending = true;
-                renderFrameId = requestAnimationFrame(() => {
+                if (renderTimer) return;
+                const now = Date.now();
+                const delay = Math.max(0, 66 - (now - lastRenderTime)); // ~15 FPS max
+                renderTimer = setTimeout(() => {
                     try {
                         if (!firstTokenReceived) {
                             removeTypingIndicator();
@@ -931,13 +938,13 @@ window.downloadCode = (btn, ext) => {
                                 }
                             }
                         }
+                        lastRenderTime = Date.now();
                     } catch (e) {
                         console.error("Render error:", e);
                     } finally {
-                        renderPending = false;
-                        renderFrameId = null;
+                        renderTimer = null;
                     }
-                });
+                }, delay);
             }
 
             while (true) {
@@ -982,11 +989,11 @@ window.downloadCode = (btn, ext) => {
                             currentResponseText += "\n\n<action_result>" + event.content + "</action_result>";
                             scheduleRender();
                         } else if (event.type === "clear") {
-                            if (renderFrameId !== null) {
-                                cancelAnimationFrame(renderFrameId);
-                                renderFrameId = null;
+                            if (renderTimer !== null) {
+                                clearTimeout(renderTimer);
+                                renderTimer = null;
                             }
-                            renderPending = false;
+                            lastRenderTime = 0;
                             currentResponseText = "";
                             rawResponseText = "";
                             firstTokenReceived = false;

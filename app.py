@@ -740,14 +740,11 @@ def warmup_models():
     """
     if PRO_MODE:
         return
-    import logging
-    from src.iris import load_model, ModelRole
-    import src.voice_models as vm
     
-    logger = logging.getLogger('iris')
-    logger.info("[Warmup] Sequentially caching models in OS RAM to prevent cold starts...")
-    
-    roles_to_warm = [ModelRole.GENERAL, ModelRole.CODE, ModelRole.MATH]
+    # [DISABLED] Caching multiple gigabytes of models in the OS page cache on 16GB Macs 
+    # forces macOS to evict the user's active applications (like Chrome and WindowServer) to Swap.
+    # This causes the entire OS to become glitchy and buggy.
+    return
     
     for role in roles_to_warm:
         try:
