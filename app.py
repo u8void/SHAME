@@ -701,12 +701,12 @@ def save_settings():
 
 @app.route("/model_status", methods=["GET"])
 def model_status():
-    from src.iris import _active_role, load_generation_config, ModelRole, DEFAULT_MODEL_FILES
+    from src.iris import _model_pool, load_generation_config, ModelRole, DEFAULT_MODEL_FILES
 
     active_role = None
     active_file = None
-    if _active_role is not None:
-        active_role = _active_role.value
+    if _model_pool:
+        active_role = next(reversed(_model_pool))
         cfg = load_generation_config()
         models_dict = cfg.get("models", {})
         active_file = models_dict.get(active_role) or DEFAULT_MODEL_FILES.get(active_role)
@@ -732,42 +732,18 @@ def model_status():
 
 def warmup_models():
     """
-    Sequentially loads and unloads models in the background.
-    This forces the OS to cache the GGUF files in the filesystem RAM cache (page cache).
-    Because we unload after each load, it completely avoids active memory overhauls, 
-    but subsequent loads by the user will be instantly read from RAM instead of the SSD, 
-    fixing the cold start problem!
+    Pre-loads models into active memory on startup.
+    The user requested the Control model to be loaded by default to avoid cold starts.
     """
     if PRO_MODE:
         return
     
-    # [DISABLED] Caching multiple gigabytes of models in the OS page cache on 16GB Macs 
-    # forces macOS to evict the user's active applications (like Chrome and WindowServer) to Swap.
-    # This causes the entire OS to become glitchy and buggy.
-    return
-    
-    for role in roles_to_warm:
-        try:
-            logger.info(f"[Warmup] Caching {role.value} model...")
-            load_model(role)
-        except Exception:
-            pass
-            
-    # Cache the voice model
+    from src.iris import load_model, ModelRole
     try:
-        logger.info("[Warmup] Caching Voice LLM...")
-        vm.load_voice_llm()
-    except Exception:
-        pass
-
-    # Finish by keeping the TRIAGE router model loaded, as it's ALWAYS the first hit
-    try:
-        logger.info("[Warmup] Caching and locking Triage router...")
-        load_model(ModelRole.TRIAGE)
-    except Exception:
-        pass
-
-    logger.info("[Warmup] Caching complete. Cold starts eliminated!")
+        logger.info("[Warmup] Loading and locking Control model into memory...")
+        load_model(ModelRole.CONTROL)
+    except Exception as e:
+        logger.warning(f"[Warmup] Failed to load Control model: {e}")
 
 if __name__ == "__main__":
     if PRO_MODE:

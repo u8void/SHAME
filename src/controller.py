@@ -467,6 +467,9 @@ def execute_action_by_dict(action_dict: dict) -> str:
         elif action == "open_app":
             app = action_dict.get("name", "")
             return handle_app_by_name(app, load_config())
+        elif action == "close_app":
+            app = action_dict.get("name", "")
+            return handle_close_app_by_name(app, load_config())
         elif action == "open_settings":
             return handle_open_settings()
         elif action == "youtube_video":
@@ -853,7 +856,7 @@ def handle_app(match: re.Match, config: dict):
     app_name = match.group(1).strip().lower()
     return handle_app_by_name(app_name, config)
 
-def handle_app_by_name(app_name: str, config: dict = None):
+def _resolve_app_command(app_name: str, config: dict = None):
     if config is None:
         config = load_config()
     apps_map = config.get("apps", {})
@@ -864,29 +867,77 @@ def handle_app_by_name(app_name: str, config: dict = None):
                 cmd = val
                 break
                 
+    if cmd and platform.system() != "Windows":
+        if cmd.lower().endswith(".exe") or cmd.lower().startswith("shell:"):
+            cmd = None
+            
     if not cmd and platform.system() == "Linux":
         linux_defaults = {
             "settings": "gnome-control-center",
             "calculator": "gnome-calculator",
             "calc": "gnome-calculator",
             "notepad": "gedit",
+            "text editor": "gnome-text-editor",
             "paint": "drawing",
             "store": "gnome-software",
+            "software": "gnome-software",
             "camera": "cheese",
             "clock": "gnome-clocks",
+            "clocks": "gnome-clocks",
             "mail": "thunderbird",
             "calendar": "gnome-calendar",
             "weather": "gnome-weather",
             "photos": "eog",
+            "image viewer": "eog",
             "maps": "gnome-maps",
             "task manager": "gnome-system-monitor",
             "system monitor": "gnome-system-monitor",
-            "terminal": "gnome-terminal"
+            "terminal": "gnome-terminal",
+            "files": "nautilus",
+            "explorer": "nautilus",
+            "videos": "totem",
+            "music": "rhythmbox",
+            "contacts": "gnome-contacts",
+            "disks": "gnome-disks",
+            "document viewer": "evince",
+            "pdf": "evince",
+            "characters": "gnome-characters",
+            "fonts": "gnome-font-viewer",
+            "passwords": "seahorse",
+            "logs": "gnome-logs",
+            "tweaks": "gnome-tweaks",
+            "archive manager": "file-roller",
+            "disk usage": "baobab",
+            "screenshot": "gnome-screenshot",
+            "scanner": "simple-scan",
+            "help": "yelp",
+            "browser": "firefox"
         }
         for k, v in linux_defaults.items():
-            if k in app_name.lower():
+            if k in app_name.lower() or app_name.lower() in k:
                 cmd = v
                 break
+        
+        if not cmd:
+            import glob, re
+            desktop_files = glob.glob("/usr/share/applications/*.desktop") + glob.glob(os.path.expanduser("~/.local/share/applications/*.desktop"))
+            for desktop_file in desktop_files:
+                try:
+                    with open(desktop_file, "r", encoding="utf-8", errors="ignore") as f:
+                        name = ""
+                        exec_cmd = ""
+                        for line in f:
+                            if line.startswith("Name="):
+                                name = line.split("=", 1)[1].strip().lower()
+                            elif line.startswith("Exec="):
+                                exec_cmd = line.split("=", 1)[1].strip()
+                            if name and exec_cmd:
+                                break
+                        if name and (app_name.lower() in name or name in app_name.lower()) and exec_cmd:
+                            cmd = re.sub(r'%[a-zA-Z]', '', exec_cmd).strip()
+                            break
+                except Exception:
+                    continue
     
     if not cmd and platform.system() == "Windows":
         windows_defaults = {
@@ -927,12 +978,24 @@ def handle_app_by_name(app_name: str, config: dict = None):
 
     if not cmd:
         cmd = app_name
+    return cmd
+
+def handle_app_by_name(app_name: str, config: dict = None):
+    cmd = _resolve_app_command(app_name, config)
     log_action("app", f"Launching: {cmd}")
     success = _launch_app(cmd)
     if success:
         return f"Launching {app_name}."
     else:
         return f"I couldn't find '{app_name}'. Add it to {CONFIG_FILE} under 'apps'."
+
+def handle_close_app_by_name(app_name: str, config: dict = None):
+    cmd = _resolve_app_command(app_name, config)
+    exec_name = extract_executable_name(cmd)
+    if not exec_name:
+        exec_name = app_name
+    log_action("app", f"Closing app: {exec_name}")
+    return handle_kill_process(exec_name)
 
 def handle_open_settings():
     system = platform.system()
@@ -2149,6 +2212,12 @@ def handle_bluetooth(state: str) -> str:
             return f"Attempted to set Bluetooth to {state} (install blueutil via brew for full reliability)."
         except Exception as e:
             return f"Failed to set Bluetooth: {e}"
+    elif system == "Windows":
+        try:
+            subprocess.run('start ms-settings:bluetooth', shell=True)
+            return f"Opened Bluetooth settings to turn it {state}."
+        except Exception as e:
+            return f"Failed to open Bluetooth settings: {e}"
     elif system == "Linux":
         cmd = "rfkill unblock bluetooth" if state == "on" else "rfkill block bluetooth"
         try:
@@ -2168,6 +2237,14 @@ def handle_vpn(action: str, name: str) -> str:
         cmd = f"rasdial \"{name}\"" if action == "connect" else f"rasdial \"{name}\" /disconnect"
         subprocess.run(cmd, shell=True)
         return f"VPN {action} command executed."
+    elif system == "Linux":
+        nmcli_action = "up" if action == "connect" else "down"
+        cmd = f"nmcli con {nmcli_action} id \"{name}\""
+        res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if res.returncode == 0:
+            return f"VPN {action} command executed natively."
+        else:
+            return f"VPN {action} failed: {res.stderr.strip()}"
     return f"VPN control not supported on {system}."
 
 def handle_speed_test() -> str:
@@ -2303,6 +2380,15 @@ def handle_set_wallpaper(path: str) -> str:
         SPIF_SENDWININICHANGE = 2
         ctypes.windll.user32.SystemParametersInfoW(SPI_SETDESKWALLPAPER, 0, resolved_path, SPIF_UPDATEINIFILE | SPIF_SENDWININICHANGE)
         return f"Wallpaper set to {resolved_path}."
+    elif system == "Linux":
+        try:
+            cmd = f"gsettings set org.gnome.desktop.background picture-uri file://{resolved_path}"
+            cmd_dark = f"gsettings set org.gnome.desktop.background picture-uri-dark file://{resolved_path}"
+            subprocess.run(cmd, shell=True)
+            subprocess.run(cmd_dark, shell=True)
+            return f"Wallpaper set to {resolved_path} (GNOME)."
+        except Exception as e:
+            return f"Failed to set wallpaper on Linux: {e}"
     return f"Wallpaper setting not supported on {system}."
 
 def handle_screenshot(path: str) -> str:
@@ -2332,7 +2418,27 @@ def handle_screenshot(path: str) -> str:
     return f"Screenshot saved to {resolved_path}."
 
 def handle_screen_record(path: str, duration: int) -> str:
-    return f"Screen recording started (saving to {path} for {duration} seconds)."
+    system = platform.system()
+    resolved_path = os.path.abspath(os.path.expanduser(path))
+    log_action("system", f"Starting screen recording for {duration} seconds to {resolved_path}...")
+    
+    if system == "Darwin":
+        subprocess.Popen(f"screencapture -v -V {duration} \"{resolved_path}\"", shell=True)
+        return f"Screen recording started for {duration} seconds. Saving to {resolved_path}."
+    elif system == "Windows":
+        import shutil
+        if not shutil.which("ffmpeg"):
+            return "Screen recording on Windows requires FFmpeg. Please install it (e.g. via Iris install command)."
+        cmd = f"ffmpeg -f gdigrab -framerate 30 -i desktop -t {duration} \"{resolved_path}\""
+        subprocess.Popen(cmd, shell=True, creationflags=0x08000000)
+        return f"Screen recording started via FFmpeg for {duration} seconds."
+    else:
+        import shutil
+        if not shutil.which("ffmpeg"):
+            return "Screen recording on Linux requires FFmpeg. Please install it (e.g. sudo apt install ffmpeg)."
+        cmd = f"ffmpeg -f x11grab -framerate 30 -video_size 1920x1080 -i :0.0 -t {duration} \"{resolved_path}\""
+        subprocess.Popen(cmd, shell=True)
+        return f"Screen recording started via FFmpeg for {duration} seconds."
 
 def handle_media(action: str) -> str:
     system = platform.system()
@@ -2391,8 +2497,10 @@ def handle_kill_process(name: str) -> str:
     else:
         if system == "Windows":
             subprocess.run(f"taskkill /F /IM \"{name}\" || taskkill /F /IM \"{name}.exe\"", shell=True)
+        elif system == "Darwin":
+            subprocess.run(f"pkill -9 -i -f \"{name}\"", shell=True)
         else:
-            subprocess.run(f"pkill -f \"{name}\"", shell=True)
+            subprocess.run(f"pkill -9 -i -f \"{name}\" || killall -9 -I \"{name}\"", shell=True)
         return f"Sent terminate signal to process '{name}'."
 
 def handle_set_env(key: str, value: str) -> str:

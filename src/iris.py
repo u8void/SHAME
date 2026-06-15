@@ -916,7 +916,17 @@ def classify_task(
     # If the user is in a continuous chat, and we already have a massive model loaded in RAM,
     # avoid unloading it to load the Triage router just because they didn't use a strong keyword.
     # Keep the conversation flowing on the active model to prevent model thrashing.
-    from src.iris import _active_role
+    from src.iris import _model_pool, ModelRole
+    
+    _active_role = None
+    if _model_pool:
+        # The most recently used model is the last key in the OrderedDict
+        _active_role_str = next(reversed(_model_pool))
+        try:
+            _active_role = ModelRole(_active_role_str)
+        except ValueError:
+            pass
+
     if _active_role is not None and history:
         role_to_task = {
             ModelRole.CODE: TaskType.CODING_SIMPLE,
