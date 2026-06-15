@@ -15,6 +15,7 @@ import subprocess
 import platform
 import shutil
 import tempfile
+import torch
 from typing import List, Tuple
 
 from src.iris import (
