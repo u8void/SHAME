@@ -707,6 +707,13 @@ def model_status():
     active_file = None
     if _model_pool:
         active_role = next(reversed(_model_pool))
+    from src.iris import get_active_role, load_generation_config, ModelRole, DEFAULT_MODEL_FILES
+
+    active_role = None
+    active_file = None
+    role_obj = get_active_role()
+    if role_obj is not None:
+        active_role = role_obj.value
         cfg = load_generation_config()
         models_dict = cfg.get("models", {})
         active_file = models_dict.get(active_role) or DEFAULT_MODEL_FILES.get(active_role)

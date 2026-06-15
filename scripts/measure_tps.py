@@ -3,13 +3,11 @@ import time
 
 def test():
     print("Loading reasoning model...")
-    # This will trigger the draft model and reasoning model to load
     llm = load_model(ModelRole.REASONING)
     
     print("\n--- Starting Generation ---")
     start = time.time()
     
-    # We will ask a question that requires a somewhat long answer to get a stable TPS measurement
     res = llm.create_chat_completion(
         messages=[{"role": "user", "content": "Write a highly detailed explanation of how a jet engine works, step by step."}],
         max_tokens=200,
