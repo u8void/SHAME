@@ -14,3 +14,4 @@ scratch/
 mlx_data/
 models/
 *.pkl
+iris_adapters/
