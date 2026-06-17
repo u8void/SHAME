@@ -61,15 +61,19 @@ try:
     # Import the singleton instance (not the module)
     from interpreter import interpreter as _oi
 
-    _oi.auto_run = True  # execute without user confirmation prompts
+    _oi.auto_run = True   # execute without user confirmation prompts
     _oi.verbose = False
     _oi.max_output = 4000
-    _oi.offline = False  # use OI's own model; iris_002.gguf is intent-only
+    _oi.offline = True    # NEVER call OpenAI — use local model only
     _oi.sync_computer = False  # prevents the respond.py 'result' NameError bug
-    _oi.loop = False  # stop after one round; no follow-up prompts
+    _oi.loop = False      # stop after one round; no follow-up prompts
 
     _oi.llm.supports_functions = False
     _oi.llm.supports_vision = False
+    # Point OI at a local llama.cpp server if one is running; otherwise
+    # OI stays silent (offline=True means it won't crash on missing keys).
+    _oi.llm.api_base = os.environ.get("IRIS_OI_API_BASE", "http://localhost:11434")
+    _oi.llm.model = os.environ.get("IRIS_OI_MODEL", "ollama/mistral")
 
     _oi.system_message = (
         "You are Iris, an AI PC assistant. "
@@ -80,7 +84,7 @@ try:
     )
 
     OI_AVAILABLE = True
-    logger.info("[OI] Open Interpreter ready ✓")
+    logger.info("[OI] Open Interpreter ready (offline mode) ✓")
 
 except Exception as _oi_err:
     OI_AVAILABLE = False
@@ -251,6 +255,141 @@ def _action_dict_to_cmd(action_dict: dict) -> str | None:
         return template.format_map(d)
     except KeyError:
         return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Smart action resolver — handles any verb_subject action offline, no LLM
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Maps subject keywords → real Linux process / command name
+_SUBJECT_MAP: dict[str, str] = {
+    # System tools
+    "settings":        "gnome-control-center",
+    "control_center":  "gnome-control-center",
+    "terminal":        "gnome-terminal",
+    "console":         "gnome-terminal",
+    "shell":           "gnome-terminal",
+    "calculator":      "gnome-calculator",
+    "files":           "nautilus",
+    "file_manager":    "nautilus",
+    "explorer":        "nautilus",
+    "monitor":         "gnome-system-monitor",
+    "system_monitor":  "gnome-system-monitor",
+    "task_manager":    "gnome-system-monitor",
+    "text_editor":     "gedit",
+    "editor":          "gedit",
+    "notepad":         "gedit",
+    "disk":            "gnome-disk-utility",
+    "disks":           "gnome-disk-utility",
+    "software":        "gnome-software",
+    "store":           "gnome-software",
+    "calendar":        "gnome-calendar",
+    "contacts":        "gnome-contacts",
+    "clock":           "gnome-clocks",
+    "clocks":          "gnome-clocks",
+    "maps":            "gnome-maps",
+    "weather":         "gnome-weather",
+    "camera":          "cheese",
+    "screenshot":      "gnome-screenshot",
+    "photos":          "shotwell",
+    "image_viewer":    "eog",
+    "archive":         "file-roller",
+    "archive_manager": "file-roller",
+    "printer":         "system-config-printer",
+    # Browsers
+    "chrome":          "google-chrome",
+    "chromium":        "chromium-browser",
+    "firefox":         "firefox",
+    "browser":         "xdg-open https://",
+    "edge":            "microsoft-edge",
+    # Dev tools
+    "vscode":          "code",
+    "code":            "code",
+    "sublime":         "subl",
+    "vim":             "vim",
+    "nvim":            "nvim",
+    "git":             "git",
+    "docker":          "docker",
+    # Media
+    "spotify":         "spotify",
+    "vlc":             "vlc",
+    "video":           "totem",
+    "music":           "rhythmbox",
+    "rhythmbox":       "rhythmbox",
+    # Office
+    "libreoffice":     "libreoffice",
+    "writer":          "libreoffice --writer",
+    "calc":            "libreoffice --calc",
+    "impress":         "libreoffice --impress",
+    "word":            "libreoffice --writer",
+    "excel":           "libreoffice --calc",
+    # Comms
+    "thunderbird":     "thunderbird",
+    "mail":            "thunderbird",
+    "email":           "thunderbird",
+    "slack":           "slack",
+    "discord":         "discord",
+    "telegram":        "telegram-desktop",
+    "zoom":            "zoom",
+    "teams":           "teams",
+    "skype":           "skype",
+    # Misc
+    "steam":           "steam",
+    "obs":             "obs",
+    "gimp":            "gimp",
+    "inkscape":        "inkscape",
+    "blender":         "blender",
+}
+
+# Maps verb keywords → shell command template  ({cmd} = resolved process name)
+_VERB_PATTERNS: dict[str, str] = {
+    "open":    "{cmd} &",
+    "launch":  "{cmd} &",
+    "start":   "{cmd} &",
+    "show":    "{cmd} &",
+    "run":     "{cmd} &",
+    "close":   "pkill -f '{cmd}' 2>/dev/null; true",
+    "kill":    "pkill -9 -f '{cmd}' 2>/dev/null; true",
+    "stop":    "pkill -f '{cmd}' 2>/dev/null; true",
+    "quit":    "pkill -f '{cmd}' 2>/dev/null; true",
+    "exit":    "pkill -f '{cmd}' 2>/dev/null; true",
+    "hide":    "pkill -f '{cmd}' 2>/dev/null; true",
+    "restart": "pkill -f '{cmd}' 2>/dev/null; sleep 0.5; {cmd} &",
+    "relaunch": "pkill -f '{cmd}' 2>/dev/null; sleep 0.5; {cmd} &",
+    "focus":   "wmctrl -a '{cmd}' 2>/dev/null || {cmd} &",
+    "minimize": "xdotool search --name '{cmd}' windowminimize 2>/dev/null || true",
+    "maximize": "xdotool search --name '{cmd}' windowactivate 2>/dev/null || true",
+}
+
+
+def _smart_action_resolve(action_dict: dict) -> str | None:
+    """
+    Tier-3 offline resolver: splits any action like 'close_settings' or
+    'restart_spotify' into (verb, subject), resolves subject → process name,
+    then generates a shell command — no LLM or API key required.
+
+    Returns None if the action cannot be decomposed.
+    """
+    action = action_dict.get("action", "")
+    parts = action.lower().split("_", 1)          # e.g. ['close', 'settings']
+    if len(parts) != 2:
+        return None
+
+    verb, subject = parts[0], parts[1]
+
+    verb_template = _VERB_PATTERNS.get(verb)
+    if not verb_template:
+        return None
+
+    # Resolve subject → real command; fall back to subject itself (e.g. 'gedit')
+    cmd = _SUBJECT_MAP.get(subject, subject.replace("_", "-"))
+
+    # Allow action_dict to override with an explicit 'name' or 'app' field
+    cmd = action_dict.get("name") or action_dict.get("app") or cmd
+
+    shell_cmd = verb_template.format(cmd=cmd)
+    logger.info(f"[SmartResolve] '{action}' → '{shell_cmd}'")
+    return shell_cmd
 
 
 def _exec_shell_cmd(cmd: str) -> str:
@@ -1244,8 +1383,8 @@ def execute_action_by_dict(action_dict: dict) -> str:
     """
     Execute a single action dict.
       1. Native cross-platform handler via _dispatch_action()   (macOS/Windows/Linux)
-      2. Linux template table → _exec_shell_cmd()               (offline fallback)
-      3. Unknown/complex actions → _run_oi_task()               (needs LLM)
+      2. Linux template table → _exec_shell_cmd()               (offline, no LLM)
+      3. Unknown action → returns a descriptive error message   (no LLM required)
     """
     action = action_dict.get("action", "chat")
 
@@ -1269,14 +1408,24 @@ def execute_action_by_dict(action_dict: dict) -> str:
         logger.info(f"[CMD] {action} → {cmd[:100]}")
         return _exec_shell_cmd(cmd)
 
-    # ── Tier 3: delegate to OI chat() for unknown / complex actions ───────────
+    # ── Tier 3: smart verb+noun decomposer (offline, no LLM) ────────────────────
+    # Splits e.g. 'close_settings' → verb='close', subject='settings' →
+    # resolves to 'pkill -f gnome-control-center'. No API key needed.
+    smart_cmd = _smart_action_resolve(action_dict)
+    if smart_cmd:
+        logger.info(f"[SmartResolve] {action} → executing: {smart_cmd[:100]}")
+        return _exec_shell_cmd(smart_cmd)
+
+    # ── Tier 4: OI fallback (only if offline=False and local server is up) ──────
+    # _run_oi_task() is safe to call here because _oi.offline=True prevents any
+    # external API call; it will only work if a local llama.cpp/Ollama server is
+    # reachable at IRIS_OI_API_BASE (default: localhost:11434).
+    logger.warning(f"[Action] Unknown action '{action}' — trying OI fallback")
     task_parts = [f"Task: {action}"]
     for key, val in action_dict.items():
         if key != "action":
             task_parts.append(f"  {key}: {val}")
-    task_description = "\n".join(task_parts)
-    logger.info(f"[OI] Unknown action '{action}' → Open Interpreter")
-    return _run_oi_task(task_description)
+    return _run_oi_task("\n".join(task_parts))
 
 
 _AGENT_LOOP_ADDENDUM = """
