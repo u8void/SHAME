@@ -815,12 +815,16 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
     q = query.lower()
     
     control_keywords = {
-        "open", "launch", "start", "run", "play", "send", "copy", "set volume", "set brightness",
+        "open", "close", "launch", "start", "run", "play", "send", "copy",
+        "kill", "stop", "quit", "exit", "terminate",
+        "set volume", "set brightness",
         "brightness", "clipboard", "email", "spotify", "youtube", "terminal", "command",
         "lock screen", "sleep", "restart", "shutdown", "check storage", "free storage",
+        "disk usage", "disk space", "free space", "storage left",
         "system info", "wifi", "bluetooth", "take note", "screenshot", "record",
         "check memory", "check battery", "empty trash", "type text", "press key",
-        "volume", "mute", "unmute", "increase volume", "decrease volume"
+        "volume", "mute", "unmute", "increase volume", "decrease volume",
+        "dark mode", "night mode", "wallpaper", "notification",
     }
     for kw in control_keywords:
         if q.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", q):
@@ -1580,15 +1584,26 @@ def ask_stream(
             delta = chunk["choices"][0].get("delta", {})
             if "content" in delta:
                 action_json += delta["content"]
-                
+
+        if not _keep_loaded:
+            unload_model()
+
         action_dict = parse_ai_response(action_json)
         if action_dict:
             action_name = action_dict.get("action", "unknown")
             yield {"type": "status", "content": f"Executing: {action_name}"}
             result = execute_action_by_dict(action_dict)
+            result = (result or "Done.").strip()
             yield {"type": "action_result", "content": f"Action '{action_name}' Executed.\nResult:\n{result}"}
+            # ── Yield visible output so the user sees what happened ──
+            summary = action_dict.get("summary", "") or result
+            yield {"type": "token", "content": summary}
+            yield {"type": "raw_response", "content": summary}
         else:
-            yield {"type": "status", "content": "Action failed to parse."}
+            fail_msg = "I couldn't translate that into an action I can run."
+            logger.warning(f"[CONTROL] Failed to parse action JSON: {action_json[:200]}")
+            yield {"type": "token", "content": fail_msg}
+            yield {"type": "raw_response", "content": fail_msg}
         
         return
 

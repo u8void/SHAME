@@ -100,46 +100,39 @@ class _FakeResult:
         self.returncode = returncode
 
 
-def _shell(cmd: str, **kw) -> _FakeResult:
-    """Execute a shell command.
+def _shell(cmd, **kw) -> _FakeResult:
+    """Execute a shell command via subprocess.
 
-    The Open Interpreter path can only honor a bare string command — it cannot
-    pipe `input`, capture real stderr/returncode, accept a list argv, or pass
-    flags like `timeout`/`creationflags`. So route through OI ONLY for the
-    trivial `_shell("...")` case; anything with kwargs or a list command goes
-    straight to subprocess so the calling handler gets correct semantics.
+    Always uses subprocess directly for reliable stdout/stderr/returncode.
+    OI is reserved for high-level chat tasks, not raw shell commands.
     """
-    if OI_AVAILABLE and isinstance(cmd, str) and not kw:
-        try:
-            chunks = _oi.computer.run("shell", cmd)
-            out = "\n".join(
-                c.get("output", "")
-                for c in chunks
-                if isinstance(c, dict) and c.get("output")
-            ).strip()
-            return _FakeResult(stdout=out or "")
-        except Exception as e:
-            logger.warning(f"[OI] _shell fallback: {e}")
-    # Raw subprocess (correct stdout/stderr/returncode, supports input=, argv, etc.)
     defaults = dict(shell=isinstance(cmd, str), capture_output=True, text=True)
     defaults.update(kw)
-    r = _subprocess.run(cmd, **defaults)
-    return _FakeResult(r.stdout or "", r.stderr or "", r.returncode)
+    try:
+        r = _subprocess.run(cmd, **defaults)
+        return _FakeResult(r.stdout or "", r.stderr or "", r.returncode)
+    except Exception as e:
+        logger.warning(f"[Shell] command failed: {e}")
+        return _FakeResult("", str(e), 1)
 
 
 def _popen(cmd, shell: bool = False, **kw) -> None:
-    """Launch a process non-blocking via OI (or subprocess fallback)."""
-    if OI_AVAILABLE:
-        try:
-            shell_cmd = cmd if isinstance(cmd, str) else " ".join(cmd)
-            _oi.computer.run("shell", shell_cmd + " &")
-            return None
-        except Exception as e:
-            logger.warning(f"[OI] _popen fallback: {e}")
-    # Fallback to raw subprocess
+    """Launch a process non-blocking via subprocess."""
     suppress = dict(stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
     suppress.update(kw)
-    return _subprocess.Popen(cmd, shell=shell, **suppress)
+    try:
+        return _subprocess.Popen(cmd, shell=shell, start_new_session=True, **suppress)
+    except Exception as e:
+        # If list form fails (e.g. multi-word command), retry with shell=True
+        if not shell and isinstance(cmd, list):
+            try:
+                shell_cmd = " ".join(cmd)
+                return _subprocess.Popen(shell_cmd, shell=True, start_new_session=True, **suppress)
+            except Exception as e2:
+                logger.warning(f"[Popen] shell fallback also failed: {e2}")
+        else:
+            logger.warning(f"[Popen] launch failed: {e}")
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -261,24 +254,12 @@ def _action_dict_to_cmd(action_dict: dict) -> str | None:
 
 
 def _exec_shell_cmd(cmd: str) -> str:
-    """Execute a shell command via OI computer.run() or subprocess fallback."""
-    if OI_AVAILABLE:
-        try:
-            chunks = list(_oi.computer.run("shell", cmd))
-            parts = [
-                str(c.get("content", "")).strip()
-                for c in chunks
-                if isinstance(c, dict)
-                and c.get("format") == "output"
-                and c.get("content")
-            ]
-            return "\n".join(parts).strip() or "Done."
-        except Exception as e:
-            logger.warning(f"[OI] computer.run fallback: {e}")
-    # Raw subprocess fallback
+    """Execute a shell command via subprocess and return output."""
     try:
         r = _subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
         return (r.stdout or r.stderr or "Done.").strip()
+    except _subprocess.TimeoutExpired:
+        return "Command timed out (30s limit)."
     except Exception as e:
         return f"Command failed: {e}"
 
@@ -1577,6 +1558,8 @@ def handle_website_from_url(url: str):
 
 
 def _launch_app(cmd: str):
+    import shlex
+
     system = platform.system()
     try:
         if system == "Windows":
@@ -1586,19 +1569,20 @@ def _launch_app(cmd: str):
             _popen(["open", "-a", cmd])
             return True
         else:
-            _popen([cmd], stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
+            # Split multi-word commands like "libreoffice --writer" into proper argv
+            try:
+                argv = shlex.split(cmd)
+            except ValueError:
+                argv = [cmd]
+            _popen(argv)
             return True
     except Exception as e:
-        if system == "Windows":
-            logger.warning(f"  [ERROR] Could not launch on Windows: {e}")
-            return False
+        # Fallback: run as shell command (handles aliases, PATH lookups, etc.)
         try:
-            _popen(
-                cmd, shell=True, stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL
-            )
+            _popen(cmd, shell=True)
             return True
         except Exception as e2:
-            logger.warning(f"  [ERROR] Could not launch: {e2}")
+            logger.warning(f"  [ERROR] Could not launch '{cmd}': {e2}")
             return False
 
 
@@ -1778,7 +1762,7 @@ def handle_open_settings():
         cmd = "gnome-control-center"
     log_action("system", f"Opening settings: {cmd}")
     try:
-        _shell(cmd, shell=True, start_new_session=True)
+        _popen(cmd, shell=True)
         return "Opened settings."
     except Exception as e:
         return f"Failed to open settings: {e}"
