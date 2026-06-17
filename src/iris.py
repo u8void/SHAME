@@ -813,7 +813,11 @@ def _is_continuation(query: str, history: List[Dict[str, str]]) -> bool:
 
 def _fallback_classify(query: str) -> Optional[TaskType]:
     q = query.lower()
-    
+
+    # Explicit "how to <do X>" implies the user wants instructions/reasoning,
+    # not for Iris to actually perform the action.
+    is_how_to = bool(re.search(r"\bhow to\b", q))
+
     control_keywords = {
         "open", "launch", "start", "run", "play", "send", "copy", "set volume", "set brightness",
         "brightness", "clipboard", "email", "spotify", "youtube", "terminal", "command",
@@ -824,9 +828,33 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
     }
     for kw in control_keywords:
         if q.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", q):
-            # Check if it's explicitly asking "how to" which implies reasoning, not doing
-            if not re.search(r"\bhow to\b", q):
+            if not is_how_to:
                 return TaskType.CONTROL
+
+    # ── Order-independent system/device status & control nouns ──────────────
+    # These cover real phrasing like "check how much storage left do I have",
+    # "what's my battery percentage", "how much free space is left on disk",
+    # where the action verb/question word and the target noun are not
+    # adjacent, so the rigid phrase-matching above misses them. Any one of
+    # these nouns, paired with system-status intent words, is a strong signal
+    # the user wants Iris to actually inspect/act on the machine — not a
+    # general knowledge question — so this must be checked before the
+    # generic search_keywords ("how much", "how many") below.
+    system_status_nouns = {
+        "storage", "disk space", "disk usage", "free space", "hard drive",
+        "battery", "battery percentage", "battery life", "ram", "memory usage",
+        "cpu usage", "wifi", "wi-fi", "bluetooth", "volume level", "brightness level",
+        "system info", "specs", "disk",
+    }
+    status_intent_words = {
+        "check", "how much", "how many", "what's my", "what is my", "show me",
+        "left", "remaining", "available", "free", "current", "level",
+    }
+    if not is_how_to:
+        has_noun = any(re.search(rf"\b{re.escape(n)}\b", q) for n in system_status_nouns)
+        has_intent = any(re.search(rf"\b{re.escape(w)}\b", q) for w in status_intent_words)
+        if has_noun and has_intent:
+            return TaskType.CONTROL
 
     code_keywords = {
         "code", "coding", "program", "programming", "compile", "compiler",
@@ -1570,8 +1598,41 @@ def ask_stream(
         task_type = TaskType.REASONING
 
     if task_type == TaskType.CONTROL:
+        from src.controller import (
+            _get_agent_system_prompt, parse_ai_response, execute_action_by_dict,
+            detect_intent,
+        )
+
+        # ── Fast path: deterministic YouTube intent regexes ──────────────────
+        # youtube_video / youtube_channel already have well-tested regexes in
+        # controller.detect_intent. Routing "open X on youtube" through the
+        # LLM is unnecessary and risky here: the model has no real knowledge
+        # of valid YouTube video IDs, so it can hallucinate a URL (e.g.
+        # malformed "watch=title" links, or fabricated/unavailable video
+        # IDs) instead of using the real, verified lookup in
+        # handle_youtube_video_from_query. Checking the deterministic
+        # matcher first avoids that failure mode for the common phrasing it
+        # covers, and falls through to the LLM for anything else.
+        # (Other entries in detect_intent's _INTENTS list use action names /
+        # named groups that don't line up with _dispatch_action's expected
+        # keys, so only the two verified-safe YouTube intents are wired up
+        # here rather than reviving the whole list.)
+        intent_name, intent_match = detect_intent(user_query)
+        if intent_name in ("youtube_video", "youtube_channel") and intent_match:
+            fast_query = intent_match.group(1).strip()
+            fast_action_dict = {"action": intent_name, "query": fast_query}
+            yield {"type": "status", "content": f"Executing: {intent_name}"}
+            result = execute_action_by_dict(fast_action_dict)
+            reply_text = f"Action '{intent_name}' executed.\n\nResult:\n{result}"
+            yield {"type": "action_result", "content": f"Action '{intent_name}' Executed.\nResult:\n{result}"}
+            yield {"type": "token", "content": reply_text}
+            yield {"type": "raw_response", "content": reply_text}
+            if not _keep_loaded:
+                unload_model()
+            return
+
+
         yield {"type": "status", "content": "Generating computer command..."}
-        from src.controller import _get_agent_system_prompt, parse_ai_response, execute_action_by_dict
         control_messages = [{"role": "system", "content": _get_agent_system_prompt()}, {"role": "user", "content": user_query}]
         control_llm = load_model(ModelRole.CONTROL)
         
@@ -1586,11 +1647,24 @@ def ask_stream(
             action_name = action_dict.get("action", "unknown")
             yield {"type": "status", "content": f"Executing: {action_name}"}
             result = execute_action_by_dict(action_dict)
+            reply_text = f"Action '{action_name}' executed.\n\nResult:\n{result}"
             yield {"type": "action_result", "content": f"Action '{action_name}' Executed.\nResult:\n{result}"}
+            # IMPORTANT: also yield token + raw_response so the reply is actually
+            # captured into final_reply / persisted history. Without this, the
+            # action_result event renders only during live streaming and the
+            # saved conversation turn ends up empty (final_reply stays "").
+            yield {"type": "token", "content": reply_text}
+            yield {"type": "raw_response", "content": reply_text}
         else:
+            fail_text = "I couldn't translate that into an action I can run. Could you rephrase it?"
             yield {"type": "status", "content": "Action failed to parse."}
+            yield {"type": "token", "content": fail_text}
+            yield {"type": "raw_response", "content": fail_text}
         
+        if not _keep_loaded:
+            unload_model()
         return
+
 
 
     if task_type is None:

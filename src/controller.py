@@ -1571,7 +1571,65 @@ def handle_website(match: re.Match):
     return f"Opening {url} in your browser."
 
 
+_YOUTUBE_HOST_RE = re.compile(r"(?:^|\.)(?:youtube\.com|youtu\.be)$", re.IGNORECASE)
+_YOUTUBE_VALID_WATCH_RE = re.compile(
+    r"^https?://(?:www\.)?(?:youtube\.com/watch\?(?:[\w=&%+.-]*&)?v=[a-zA-Z0-9_-]{11}(?:&\S*)?"
+    r"|youtu\.be/[a-zA-Z0-9_-]{11}(?:\?\S*)?)$",
+    re.IGNORECASE,
+)
+_YOUTUBE_VALID_SEARCH_RE = re.compile(
+    r"^https?://(?:www\.)?youtube\.com/results\?search_query=\S+$", re.IGNORECASE
+)
+_YOUTUBE_VALID_CHANNEL_RE = re.compile(
+    r"^https?://(?:www\.)?youtube\.com/(?:channel/UC[a-zA-Z0-9_-]{22}|@\S+)$",
+    re.IGNORECASE,
+)
+
+
 def handle_website_from_url(url: str):
+    """Open a website URL — but first guard against malformed/hallucinated
+    YouTube links.
+
+    The control LLM occasionally routes "open <video> on youtube" through
+    the generic open_website action and writes its own URL instead of using
+    the youtube_video action. Those URLs are frequently malformed (e.g.
+    "youtube.com/watch=some-title" instead of "watch?v=<id>") or point at a
+    fabricated/unavailable video ID, since the model has no way to actually
+    know real video IDs. Any YouTube-host URL that isn't already a
+    well-formed, valid watch/search/channel URL gets treated as a search
+    query and redirected through the verified lookup pipeline instead of
+    being opened as-is.
+    """
+    url = (url or "").strip()
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        parsed = None
+
+    is_youtube_host = bool(parsed and _YOUTUBE_HOST_RE.search(parsed.netloc or ""))
+    if is_youtube_host:
+        if (
+            _YOUTUBE_VALID_WATCH_RE.match(url)
+            or _YOUTUBE_VALID_SEARCH_RE.match(url)
+            or _YOUTUBE_VALID_CHANNEL_RE.match(url)
+        ):
+            pass  # already a well-formed, real YouTube URL — open as-is
+        else:
+            # Malformed YouTube URL. Recover a search query from whatever
+            # text is available (path segments / query string / fragment)
+            # and route through the real, verified video lookup instead of
+            # opening a broken or hallucinated link.
+            guess_bits = [parsed.path, parsed.query, parsed.fragment]
+            guess = " ".join(b for b in guess_bits if b)
+            guess = re.sub(r"^[/?#]+", "", guess)
+            guess = re.sub(r"^watch\b[\s=:/-]*", "", guess, flags=re.IGNORECASE)
+            guess = re.sub(r"[=&/_+]+", " ", guess).strip()
+            if guess:
+                return handle_youtube_video_from_query(guess)
+            # No usable text to search with — fall back to YouTube home
+            # rather than opening a broken link.
+            url = "https://www.youtube.com"
+
     _open_url(url)
     return f"Opening {url}."
 
@@ -1789,6 +1847,34 @@ def _youtube_search_url(query: str) -> str:
     return f"https://www.youtube.com/results?search_query={q}"
 
 
+def _youtube_video_available(video_id: str) -> bool:
+    """Return True if a video is playable (not removed/private/region-blocked).
+
+    Uses YouTube's public oembed endpoint: 200 + title for available videos,
+    4xx for unavailable ones. Fails open (returns True) on network errors so a
+    transient hiccup doesn't make us skip a good result.
+    """
+    url = (
+        "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v="
+        + video_id
+        + "&format=json"
+    )
+    ctx = ssl.create_default_context()
+    try:
+        ctx.load_default_certs()
+    except Exception:
+        pass
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=6, context=ctx) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return bool(data.get("title"))
+    except urllib.error.HTTPError:
+        return False  # 400/401/403/404 → unavailable
+    except Exception:
+        return True  # network error — don't penalise the result
+
+
 def _youtube_find_first_video(query: str) -> str | None:
     search_url = (
         "https://www.youtube.com/results?search_query=" + urllib.parse.quote_plus(query)
@@ -1820,10 +1906,37 @@ def _youtube_find_first_video(query: str) -> str | None:
         except Exception as e2:
             logger.warning(f"  [YouTube search error] {e2}")
             return None
-    video_ids = re.findall(r'"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"', html)
-    if video_ids:
-        return f"https://www.youtube.com/watch?v={video_ids[0]}"
-    return None
+
+    # Extract IDs scoped to actual search-result entries (videoRenderer), in
+    # ranked order. The old approach grabbed the FIRST bare "videoId" anywhere
+    # in the page, which often matched an ad / promoted / "people also watched"
+    # slot — frequently an unavailable video — instead of the top real result.
+    ids: list[str] = []
+    seen = set()
+    for vid in re.findall(
+        r'"videoRenderer"\s*:\s*\{\s*"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"', html
+    ):
+        if vid not in seen:
+            seen.add(vid)
+            ids.append(vid)
+
+    # Fallback: if the page structure changes, fall back to the raw scan.
+    if not ids:
+        for vid in re.findall(r'"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"', html):
+            if vid not in seen:
+                seen.add(vid)
+                ids.append(vid)
+
+    if not ids:
+        return None
+
+    # Return the first result that is actually playable (check up to 5).
+    for vid in ids[:5]:
+        if _youtube_video_available(vid):
+            return f"https://www.youtube.com/watch?v={vid}"
+
+    # None verified available — return the top-ranked result anyway.
+    return f"https://www.youtube.com/watch?v={ids[0]}"
 
 
 def _youtube_find_channel(query: str) -> str | None:
