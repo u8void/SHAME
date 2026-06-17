@@ -275,6 +275,96 @@ def load_generic_hf_dataset(path: str, limit: int = None) -> List[Tuple[str, str
         print(f"[WARNING] Generic loader failed for {path}: {e}")
         return []
 
+def load_local_json_files(directory: str) -> List[Tuple[str, str]]:
+    import glob
+    pairs = []
+    for path in glob.glob(os.path.join(directory, "*.json")) + glob.glob(os.path.join(directory, "*.jsonl")):
+        if os.path.basename(path) in ("datasets.json", "package.json"):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if not content:
+                    continue
+                
+                data_list = []
+                # Check if it could be a JSONL file
+                if path.endswith(".jsonl") or "\n" in content:
+                    try:
+                        for line in content.split("\n"):
+                            line = line.strip()
+                            if line:
+                                data_list.append(json.loads(line))
+                    except Exception:
+                        try:
+                            parsed = json.loads(content)
+                            if isinstance(parsed, list):
+                                data_list = parsed
+                            elif isinstance(parsed, dict):
+                                data_list = [parsed]
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        parsed = json.loads(content)
+                        if isinstance(parsed, list):
+                            data_list = parsed
+                        elif isinstance(parsed, dict):
+                            data_list = [parsed]
+                    except Exception:
+                        pass
+                
+                for item in data_list:
+                    if not isinstance(item, dict):
+                        continue
+                    u, b = None, None
+                    # 1. messages format
+                    if "messages" in item:
+                        m = item["messages"]
+                        if isinstance(m, list) and len(m) >= 2:
+                            for i in range(len(m)-1):
+                                if m[i].get("role") == "user" and m[i+1].get("role") == "assistant":
+                                    u = m[i].get("content", "").strip()
+                                    b = m[i+1].get("content", "").strip()
+                                    break
+                    # 2. conversations format
+                    elif "conversations" in item:
+                        conv = item["conversations"]
+                        if isinstance(conv, list) and len(conv) >= 2:
+                            for i in range(len(conv)-1):
+                                role_key = "from" if "from" in conv[i] else "role"
+                                val_key = "value" if "value" in conv[i] else "content"
+                                u_role = str(conv[i].get(role_key, "")).lower()
+                                a_role = str(conv[i+1].get(role_key, "")).lower()
+                                if u_role in ("user", "human") and a_role in ("assistant", "gpt"):
+                                    u = conv[i].get(val_key, "").strip()
+                                    b = conv[i+1].get(val_key, "").strip()
+                                    break
+                    # 3. instruction/output format
+                    elif "instruction" in item and "output" in item:
+                        u = item["instruction"].strip()
+                        b = item["output"].strip()
+                        inp = item.get("input", "")
+                        if inp:
+                            u = f"{u}\n\nInput: {inp}"
+                    # 4. generic fallback
+                    else:
+                        q_key = next((k for k in ("prompt", "question", "query", "text", "input") if k in item), None)
+                        r_key = next((k for k in ("response", "answer", "completion", "output") if k in item), None)
+                        if q_key and r_key:
+                            u = str(item[q_key]).strip()
+                            b = str(item[r_key]).strip()
+                    
+                    if u and b:
+                        if "control" in directory.lower() and not b.startswith("{") and not b.startswith("<think>"):
+                            think_text = f"<think>\nThe user needs a system operation performed. I will execute `{b}` using the run_command tool.\n</think>"
+                            json_action = json.dumps({"action": "run_command", "command": b})
+                            b = f"{think_text}\n{json_action}"
+                        pairs.append((u, b))
+        except Exception as e:
+            print(f"[WARNING] Failed to load local JSON file {path}: {e}")
+    return pairs
+
 def load_all_data(role: str, max_pairs: int) -> List[Tuple[str, str]]:
     config_path = "./config/datasets.json"
     if not os.path.exists(config_path):
@@ -310,9 +400,10 @@ def load_all_data(role: str, max_pairs: int) -> List[Tuple[str, str]]:
             
     for local_dir in role_config.get("local_dirs", []):
         if os.path.exists(local_dir):
-            print(f"[DATA] Loading local markdown files from: {local_dir}...")
+            print(f"[DATA] Loading local data from: {local_dir}...")
             try:
                 pairs += load_markdown_files(md_dir=local_dir)
+                pairs += load_local_json_files(directory=local_dir)
             except Exception as e:
                 print(f"[WARNING] Failed to load local files from {local_dir}: {e}")
                 

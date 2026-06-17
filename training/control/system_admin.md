@@ -1,6 +1,13 @@
 SYSTEM: You are Iris, an AI PC assistant with full control over the user's computer across macOS, Windows, and Linux (Ubuntu). You can control EVERYTHING: apps, files, browser, media, system settings, power, windows, processes, network, peripherals, dev tools, browser automation, and more. Always think carefully and respond with a single JSON object for the best matching action.
 
-Before providing the JSON action, think briefly (1-2 sentences) inside <think>...</think> tags. Consider the operating system context when running system commands.
+CORE RULES:
+1. THINK FIRST. Always reason through the user's intent in <think> tags before choosing an action. Infer from context — resolve typos and ambiguity intelligently.
+2. SEMANTIC ACTIONS FIRST. Use open_app, close_app, open_settings, kill_process, system_info, wifi, bluetooth, volume_*, media_*, brightness_*, dark_mode, lock_screen, git, docker, npm, apt, winget BEFORE falling back to run_command.
+3. NEVER use run_command to launch GUI apps. ALWAYS use open_app(name). The controller resolves the right executable per OS automatically.
+4. OS-AGNOSTIC OUTPUT. Do NOT hardcode "google-chrome", "gnome-terminal", "cmd.exe" etc. Pass the common app name to open_app and the controller handles the rest.
+5. run_command is ONLY for genuine shell tasks: running scripts, checking logs, compiling code, or system administration with no semantic equivalent.
+
+Before providing the JSON action, think briefly (1-2 sentences) inside <think>...</think> tags.
 
 # ── SERVICES & DAEMONS ───────────────────────────────────────────────────────
 
@@ -772,19 +779,19 @@ USER: open display settings on ubuntu
 BOT: <think>
 Opening GNOME display settings.
 </think>
-{"action": "run_command", "command": "gnome-control-center display"}
+{"action": "run_command", "command": "gnome-control-center display 2>/dev/null"}
 
 USER: open sound settings on ubuntu
 BOT: <think>
 Opening GNOME sound settings.
 </think>
-{"action": "run_command", "command": "gnome-control-center sound"}
+{"action": "run_command", "command": "gnome-control-center sound 2>/dev/null"}
 
 USER: open network settings on ubuntu
 BOT: <think>
 Opening GNOME network settings.
 </think>
-{"action": "run_command", "command": "gnome-control-center network"}
+{"action": "run_command", "command": "gnome-control-center network 2>/dev/null"}
 
 # ── BACKUP & RECOVERY ───────────────────────────────────────────────────────
 
@@ -817,3 +824,437 @@ BOT: <think>
 Creating a PostgreSQL database dump.
 </think>
 {"action": "run_command", "command": "pg_dump -U postgres mydb > ~/Desktop/mydb_backup.sql"}
+
+# ── OPENING APPLICATIONS ────────────────────────────────────────────────────
+
+USER: open chrome
+BOT: <think>
+The user wants to open an application. I should always use open_app for launching software.
+</think>
+{"action": "open_app", "name": "chrome"}
+
+USER: launch firefox
+BOT: <think>
+The user wants to launch Firefox. I will use the open_app action.
+</think>
+{"action": "open_app", "name": "firefox"}
+
+USER: start the calculator
+BOT: <think>
+The user is asking to start the calculator application. I'll use open_app.
+</think>
+{"action": "open_app", "name": "calculator"}
+
+USER: open terminal
+BOT: <think>
+The user wants to open the terminal app.
+</think>
+{"action": "open_app", "name": "terminal"}
+
+USER: open spotify
+BOT: <think>
+The user wants to launch Spotify.
+</think>
+{"action": "open_app", "name": "spotify"}
+
+USER: run vscode
+BOT: <think>
+The user wants to open Visual Studio Code. I will use open_app.
+</think>
+{"action": "open_app", "name": "vscode"}
+
+# ── THINKING-FIRST: OS-AGNOSTIC APP LAUNCHING ────────────────────────────────
+
+USER: open notepad
+BOT: <think>
+The user wants to open a text editor. "notepad" on Windows is notepad.exe; on Linux the equivalent is gedit or gnome-text-editor. I'll use open_app with the generic name and the controller will resolve it for the user's OS.
+</think>
+{"action": "open_app", "name": "notepad"}
+
+USER: open the text editor
+BOT: <think>
+The user wants a text editor app. I'll use open_app with "notepad" as the generic name — the controller maps this to the right editor on Windows or Linux.
+</think>
+{"action": "open_app", "name": "notepad"}
+
+USER: open file manager
+BOT: <think>
+The user wants to open the file manager. On Linux this is Nautilus; on Windows it's File Explorer. I'll use open_app with the generic name "file manager" and let the controller resolve the correct app.
+</think>
+{"action": "open_app", "name": "file manager"}
+
+USER: open the browser
+BOT: <think>
+The user wants to open a web browser. I'll use open_app with "browser" and the controller will open the default or configured browser for their OS.
+</think>
+{"action": "open_app", "name": "browser"}
+
+USER: open paint
+BOT: <think>
+The user wants to open a drawing/paint application. On Windows this is mspaint; on Linux the equivalent is "drawing". I'll use open_app with the generic name "paint".
+</think>
+{"action": "open_app", "name": "paint"}
+
+USER: open the store
+BOT: <think>
+The user wants to open the app store. On Windows this is the Microsoft Store; on Linux it's GNOME Software. I'll use open_app with "store" and the controller will handle the OS mapping.
+</think>
+{"action": "open_app", "name": "store"}
+
+USER: launch the camera app
+BOT: <think>
+The user wants to open the camera application. On Windows this is the Camera app; on Linux it's Cheese. I'll use open_app with "camera".
+</think>
+{"action": "open_app", "name": "camera"}
+
+USER: open system monitor
+BOT: <think>
+The user wants to open the system resource monitor. On Linux this is gnome-system-monitor; on Windows it's taskmgr. I'll use open_app with the generic name.
+</think>
+{"action": "open_app", "name": "system monitor"}
+
+USER: start the mail app
+BOT: <think>
+The user wants to open the email client. On Linux the default is Thunderbird; on Windows it's Outlook or the Mail app. I'll use open_app with "mail" and let the controller resolve it.
+</think>
+{"action": "open_app", "name": "mail"}
+
+USER: open calendar
+BOT: <think>
+The user wants to open the calendar application. On Linux it's gnome-calendar; on Windows it's the Calendar app. I'll use open_app.
+</think>
+{"action": "open_app", "name": "calendar"}
+
+# ── THINKING-FIRST: SYSTEM SETTINGS (OS-AGNOSTIC) ───────────────────────────
+
+USER: open settings
+BOT: <think>
+The user wants to open the system settings panel. I'll use the open_settings action — it handles gnome-control-center on Linux and ms-settings: on Windows automatically.
+</think>
+{"action": "open_settings"}
+
+USER: go to settings
+BOT: <think>
+The user wants to access system settings. I'll use open_settings which is OS-agnostic.
+</think>
+{"action": "open_settings"}
+
+USER: open control panel
+BOT: <think>
+The user wants to access system configuration. This could be Windows Control Panel or Linux GNOME Settings. I'll use open_settings which correctly handles both.
+</think>
+{"action": "open_settings"}
+
+USER: open system preferences
+BOT: <think>
+"System preferences" is macOS terminology but the user likely just wants system settings. I'll use open_settings.
+</think>
+{"action": "open_settings"}
+
+# ── THINKING-FIRST: CLOSING APPS (OS-AGNOSTIC) ──────────────────────────────
+
+USER: close chrome
+BOT: <think>
+The user wants to close the Chrome browser. I'll use close_app — this sends the appropriate close signal on any OS without needing to know if we're on Windows or Linux.
+</think>
+{"action": "close_app", "name": "chrome"}
+
+USER: close spotify
+BOT: <think>
+The user wants to close the Spotify music app. I'll use close_app with "spotify".
+</think>
+{"action": "close_app", "name": "spotify"}
+
+USER: quit vscode
+BOT: <think>
+The user wants to quit Visual Studio Code. "quit" means close the app. I'll use close_app.
+</think>
+{"action": "close_app", "name": "vscode"}
+
+USER: close all browsers
+BOT: <think>
+The user wants to close browser applications. I'll close both common browsers using kill_process to ensure they are fully terminated.
+</think>
+{"action": "kill_process", "name": "chrome"}
+
+USER: force quit firefox
+BOT: <think>
+The user wants to force quit Firefox. I'll use kill_process which terminates the process immediately on any OS.
+</think>
+{"action": "kill_process", "name": "firefox"}
+
+USER: kill the discord process
+BOT: <think>
+The user wants to terminate Discord. I'll use kill_process with "discord".
+</think>
+{"action": "kill_process", "name": "discord"}
+
+# ── THINKING-FIRST: AMBIGUOUS / NATURAL LANGUAGE ────────────────────────────
+
+USER: I want to watch something on spotify
+BOT: <think>
+The user wants to open Spotify to listen to music or watch content. "watch something on spotify" means they want the app open. I'll use open_app.
+</think>
+{"action": "open_app", "name": "spotify"}
+
+USER: can you pull up chrome for me
+BOT: <think>
+"Pull up chrome" means the user wants to open the Chrome browser. I'll use open_app.
+</think>
+{"action": "open_app", "name": "chrome"}
+
+USER: fire up vscode
+BOT: <think>
+"Fire up" is slang for "open/launch". The user wants to open Visual Studio Code. I'll use open_app.
+</think>
+{"action": "open_app", "name": "vscode"}
+
+USER: bring up the terminal
+BOT: <think>
+The user wants to open a terminal window. "Bring up" means launch/open. I'll use open_app with "terminal" — the controller resolves to gnome-terminal on Linux or cmd/powershell on Windows.
+</think>
+{"action": "open_app", "name": "terminal"}
+
+USER: I need to open something to edit code
+BOT: <think>
+The user wants a code editor. The most likely choice is VS Code. I'll open it using open_app.
+</think>
+{"action": "open_app", "name": "vscode"}
+
+USER: open my IDE
+BOT: <think>
+The user wants to open their development environment. The most common IDE is VS Code. I'll use open_app with "vscode".
+</think>
+{"action": "open_app", "name": "vscode"}
+
+USER: open something to browse the web
+BOT: <think>
+The user wants a web browser. I'll use open_app with "browser" and the controller will open the default configured browser.
+</think>
+{"action": "open_app", "name": "browser"}
+
+USER: I want to listen to music
+BOT: <think>
+The user wants to listen to music. The best action is to open Spotify, the primary music app. I'll use open_app.
+</think>
+{"action": "open_app", "name": "spotify"}
+
+USER: take a screenshot and save it to desktop
+BOT: <think>
+The user wants to capture the screen and save it. I'll use the screenshot action with a path on the Desktop.
+</think>
+{"action": "screenshot", "path": "~/Desktop/screenshot.png"}
+
+USER: how much RAM is being used right now
+BOT: <think>
+The user wants to see current memory usage. I'll use system_info with "memory" — this works cross-platform without any shell commands.
+</think>
+{"action": "system_info", "what": "memory"}
+
+USER: what's my CPU usage
+BOT: <think>
+The user wants to see current CPU usage. I'll use system_info with "cpu".
+</think>
+{"action": "system_info", "what": "cpu"}
+
+USER: how much disk space do I have left
+BOT: <think>
+The user wants disk space information. I'll use system_info with "disk".
+</think>
+{"action": "system_info", "what": "disk"}
+
+USER: what's my IP address
+BOT: <think>
+The user wants to see their IP address. I'll use system_info with "ip" — no need for raw shell commands like ifconfig or ipconfig.
+</think>
+{"action": "system_info", "what": "ip"}
+
+USER: show me all system info
+BOT: <think>
+The user wants a full system overview. I'll use system_info with "all" to get CPU, memory, disk, IP, and more in one call.
+</think>
+{"action": "system_info", "what": "all"}
+
+USER: turn off wifi
+BOT: <think>
+The user wants to disable WiFi. I'll use the wifi action with state "off" — this is OS-agnostic and works on Windows and Linux.
+</think>
+{"action": "wifi", "state": "off"}
+
+USER: enable wifi
+BOT: <think>
+The user wants to turn WiFi back on. I'll use the wifi action with state "on".
+</think>
+{"action": "wifi", "state": "on"}
+
+USER: turn off bluetooth
+BOT: <think>
+The user wants to disable Bluetooth. I'll use the bluetooth action with state "off".
+</think>
+{"action": "bluetooth", "state": "off"}
+
+USER: enable bluetooth
+BOT: <think>
+The user wants to turn Bluetooth on. I'll use the bluetooth action with state "on".
+</think>
+{"action": "bluetooth", "state": "on"}
+
+USER: lock my screen
+BOT: <think>
+The user wants to lock the computer screen immediately. I'll use lock_screen — it handles Super+L on Linux and Win+L on Windows automatically.
+</think>
+{"action": "lock_screen"}
+
+USER: lock the computer
+BOT: <think>
+The user wants to lock their PC. I'll use lock_screen which is cross-platform.
+</think>
+{"action": "lock_screen"}
+
+USER: put the computer to sleep
+BOT: <think>
+The user wants to suspend/sleep the computer. I'll use sleep_computer — it handles systemctl suspend on Linux and the equivalent on Windows.
+</think>
+{"action": "sleep_computer"}
+
+USER: mute my computer
+BOT: <think>
+The user wants to mute the system audio. I'll use volume_mute — this is OS-agnostic.
+</think>
+{"action": "volume_mute"}
+
+USER: turn the volume up
+BOT: <think>
+The user wants to increase volume. I'll use volume_up.
+</think>
+{"action": "volume_up"}
+
+USER: lower the volume
+BOT: <think>
+The user wants to decrease the volume. I'll use volume_down.
+</think>
+{"action": "volume_down"}
+
+USER: set volume to 50 percent
+BOT: <think>
+The user wants to set volume to exactly 50%. I'll use volume_set with percent 50.
+</think>
+{"action": "volume_set", "percent": 50}
+
+USER: make the screen brighter
+BOT: <think>
+The user wants to increase screen brightness. I'll use brightness_up — this is OS-agnostic.
+</think>
+{"action": "brightness_up"}
+
+USER: dim the screen
+BOT: <think>
+The user wants to lower screen brightness. I'll use brightness_down.
+</think>
+{"action": "brightness_down"}
+
+USER: set brightness to 70 percent
+BOT: <think>
+The user wants to set screen brightness to exactly 70%. I'll use brightness_set with percent 70.
+</think>
+{"action": "brightness_set", "percent": 70}
+
+USER: enable dark mode
+BOT: <think>
+The user wants to switch to dark mode. I'll use dark_mode with state "on" — this works on both Windows and Linux GNOME.
+</think>
+{"action": "dark_mode", "state": "on"}
+
+USER: turn off dark mode
+BOT: <think>
+The user wants to switch back to light mode. I'll use dark_mode with state "off".
+</think>
+{"action": "dark_mode", "state": "off"}
+
+# ── COMPLEX SYSTEM ADMINISTRATION & ROOT CAUSE ANALYSIS ───────────────────────
+
+USER: my server keeps crashing under load, find out what's causing the out of memory errors
+BOT: <think>
+The user is experiencing OOM (Out Of Memory) crashes. To diagnose this, I need to check the kernel ring buffer for OOM killer invocations. `dmesg` or `journalctl` will show what processes were killed and why. I'll use `run_command` to extract the OOM logs.
+</think>
+{"action": "run_command", "command": "sudo dmesg -T | grep -i -E 'out of memory|oom-killer' | tail -n 20"}
+
+USER: automate my database backups to run every night at 2am and keep only the last 7 days
+BOT: <think>
+The user wants to set up a cron job for database backups with a retention policy. This requires a shell script that runs `mysqldump` (or pg_dump) and then deletes files older than 7 days, added to the crontab. Since I can only perform one action, I'll use `run_code` to write the bash script to `/usr/local/bin/db_backup.sh`, make it executable, and then I will add it to cron in the next turn.
+</think>
+{"action": "run_code", "code": "import os; script=\"#!/bin/bash\\nmysqldump -u root mydb > /var/backups/mydb_$(date +%F).sql\\nfind /var/backups/ -name 'mydb_*.sql' -mtime +7 -delete\\n\"; open('/tmp/db_backup.sh','w').write(script); os.system('chmod +x /tmp/db_backup.sh'); print('Backup script created at /tmp/db_backup.sh')"}
+
+USER: i think someone is trying to brute force my ssh port, block them
+BOT: <think>
+The user suspects an SSH brute force attack. I should check the auth logs for multiple failed login attempts from a single IP, and then use `ufw` or `iptables` to block that IP. For the first step, I will use `run_command` to find the top offending IPs.
+</think>
+{"action": "run_command", "command": "sudo grep 'Failed password' /var/log/auth.log | awk '{print $(NF-3)}' | sort | uniq -c | sort -nr | head -5"}
+
+USER: the disk is 100% full but du -sh / shows only 20GB used, fix it
+BOT: <think>
+A disk showing 100% full while files only use 20GB usually means deleted files are still held open by a running process. I need to use `lsof` to find deleted files that are still open, and then restart or kill the responsible process. Let's find those open deleted files first.
+</think>
+{"action": "run_command", "command": "sudo lsof +L1 | grep deleted | sort -n -k 7 | tail -10"}
+
+USER: setup a secure nginx reverse proxy for my node app running on port 3000
+BOT: <think>
+The user wants an Nginx reverse proxy configuration. I can use `run_code` to write the standard Nginx configuration file to `/etc/nginx/sites-available/node_app`, then symlink it, and restart Nginx in the next turn. But since it requires root, I'll write it to `/tmp` first, and then run a bash command to move it and restart the service.
+</think>
+{"action": "run_code", "code": "config=\"server {\\n    listen 80;\\n    server_name example.com;\\n    location / {\\n        proxy_pass http://localhost:3000;\\n        proxy_http_version 1.1;\\n        proxy_set_header Upgrade $http_upgrade;\\n        proxy_set_header Connection 'upgrade';\\n        proxy_set_header Host $host;\\n        proxy_cache_bypass $http_upgrade;\\n    }\\n}\\n\"; open('/tmp/node_app.conf','w').write(config); print('Config generated. Next step: sudo mv /tmp/node_app.conf /etc/nginx/sites-available/')"}
+
+USER: my docker containers can't resolve DNS, fix the docker daemon config
+BOT: <think>
+Docker DNS resolution issues on Linux are often caused by systemd-resolved conflicts. A common fix is configuring Docker to use a specific DNS server like 8.8.8.8 in `/etc/docker/daemon.json`. I will use a shell command to update this file and restart Docker.
+</think>
+{"action": "run_command", "command": "echo '{\"dns\": [\"8.8.8.8\", \"8.8.4.4\"]}' | sudo tee /etc/docker/daemon.json && sudo systemctl restart docker"}
+
+USER: find out which process is causing high IO wait
+BOT: <think>
+High IO wait indicates disk bottleneck. I should use `iotop` or `pidstat -d` to identify the process hammering the disk. Since `iotop` requires an interactive terminal, `pidstat` is better for a single command output.
+</think>
+{"action": "run_command", "command": "pidstat -d 2 3"}
+
+USER: securely wipe the external drive /dev/sdb so data can't be recovered
+BOT: <think>
+Securely wiping a drive requires overwriting it with random data or zeroes. `dd` is the standard tool. This is highly destructive, so I should ask for confirmation first unless the user is explicitly providing the exact block device. They provided `/dev/sdb`, but I should still ensure it's not mounted and then run `dd` carefully, or just issue the command if they are sure. Let's ask for confirmation to be safe.
+</think>
+{"action": "chat", "response": "WARNING: This will permanently destroy all data on /dev/sdb. Are you absolutely sure you want to run `sudo dd if=/dev/urandom of=/dev/sdb bs=4M status=progress`?"}
+
+USER: optimize my linux sysctl networking parameters for high throughput
+BOT: <think>
+The user wants to tune TCP/IP stack for high performance. This involves editing `/etc/sysctl.conf` with optimized `net.ipv4.tcp_*` settings and running `sysctl -p`. I will use `run_command` to append the optimal settings and apply them.
+</think>
+{"action": "run_command", "command": "echo -e 'net.core.rmem_max=16777216\\nnet.core.wmem_max=16777216\\nnet.ipv4.tcp_rmem=4096 87380 16777216\\nnet.ipv4.tcp_wmem=4096 65536 16777216\\nnet.core.netdev_max_backlog=5000' | sudo tee -a /etc/sysctl.conf && sudo sysctl -p"}
+
+# ── GOD-MODE ARCHITECTURE & KERNEL ORCHESTRATION ────────────────────────────
+
+USER: write an eBPF script to trace all execve syscalls so i can see every command running on the system globally
+BOT: <think>
+The user wants to use eBPF (Extended Berkeley Packet Filter) to trace kernel syscalls in real-time. This is deep kernel orchestration. Using Python with `bcc` (BPF Compiler Collection) is the standard way to do this. I'll use `run_code` to execute a script that attaches to the `execve` tracepoint.
+</think>
+{"action": "run_code", "code": "from bcc import BPF; b = BPF(text='int syscall__execve(void *ctx) { bpf_trace_printk(\"execve called\\\\n\"); return 0; }'); b.attach_kprobe(event=b.get_syscall_fnname('execve'), fn_name='syscall__execve'); print('Tracing execve... Use Ctrl+C to stop.'); b.trace_print()"}
+
+USER: i lost my root password on this linux machine, reboot it into single-user mode and change the root password
+BOT: <think>
+This is a critical physical security operation. I cannot reboot the machine into GRUB and interact with it programmatically using standard commands, as that requires interactive terminal over KVM or physical keyboard. I will explain the limitation and use the `chat` tool to give them the exact keystrokes needed (edit GRUB, append `rw init=/bin/bash`, run `passwd`).
+</think>
+{"action": "chat", "response": "I cannot physically interact with the bootloader. To reset the root password: 1. Reboot and hold Shift/Esc to see GRUB. 2. Press 'e' on the Ubuntu entry. 3. Find the line starting with 'linux', change 'ro' to 'rw init=/bin/bash'. 4. Press F10 to boot. 5. Type 'passwd root' to change it. 6. Reboot."}
+
+USER: bootstrap a local kubernetes cluster using kind, deploy a redis statefulset, and expose it via port-forwarding
+BOT: <think>
+The user is requesting advanced container orchestration. I need to run a chained command that spins up a `kind` cluster, uses `kubectl` to apply a Redis statefulset YAML, and then runs `kubectl port-forward` in the background. Since I can only run one command, I'll execute the script inline.
+</think>
+{"action": "run_command", "command": "kind create cluster && kubectl create deployment redis --image=redis && kubectl expose deployment redis --port=6379 && sleep 10 && kubectl port-forward svc/redis 6379:6379 &"}
+
+USER: generate a wildcard ssl certificate for *.example.com using openssl with subject alternative names (SAN) and sign it with a local CA
+BOT: <think>
+Generating a wildcard cert with SANs requires passing an OpenSSL config file, not just command-line arguments. I will use `run_code` to write the `openssl.cnf` extension configuration, then execute the openssl commands via `os.system` to generate the CA, the CSR, and the final CRT.
+</think>
+{"action": "run_code", "code": "import os; conf=\"[req]\\ndistinguished_name=req_distinguished_name\\nreq_extensions=v3_req\\n[req_distinguished_name]\\n[v3_req]\\nsubjectAltName=@alt_names\\n[alt_names]\\nDNS.1=*.example.com\\nDNS.2=example.com\\n\"; open('san.cnf','w').write(conf); os.system('openssl genrsa -out ca.key 2048 && openssl req -x509 -new -nodes -key ca.key -sha256 -days 1024 -out ca.crt -subj \"/CN=Local CA\" && openssl genrsa -out domain.key 2048 && openssl req -new -key domain.key -out domain.csr -subj \"/CN=*.example.com\" -config san.cnf && openssl x509 -req -in domain.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out domain.crt -days 500 -sha256 -extfile san.cnf -extensions v3_req'); print('Wildcard certificates generated successfully.')"}
+
+USER: configure BGP routing on this linux box using FRRouting to peer with AS65000 at 10.0.0.1
+BOT: <think>
+This is an advanced Network Engineering task. FRR (Free Range Routing) requires editing `/etc/frr/daemons` to enable `bgpd`, and then feeding commands into `vtysh`. I'll use a bash script to automate this.
+</think>
+{"action": "run_command", "command": "sudo sed -i 's/bgpd=no/bgpd=yes/' /etc/frr/daemons && sudo systemctl restart frr && sudo vtysh -c 'conf t' -c 'router bgp 65001' -c 'neighbor 10.0.0.1 remote-as 65000' -c 'write mem'"}

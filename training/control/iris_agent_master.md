@@ -481,3 +481,59 @@ BOT: <think>
 Use apt list or dpkg to list installed software.
 </think>
 {"action": "run_command", "command": "dpkg --get-selections"}
+
+# --- Extreme Advanced Automation & Diagnostics ---
+USER: My kubernetes cluster is failing. Pod 'backend-api' is CrashLoopBackOff. Fetch the logs, get the exact error stack trace, and restart the deployment.
+BOT: <think>
+This is a multi-step Kubernetes diagnostic task. First, I need to get the logs of the failing pod to identify the crash reason. Once I have the logs, the next logical step would be to restart it. I will use run_command to fetch the logs with the `kubectl logs` command as the first action.
+</think>
+{"action": "run_command", "command": "kubectl logs deployment/backend-api --tail=100"}
+
+USER: I need to migrate my database from SQLite to PostgreSQL. Parse my sqlite.db, generate the SQL dump, convert the syntax, and pipe it into the local Postgres 'prod_db'.
+BOT: <think>
+Database migration involves exporting, converting syntax (e.g. removing sqlite-specific pragmas), and importing. This is best done with a Python script or a specialized tool like pgloader. Since I only have one action, I'll write a Python script using run_code to handle the conversion logic safely.
+</think>
+{"action": "run_code", "code": "import sqlite3; conn=sqlite3.connect('sqlite.db'); dump='\\n'.join(conn.iterdump()); open('dump.sql','w').write(dump); print('Dumped SQLite to dump.sql. Next step: converting syntax for PostgreSQL.')"}
+
+USER: Run a massive parallel brute-force attack on this zip file 'secret.zip' using a dictionary attack from rockyou.txt
+BOT: <think>
+The user is requesting a password cracking operation. I will execute `fcrackzip` with the dictionary attack mode, assuming the tool is installed. If not, I would use john the ripper. Let's use `fcrackzip`.
+</think>
+{"action": "run_command", "command": "fcrackzip -u -D -p /usr/share/wordlists/rockyou.txt secret.zip"}
+
+USER: Automatically buy the dip on Bitcoin if it drops below $50,000 using my Coinbase API keys.
+BOT: <think>
+This is an automated trading workflow. It requires setting up a loop or cron job that checks the BTC price via API and places an order if the condition is met. I will write a Python script using the `requests` library to demonstrate this logic, and tell the user they need to run it as a background service.
+</think>
+{"action": "run_code", "code": "import sys; print('This requires a persistent script checking the price. I can write a Python script for you to run via cron or a systemd service. Please provide the API keys as environment variables first.')"}
+
+USER: My code is spaghetti. Use AST parsing to find all functions longer than 50 lines in the 'src' directory and generate a report.
+BOT: <think>
+The user wants advanced code analysis via Abstract Syntax Trees. I will use `run_code` to write and execute a Python script that uses the built-in `ast` module to traverse all `.py` files in `src/` and report large functions.
+</think>
+{"action": "run_code", "code": "import ast, os; \nfor root, _, files in os.walk('src'):\n  for file in files:\n    if file.endswith('.py'):\n      path=os.path.join(root, file)\n      tree=ast.parse(open(path).read())\n      for node in ast.walk(tree):\n        if isinstance(node, ast.FunctionDef):\n          if getattr(node, 'end_lineno', 0) - node.lineno > 50:\n            print(f'{path} - {node.name} is too long')"}
+
+# --- Supreme Intelligence & Malware Reverse Engineering ---
+USER: Decompile this suspicious binary 'malware.elf' without running it, extract all hardcoded IP addresses from the binary, and map them.
+BOT: <think>
+The user wants zero-shot malware analysis. I need to run a static analysis tool like `strings` or `radare2` to extract data, and pipe it through regex to find IPs. `strings malware.elf | grep -oE "\b([0-9]{1,3}\.){3}[0-9]{1,3}\b"` is the most efficient and safe way to static parse IPs from the binary without executing it.
+</think>
+{"action": "run_command", "command": "strings malware.elf | grep -oE '\\b([0-9]{1,3}\\.){3}[0-9]{1,3}\\b' | sort | uniq"}
+
+USER: I want to run a quantum circuit that creates a Bell State. Use Qiskit to execute this locally using a statevector simulator.
+BOT: <think>
+The user is requesting Quantum Computing execution. I'll use `run_code` to write a Python script using IBM's `qiskit` library to build a quantum circuit, apply a Hadamard gate and a CNOT gate, simulate it, and output the statevector.
+</think>
+{"action": "run_code", "code": "from qiskit import QuantumCircuit; from qiskit.quantum_info import Statevector; qc = QuantumCircuit(2); qc.h(0); qc.cx(0, 1); state = Statevector.from_instruction(qc); print('Bell State (Entangled):', state.data)"}
+
+USER: Write a polymorphic python script that changes its own source code hash every time it runs while maintaining its payload.
+BOT: <think>
+The user is asking for self-modifying code concepts used in polymorphic malware/viruses. I will write a benign Python script that reads its own source file (`__file__`), appends a random comment to it, and overwrites itself.
+</think>
+{"action": "run_code", "code": "import os, random, string; \nwith open(__file__, 'r') as f: code = f.read(); \ncode += f'\\n# {\"\".join(random.choices(string.ascii_letters, k=10))}'\nwith open(__file__, 'w') as f: f.write(code)\nprint('Polymorphic mutation complete.')"}
+
+USER: Analyze the memory footprint of this running process (PID 4432) and dump the memory region containing the heap into a file.
+BOT: <think>
+Dumping a live process's heap memory on Linux requires `gcore` (from gdb) or reading `/proc/4432/mem` utilizing the addresses from `/proc/4432/maps`. I'll use a bash command with `gdb` to attach to the process and generate a core dump for reverse engineering.
+</think>
+{"action": "run_command", "command": "sudo gcore -o /tmp/process_dump 4432"}

@@ -258,7 +258,7 @@ GENERAL_SYSTEM_PROMPT = (
     "ACCURACY RULES (HIGHEST PRIORITY):\n"
     "1. NEVER invent facts, statistics, dates, names, or specific details you are uncertain about. "
     "If you are unsure, say so clearly: 'I'm not certain, but...' or 'I don't have reliable data on that.'\n"
-    "2. When search results are provided, trust that they are highly relevant to the user's query. Do NOT dismiss them just because the exact keywords are missing. Synthesize the search results into a confident answer. NEVER invent external facts to fill in the gaps.\n"
+    "2. When search results are provided in the query, base your factual claims on those results only.\n"
     "RESPONSE RULES:\n"
     "3. Give clear, complete answers — not one-liners, but also not padded filler.\n"
     "4. Use examples and analogies to explain concepts clearly.\n"
@@ -293,12 +293,9 @@ REASONING_SYSTEM_PROMPT = (
     "ACCURACY RULES (HIGHEST PRIORITY):\n"
     "1. NEVER invent facts, statistics, names, dates, or specific details you are not certain about. "
     "If you do not know something, say 'I'm not certain, but...' or 'Based on my training data...' clearly.\n"
-    "2. If you are writing or showing ANY code (HTML, Python, etc.), you MUST wrap it in standard markdown triple backticks (```html ... ```). "
-    "CRITICAL: NEVER wrap your <think>...</think> tags inside triple backticks! <think> tags must be at the very top level, OUTSIDE of any code blocks.\n"
-    "3. NEVER output raw HTML or code without backticks, as it will break the chat UI.\n"
-    "4. When web search results are provided, trust that they are highly relevant to the query. "
-    "Do NOT dismiss a search result just because it doesn't contain the exact keywords. Synthesize the search results into a confident answer without hallucinating fake external information. If the results show a specific entity (like a game character), logically connect it to the user's query.\n"
-    "5. Prefer saying 'I don't have reliable information' over guessing wildly.\n"
+    "2. For factual questions (history, science, people, places), web search results will be provided in the query. "
+    "Use ONLY the provided search context for specific facts. Do NOT add unsourced numbers or claims.\n"
+    "3. Prefer saying 'I don't have reliable information on that specific detail' over guessing.\n"
     "DEPTH RULES:\n"
     "4. Structure your reasoning: problem definition → analysis → approach → solution → verification.\n"
     "5. For explanations: cover mechanics, context, and real-world examples.\n"
@@ -322,20 +319,9 @@ from collections import OrderedDict
 # LRU Cache: role.value -> Llama
 _model_pool: OrderedDict[str, 'Llama'] = OrderedDict()
 _model_paths: dict[str, str] = {}
-_MAX_MODELS_IN_POOL = 1
+_MAX_MODELS_IN_POOL = 2
 _keep_loaded: bool = False  # Set True during benchmarks to skip unload
 _model_lock = threading.RLock()
-
-def get_active_role() -> Optional[ModelRole]:
-    """Returns the most recently used ModelRole from the pool."""
-    with _model_lock:
-        if not _model_pool:
-            return None
-        last_role_value = next(reversed(_model_pool))
-        try:
-            return ModelRole(last_role_value)
-        except ValueError:
-            return None
 
 # ── MLX Text Backend: swap llama.cpp for Metal-accelerated mlx_lm when available ──
 _mlx_backend_cache: dict = {}
@@ -879,10 +865,8 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
 
     search_keywords = {
         "what is", "what are", "who is", "who was", "where is", "where are", 
-        "when did", "how many", "how much", "tell me about", "what do you know about",
-        "do you know about", "what's the", "what was", "who are", "explain what",
-        "ما هي", "ما هو", "من هو", "من هي", "أين يقع", "أين تقع", "أين", "متى",
-        "أخبرني عن", "ماذا تعرف عن"
+        "when did", "how many", "how much",
+        "ما هي", "ما هو", "من هو", "من هي", "أين يقع", "أين تقع", "أين", "متى"
     }
     for kw in search_keywords:
         if q.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", q):
@@ -932,7 +916,17 @@ def classify_task(
     # If the user is in a continuous chat, and we already have a massive model loaded in RAM,
     # avoid unloading it to load the Triage router just because they didn't use a strong keyword.
     # Keep the conversation flowing on the active model to prevent model thrashing.
-    from src.iris import _active_role
+    from src.iris import _model_pool, ModelRole
+    
+    _active_role = None
+    if _model_pool:
+        # The most recently used model is the last key in the OrderedDict
+        _active_role_str = next(reversed(_model_pool))
+        try:
+            _active_role = ModelRole(_active_role_str)
+        except ValueError:
+            pass
+
     if _active_role is not None and history:
         role_to_task = {
             ModelRole.CODE: TaskType.CODING_SIMPLE,
@@ -941,8 +935,8 @@ def classify_task(
             ModelRole.REASONING: TaskType.REASONING,
             ModelRole.GENERAL: TaskType.GENERAL,
         }
-        if active_role in role_to_task:
-            return role_to_task[active_role], None
+        if _active_role in role_to_task:
+            return role_to_task[_active_role], None
 
     minimized = _minimize_history(history, max_entries=2)
     triage_messages = [{"role": "system", "content": TRIAGE_SYSTEM_PROMPT}]
@@ -1565,7 +1559,7 @@ def ask_stream(
         try:
             from src.web_search import WebSearch
             ws = WebSearch()
-            web_context = ws.search_to_context(search_term, max_results=5)
+            web_context = ws.search_to_context(search_term, max_results=3)
             if not web_context:
                 yield {"type": "status", "content": "Web search returned no results."}
         except Exception as e:
@@ -1577,8 +1571,7 @@ def ask_stream(
 
     if task_type == TaskType.CONTROL:
         yield {"type": "status", "content": "Generating computer command..."}
-        from src.controller import _get_agent_system_prompt, parse_ai_response, execute_action_by_dict
-        
+        from src.controller import _get_agent_system_prompt, parse_ai_response
         control_messages = [{"role": "system", "content": _get_agent_system_prompt()}, {"role": "user", "content": user_query}]
         control_llm = load_model(ModelRole.CONTROL)
         
@@ -1592,7 +1585,6 @@ def ask_stream(
         if action_dict:
             action_name = action_dict.get("action", "unknown")
             yield {"type": "status", "content": f"Executing: {action_name}"}
-            result = execute_action_by_dict(action_dict)
             yield {"type": "action_result", "content": f"Action '{action_name}' Executed.\nResult:\n{result}"}
         else:
             yield {"type": "status", "content": "Action failed to parse."}

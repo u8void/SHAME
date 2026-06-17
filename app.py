@@ -1,3 +1,18 @@
+import os, sys
+
+# ── Auto-install open-interpreter on startup ──────────────────────────────
+def _ensure_open_interpreter():
+    try:
+        import interpreter  # noqa: F401
+    except ImportError:
+        import subprocess as _sp
+        print("\n[Iris] Installing open-interpreter — one-time setup...", flush=True)
+        _sp.run([sys.executable, "-m", "pip", "install", "-q",
+                 "--upgrade", "open-interpreter"], check=True)
+        print("[Iris] open-interpreter installed ✓\n", flush=True)
+_ensure_open_interpreter()
+# ─────────────────────────────────────────────────────────────────────────────
+
 import os
 os.environ["OMP_NUM_THREADS"] = "4"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
@@ -58,6 +73,22 @@ retriever     = None
 _retriever_lock   = threading.Lock()
 _retriever_ready  = False
 training_proc = None
+
+# ── Ensure models are freed from RAM when the process exits ──────────────────
+import atexit as _atexit
+def _shutdown_cleanup():
+    """Force-free all llama.cpp models from native memory on process exit.
+    Runs on Ctrl+C, SIGTERM, normal exit — ensures no memory leaks."""
+    if not PREVIEW_MODE:
+        try:
+            from src.iris import _force_unload_all_models
+            logger.info("[Shutdown] Freeing all loaded models from memory...")
+            _force_unload_all_models()
+            logger.info("[Shutdown] All models freed.")
+        except Exception as e:
+            logger.warning(f"[Shutdown] Model cleanup error: {e}")
+
+_atexit.register(_shutdown_cleanup)
 
 def get_retriever():
     global retriever, _retriever_ready
@@ -751,6 +782,30 @@ def warmup_models():
         load_model(ModelRole.CONTROL)
     except Exception as e:
         logger.warning(f"[Warmup] Failed to load Control model: {e}")
+
+@app.route("/api/unload_models", methods=["POST"])
+def unload_models_endpoint():
+    """Immediately free all loaded models from RAM/VRAM.
+    Useful when you want to reclaim memory without restarting."""
+    if PREVIEW_MODE:
+        return jsonify({"status": "preview_mode", "message": "No models loaded in preview mode."})
+    try:
+        from src.iris import _force_unload_all_models
+        _force_unload_all_models()
+        logger.info("[API] All models unloaded from memory on request.")
+        return jsonify({"status": "success", "message": "All models freed from memory."})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/shutdown", methods=["POST"])
+def shutdown_endpoint():
+    """Cleanly shut down the Iris server and free all memory."""
+    import signal, os
+    logger.info("[API] Shutdown requested via /api/shutdown.")
+    _shutdown_cleanup()
+    os.kill(os.getpid(), signal.SIGTERM)
+    return jsonify({"status": "shutting_down"})
+
 
 if __name__ == "__main__":
     if PRO_MODE:

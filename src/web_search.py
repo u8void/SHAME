@@ -247,21 +247,21 @@ class WebSearch:
         deadline = time.time() + timeout
         all_results: List[SearchResult] = []
 
-        # Tier 1: DuckDuckGo (Broad coverage: songs, games, pop-culture, news, forums)
-        if self._ddg_available and time.time() < deadline:
-            ddg_results = self._search_ddg(query, max_results, timeout=min(8.0, timeout))
-            if ddg_results:
-                logger.info(f"[WebSearch] DDG returned {len(ddg_results)} results for '{query[:60]}'")
-                all_results.extend(ddg_results)
-
-        # Tier 2: Wikipedia API (High factual accuracy for well-known encyclopedic topics)
-        if len(all_results) < max_results and time.time() < deadline:
-            wiki_results = self._search_wikipedia(query, max_results=max_results - len(all_results))
+        # Tier 1: Wikipedia API (High factual accuracy)
+        if time.time() < deadline:
+            wiki_results = self._search_wikipedia(query, max_results=max_results)
             if wiki_results:
                 logger.info(f"[WebSearch] Wikipedia returned {len(wiki_results)} results")
                 all_results.extend(wiki_results)
 
-        # Tier 3: Google scrape (last resort)
+        # Tier 2: DuckDuckGo (Broader scope, news, forums)
+        if len(all_results) < max_results and self._ddg_available:
+            ddg_results = self._search_ddg(query, max_results - len(all_results), timeout=min(6.0, timeout))
+            if ddg_results:
+                logger.info(f"[WebSearch] DDG returned {len(ddg_results)} results for '{query[:60]}'")
+                all_results.extend(ddg_results)
+
+        # Tier 3: Google scrape
         if len(all_results) == 0 and time.time() < deadline:
             google_results = self._search_google_scrape(query)
             if google_results:
@@ -276,7 +276,7 @@ class WebSearch:
 
         return all_results[:max_results]
 
-    def search_to_context(self, query: str, max_results: int = 5) -> str:
+    def search_to_context(self, query: str, max_results: int = 3) -> str:
         """Search and format results as a context string for LLM injection.
 
         Returns empty string if no results found.

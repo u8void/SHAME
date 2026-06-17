@@ -288,6 +288,129 @@ function renderChatList(query = '') {
         if (el) el.remove();
     }
 
+    function formatActionNormally(obj) {
+        const action = (obj.action || '').trim().toLowerCase();
+        const params = obj.parameters || obj || {};
+        
+        function getVal(...keys) {
+            for (const k of keys) {
+                if (params[k] !== undefined && params[k] !== null) return String(params[k]);
+            }
+            for (const k of keys) {
+                if (obj[k] !== undefined && obj[k] !== null) return String(obj[k]);
+            }
+            return '';
+        }
+
+        if (action.includes("close") || action.includes("kill") || action === "kill_app") {
+            let name = getVal("name", "app");
+            if (!name) {
+                for (const [k, v] of Object.entries(params)) {
+                    if (String(v).toLowerCase() === "true" || String(v) === "1" || String(v).toLowerCase() === "yes" || String(v).toLowerCase() === "close" || String(v).toLowerCase() === "kill") {
+                        name = k;
+                        break;
+                    }
+                }
+            }
+            if (!name) {
+                const parts = action.split(/\s+/);
+                if (parts.length > 1) name = parts.slice(1).join(' ');
+            }
+            return `⚙️ Closing ${name || 'application'}...`;
+        }
+
+        if (action.includes("open") && action.includes("website")) {
+            const url = getVal("url", "website", "link");
+            return `⚙️ Opening website: ${url || 'URL'}...`;
+        }
+
+        if (action.includes("open")) {
+            let name = getVal("name", "app");
+            if (!name) {
+                for (const [k, v] of Object.entries(params)) {
+                    if (String(v).toLowerCase() === "true" || String(v) === "1" || String(v).toLowerCase() === "yes" || String(v).toLowerCase() === "open") {
+                        name = k;
+                        break;
+                    }
+                }
+            }
+            if (!name) {
+                const parts = action.split(/\s+/);
+                if (parts.length > 1) name = parts.slice(1).join(' ');
+            }
+            return `⚙️ Opening ${name || 'application'}...`;
+        }
+
+        if (action.includes("youtube") && action.includes("channel")) {
+            const name = getVal("name", "channel");
+            return `⚙️ Opening YouTube channel: ${name}...`;
+        }
+
+        if (action.includes("youtube")) {
+            const query = getVal("query", "video", "search");
+            return `⚙️ Playing '${query}' on YouTube...`;
+        }
+
+        if (action.includes("spotify")) {
+            const query = getVal("query", "song", "search");
+            return `⚙️ Playing '${query}' on Spotify...`;
+        }
+
+        if (action.includes("email")) {
+            const to = getVal("to", "recipient");
+            const subj = getVal("subject", "sub");
+            const subjStr = subj ? ` (Subject: ${subj})` : '';
+            return `⚙️ Sending email to ${to}${subjStr}...`;
+        }
+
+        if (action.includes("search") && action.includes("file")) {
+            const query = getVal("query", "name");
+            const folder = getVal("folder", "dir");
+            return `⚙️ Searching for '${query}' in '${folder || 'Documents'}'...`;
+        }
+
+        if (action.includes("file")) {
+            const path = getVal("path", "file");
+            return `⚙️ Opening file: ${path}...`;
+        }
+
+        if (action.includes("terminal")) {
+            const cmd = getVal("command", "cmd");
+            return `⚙️ Opening terminal and running: \`${cmd}\`...`;
+        }
+
+        if (action.includes("command")) {
+            const cmd = getVal("command", "cmd");
+            return `⚙️ Running command: \`${cmd}\`...`;
+        }
+
+        if (action === "volume_up") return "⚙️ Increasing system volume...";
+        if (action === "volume_down") return "⚙️ Decreasing system volume...";
+        if (action === "volume_mute") return "⚙️ Muting system volume...";
+        if (action.includes("volume_set") || action.includes("volume")) {
+            const pct = getVal("percent", "pct", "level", "value");
+            return `⚙️ Setting system volume to ${pct}%...`;
+        }
+
+        if (action === "brightness_up") return "⚙️ Increasing screen brightness...";
+        if (action === "brightness_down") return "⚙️ Decreasing screen brightness...";
+        if (action.includes("brightness_set") || action.includes("brightness")) {
+            const pct = getVal("percent", "pct", "level", "value");
+            return `⚙️ Setting screen brightness to ${pct}%...`;
+        }
+
+        if (action.includes("system")) {
+            const what = getVal("what", "info", "query");
+            return `⚙️ Retrieving system ${what || 'information'}...`;
+        }
+
+        if (action.includes("clipboard") && action.includes("copy")) return "⚙️ Copying text to clipboard...";
+        if (action.includes("clipboard") && action.includes("read")) return "⚙️ Reading clipboard content...";
+
+        const cleanAction = action.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        return `⚙️ Performing action: ${cleanAction}...`;
+    }
+
     function formatMessage(text, isStreaming = false) {
         if (!text) return '';
 
@@ -324,11 +447,36 @@ function renderChatList(query = '') {
             return id;
         });
 
-        work = work.replace(/\{[\s]*"action"[\s]*:[\s\S]*?\}/gi, (match) => {
-            const id = `@@@ACTION_${blocks.length}@@@`;
-            blocks.push({ type: 'action', content: match });
-            return id;
-        });
+        // Robust brace-counting extraction for action JSON blocks (handles nesting)
+        let startIdx = work.indexOf('{');
+        while (startIdx !== -1) {
+            let braceCount = 0;
+            let endIdx = -1;
+            for (let i = startIdx; i < work.length; i++) {
+                const char = work[i];
+                if (char === '{') {
+                    braceCount++;
+                } else if (char === '}') {
+                    braceCount--;
+                    if (braceCount === 0) {
+                        endIdx = i + 1;
+                        break;
+                    }
+                }
+            }
+            if (endIdx !== -1) {
+                const candidate = work.substring(startIdx, endIdx);
+                if (candidate.includes('"action"') || candidate.includes("'action'")) {
+                    const id = `@@@ACTION_${blocks.length}@@@`;
+                    blocks.push({ type: 'action', content: candidate });
+                    work = work.substring(0, startIdx) + id + work.substring(endIdx);
+                    // Adjust start index search since we replaced the block
+                    startIdx = work.indexOf('{', startIdx + id.length);
+                    continue;
+                }
+            }
+            startIdx = work.indexOf('{', startIdx + 1);
+        }
 
         work = work.replace(/<action_result>([\s\S]*?)(?:<\/action_result>|$)/gi, (match, p1) => {
             const id = `@@@RESULT_${blocks.length}@@@`;
@@ -540,7 +688,8 @@ function renderChatList(query = '') {
                     if (obj.action === "chat" && obj.response) {
                         html = escapeHtml(obj.response).replace(/\n/g, '<br>');
                     } else {
-                        html = `<div class="action-result-stream" style="font-size:12px; color:#a385ff; opacity:0.8;">⚙️ Action: ${escapeHtml(obj.action)}</div>`;
+                        const formattedAction = formatActionNormally(obj);
+                        html = `<div class="action-result-stream" style="font-size:12px; color:#a385ff; opacity:0.8;">${escapeHtml(formattedAction)}</div>`;
                     }
                 } catch (e) {
                     html = escapeHtml(block.content).replace(/\n/g, '<br>');
