@@ -970,7 +970,7 @@ def classify_task(
     triage_messages = [{"role": "system", "content": TRIAGE_SYSTEM_PROMPT}]
     for msg in minimized:
         triage_messages.append({"role": msg["role"], "content": msg["content"]})
-    triage_messages.append({"role": "user", "content": user_query})
+    triage_messages.append({"role": "user", "content": user_query + _language_directive(user_query)})
 
     llm = load_model(ModelRole.TRIAGE)
     res = llm.create_chat_completion(
@@ -1489,7 +1489,7 @@ def ask_stream(
         if context:
             sys_p = f"REFERENCE EXCERPT:\n{context}\n\n{sys_p}"
 
-        optimized = [{"role": "user", "content": user_query}]
+        optimized = [{"role": "user", "content": user_query + _language_directive(user_query)}]
         if history:
             cfg = load_generation_config()
             profile = str(cfg.get("compacting_profile", "medium")).lower()
@@ -1699,7 +1699,12 @@ def ask_stream(
             f"If the search results are incomplete, you may use your internal knowledge to supplement the answer. "
             f"Respond in the SAME LANGUAGE as the user's query."
         )
-        
+
+    # Pin the reply language for this turn with a concrete, named directive.
+    # The generic standing rule in the system prompt is too weak for the local
+    # models, which drift to Arabic/other languages on short English inputs.
+    final_query += _language_directive(user_query)
+
     optimized = [{"role": "user", "content": final_query}]
     if history:
         cfg = load_generation_config()
@@ -1851,6 +1856,64 @@ def ask_stream(
 def _apply_and_yield_harness(text: str, language: str) -> Tuple[str, List[dict]]:
     """Run harness passes and collect warnings. Caller should yield them."""
     return _apply_harness(text, language)
+
+
+def detect_user_language(text: str) -> Optional[str]:
+    """Best-effort natural-language detection by Unicode script.
+
+    Returns a human-readable language name (e.g. "Arabic", "English") to inject
+    into the prompt, or None if it can't tell (e.g. only digits/punctuation).
+    Script-based detection is fast, dependency-free, and reliable enough to pin
+    the reply language, which is what the model actually needs.
+    """
+    if not text:
+        return None
+    # Strip code blocks / URLs so their ASCII doesn't skew the count.
+    sample = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    sample = re.sub(r"https?://\S+", " ", sample)
+
+    counts: Dict[str, int] = {}
+    for ch in sample:
+        cp = ord(ch)
+        if 0x0600 <= cp <= 0x06FF or 0x0750 <= cp <= 0x077F or 0x08A0 <= cp <= 0x08FF:
+            counts["Arabic"] = counts.get("Arabic", 0) + 1
+        elif 0x0400 <= cp <= 0x04FF:
+            counts["Russian"] = counts.get("Russian", 0) + 1
+        elif 0x4E00 <= cp <= 0x9FFF:
+            counts["Chinese"] = counts.get("Chinese", 0) + 1
+        elif 0x3040 <= cp <= 0x30FF:
+            counts["Japanese"] = counts.get("Japanese", 0) + 1
+        elif 0xAC00 <= cp <= 0xD7AF:
+            counts["Korean"] = counts.get("Korean", 0) + 1
+        elif 0x0590 <= cp <= 0x05FF:
+            counts["Hebrew"] = counts.get("Hebrew", 0) + 1
+        elif 0x0900 <= cp <= 0x097F:
+            counts["Hindi"] = counts.get("Hindi", 0) + 1
+        elif 0x0370 <= cp <= 0x03FF:
+            counts["Greek"] = counts.get("Greek", 0) + 1
+        elif "a" <= ch.lower() <= "z":
+            counts["English"] = counts.get("English", 0) + 1
+
+    if not counts:
+        return None
+    # Any non-Latin script wins even at low proportion — Latin letters routinely
+    # bleed into otherwise non-English text (brand names, loanwords).
+    non_latin = {k: v for k, v in counts.items() if k != "English"}
+    if non_latin:
+        return max(non_latin, key=non_latin.__getitem__)
+    return "English"
+
+
+def _language_directive(user_query: str) -> str:
+    """A concrete, named language instruction for the current turn, or ''."""
+    lang = detect_user_language(user_query)
+    if not lang:
+        return ""
+    return (
+        f"\n\nIMPORTANT: The user's message is written in {lang}. "
+        f"You MUST write your ENTIRE response — including any <think> reasoning — "
+        f"in {lang} only. Do not switch to any other language."
+    )
 
 
 def _detect_language(text: str) -> Optional[str]:
