@@ -884,7 +884,7 @@ async def ask_stream(
 
             if task_type == TaskType.CONTROL:
                 yield {"type": "status", "content": "Generating computer command..."}
-                from src.controller import _get_agent_system_prompt, parse_ai_response, 
+                from src.controller import _get_agent_system_prompt, parse_ai_response, execute_action_by_dict
                 
                 control_messages = [{"role": "system", "content": _get_agent_system_prompt()}, {"role": "user", "content": user_query}]
                 
@@ -904,6 +904,7 @@ async def ask_stream(
                     if action_dict:
                         action_name = action_dict.get("action", "unknown")
                         yield {"type": "status", "content": f"Executing: {action_name}"}
+                        result = execute_action_by_dict(action_dict)
                         yield {"type": "action_result", "content": f"Action '{action_name}' Executed.\nResult:\n{result}"}
                         messages.append({"role": "system", "content": f"Computer Command Execution Result:\n{result}\n\n"})
                     else:
