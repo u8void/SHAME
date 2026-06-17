@@ -4,20 +4,34 @@ controller.py — Iris AI PC Agent
 Natural-language control via Iris GGUF brain + Open Interpreter execution.
 """
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 1 ── Auto-install open-interpreter if missing (runs on every startup)
-# ═══════════════════════════════════════════════════════════════════════════
-import sys, os
+import os
+import platform
+import sys
+
 
 def _ensure_open_interpreter():
     try:
         import interpreter as _test  # noqa: F401
     except ImportError:
         import subprocess as _sp
+
         print("\n[Iris] Installing open-interpreter — one-time setup...", flush=True)
-        _sp.run([sys.executable, "-m", "pip", "install", "-q",
-                 "--upgrade", "open-interpreter", "--break-system-packages"], check=True)
+        pip_args = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            "--upgrade",
+            "open-interpreter",
+        ]
+        if platform.system() == "Linux":
+            pip_args.append("--break-system-packages")
+        env = os.environ.copy()
+        env["PYO3_USE_ABI3_FORWARD_COMPATIBILITY"] = "1"
+        _sp.run(pip_args, check=True, env=env)
         print("[Iris] open-interpreter installed ✓\n", flush=True)
+
 
 _ensure_open_interpreter()
 
@@ -26,12 +40,19 @@ _ensure_open_interpreter()
 # ═══════════════════════════════════════════════════════════════════════════
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.logger import get_logger
-logger = get_logger('controller')
 
-import re, json, time, shutil, platform, smtplib, subprocess
+logger = get_logger("controller")
+
+import json
+import platform
+import re
+import shutil
+import smtplib
+import subprocess
 import subprocess as _subprocess
-from typing import Optional
+import time
 from pathlib import Path
+from typing import Optional
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 3 ── Initialize Open Interpreter instance
@@ -40,15 +61,15 @@ try:
     # Import the singleton instance (not the module)
     from interpreter import interpreter as _oi
 
-    _oi.auto_run        = True    # execute without user confirmation prompts
-    _oi.verbose         = False
-    _oi.max_output      = 4000
-    _oi.offline         = False   # use OI's own model; iris_002.gguf is intent-only
-    _oi.sync_computer   = False   # prevents the respond.py 'result' NameError bug
-    _oi.loop            = False   # stop after one round; no follow-up prompts
+    _oi.auto_run = True  # execute without user confirmation prompts
+    _oi.verbose = False
+    _oi.max_output = 4000
+    _oi.offline = False  # use OI's own model; iris_002.gguf is intent-only
+    _oi.sync_computer = False  # prevents the respond.py 'result' NameError bug
+    _oi.loop = False  # stop after one round; no follow-up prompts
 
     _oi.llm.supports_functions = False
-    _oi.llm.supports_vision    = False
+    _oi.llm.supports_vision = False
 
     _oi.system_message = (
         "You are Iris, an AI PC assistant. "
@@ -69,28 +90,42 @@ except Exception as _oi_err:
 # STEP 4 ── Shell execution helpers (route through OI when available)
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 class _FakeResult:
     """Mimics subprocess.CompletedProcess so callers need no changes."""
+
     def __init__(self, stdout="", stderr="", returncode=0):
-        self.stdout = stdout; self.stderr = stderr; self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode = returncode
+
 
 def _shell(cmd: str, **kw) -> _FakeResult:
-    """Execute a shell command via Open Interpreter (or subprocess fallback)."""
-    if OI_AVAILABLE:
+    """Execute a shell command.
+
+    The Open Interpreter path can only honor a bare string command — it cannot
+    pipe `input`, capture real stderr/returncode, accept a list argv, or pass
+    flags like `timeout`/`creationflags`. So route through OI ONLY for the
+    trivial `_shell("...")` case; anything with kwargs or a list command goes
+    straight to subprocess so the calling handler gets correct semantics.
+    """
+    if OI_AVAILABLE and isinstance(cmd, str) and not kw:
         try:
             chunks = _oi.computer.run("shell", cmd)
             out = "\n".join(
-                c.get("output", "") for c in chunks
+                c.get("output", "")
+                for c in chunks
                 if isinstance(c, dict) and c.get("output")
             ).strip()
             return _FakeResult(stdout=out or "")
         except Exception as e:
             logger.warning(f"[OI] _shell fallback: {e}")
-    # Fallback to raw subprocess
-    defaults = dict(shell=True, capture_output=True, text=True)
+    # Raw subprocess (correct stdout/stderr/returncode, supports input=, argv, etc.)
+    defaults = dict(shell=isinstance(cmd, str), capture_output=True, text=True)
     defaults.update(kw)
     r = _subprocess.run(cmd, **defaults)
     return _FakeResult(r.stdout or "", r.stderr or "", r.returncode)
+
 
 def _popen(cmd, shell: bool = False, **kw) -> None:
     """Launch a process non-blocking via OI (or subprocess fallback)."""
@@ -106,6 +141,7 @@ def _popen(cmd, shell: bool = False, **kw) -> None:
     suppress.update(kw)
     return _subprocess.Popen(cmd, shell=shell, **suppress)
 
+
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 5 ── Action → Shell Command template table (offline, no LLM needed)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -113,68 +149,70 @@ import urllib.parse as _ulparse
 
 _LINUX_CMD: dict = {
     # ── Apps ───────────────────────────────────────────────────────────────
-    "open_app":         "{name} &",
-    "close_app":        "pkill -f '{name}' 2>/dev/null; true",
-    "focus_app":        "wmctrl -a '{name}' 2>/dev/null || true",
-    "kill_process":     "pkill -f '{name}' 2>/dev/null; true",
-    "open_terminal":    "gnome-terminal &",
-    "open_settings":    "gnome-control-center &",
+    "open_app": "{name} &",
+    "close_app": "pkill -f '{name}' 2>/dev/null; true",
+    "focus_app": "wmctrl -a '{name}' 2>/dev/null || true",
+    "kill_process": "pkill -f '{name}' 2>/dev/null; true",
+    "open_terminal": "gnome-terminal &",
+    "open_settings": "gnome-control-center &",
     # ── Web / media ────────────────────────────────────────────────────────
-    "open_website":     "xdg-open '{url}' &",
-    "web_search":       "xdg-open 'https://www.google.com/search?q={query_enc}' &",
-    "youtube_video":    "xdg-open 'https://www.youtube.com/results?search_query={query_enc}' &",
-    "youtube_channel":  "xdg-open 'https://www.youtube.com/results?search_query={name_enc}+channel' &",
-    "spotify_song":     "xdg-open 'https://open.spotify.com/search/{query_enc}' &",
+    "open_website": "xdg-open '{url}' &",
+    "web_search": "xdg-open 'https://www.google.com/search?q={query_enc}' &",
+    "youtube_video": "xdg-open 'https://www.youtube.com/results?search_query={query_enc}' &",
+    "youtube_channel": "xdg-open 'https://www.youtube.com/results?search_query={name_enc}+channel' &",
+    "spotify_song": "xdg-open 'https://open.spotify.com/search/{query_enc}' &",
     # ── Volume ─────────────────────────────────────────────────────────────
-    "volume_up":        "pactl set-sink-volume @DEFAULT_SINK@ +10%",
-    "volume_down":      "pactl set-sink-volume @DEFAULT_SINK@ -10%",
-    "volume_mute":      "pactl set-sink-mute @DEFAULT_SINK@ toggle",
-    "volume_set":       "pactl set-sink-volume @DEFAULT_SINK@ {percent}%",
-    "set_volume":       "pactl set-sink-volume @DEFAULT_SINK@ {percent}%",
+    "volume_up": "pactl set-sink-volume @DEFAULT_SINK@ +10%",
+    "volume_down": "pactl set-sink-volume @DEFAULT_SINK@ -10%",
+    "volume_mute": "pactl set-sink-mute @DEFAULT_SINK@ toggle",
+    "volume_set": "pactl set-sink-volume @DEFAULT_SINK@ {percent}%",
+    "set_volume": "pactl set-sink-volume @DEFAULT_SINK@ {percent}%",
     # ── Brightness ─────────────────────────────────────────────────────────
-    "brightness_up":    "brightnessctl set +10% 2>/dev/null || xrandr --output $(xrandr | grep ' connected' | head -1 | cut -d' ' -f1) --brightness 1.0",
-    "brightness_down":  "brightnessctl set 10%- 2>/dev/null || true",
-    "brightness_set":   "brightnessctl set {percent}% 2>/dev/null || true",
-    "set_brightness":   "brightnessctl set {percent}% 2>/dev/null || true",
+    "brightness_up": "brightnessctl set +10% 2>/dev/null || xrandr --output $(xrandr | grep ' connected' | head -1 | cut -d' ' -f1) --brightness 1.0",
+    "brightness_down": "brightnessctl set 10%- 2>/dev/null || true",
+    "brightness_set": "brightnessctl set {percent}% 2>/dev/null || true",
+    "set_brightness": "brightnessctl set {percent}% 2>/dev/null || true",
     # ── Power ──────────────────────────────────────────────────────────────
-    "lock_screen":      "loginctl lock-session",
-    "sleep_computer":   "systemctl suspend",
+    "lock_screen": "loginctl lock-session",
+    "sleep_computer": "systemctl suspend",
     "restart_computer": "reboot",
-    "shutdown_computer":"shutdown now",
+    "shutdown_computer": "shutdown now",
     # ── Files ──────────────────────────────────────────────────────────────
-    "open_file":        "xdg-open '{path}' &",
-    "create_file":      "mkdir -p \"$(dirname '{path}')\" && printf '%s' '{content}' > '{path}'",
-    "read_file":        "cat '{path}'",
-    "delete_file":      "rm -f '{path}'",
-    "create_folder":    "mkdir -p '{path}'",
-    "move_file":        "mv '{src}' '{dst}'",
-    "copy_file":        "cp -r '{src}' '{dst}'",
-    "rename_file":      "mv '{path}' \"$(dirname '{path}')/{new_name}\"",
-    "download_file":    "wget -q -O '{path}' '{url}'",
-    "compress_files":   "zip '{output}' {paths_str}",
-    "extract_file":     "unzip -o '{path}' -d '{dest}'",
+    "open_file": "xdg-open '{path}' &",
+    "create_file": "mkdir -p \"$(dirname '{path}')\" && printf '%s' '{content}' > '{path}'",
+    "read_file": "cat '{path}'",
+    "delete_file": "rm -f '{path}'",
+    "create_folder": "mkdir -p '{path}'",
+    "move_file": "mv '{src}' '{dst}'",
+    "copy_file": "cp -r '{src}' '{dst}'",
+    "rename_file": "mv '{path}' \"$(dirname '{path}')/{new_name}\"",
+    "download_file": "wget -q -O '{path}' '{url}'",
+    "compress_files": "zip '{output}' {paths_str}",
+    "extract_file": "unzip -o '{path}' -d '{dest}'",
     # ── System ─────────────────────────────────────────────────────────────
-    "run_command":      "{command}",
-    "screenshot":       "gnome-screenshot -f '{path}' 2>/dev/null || import '{path}'",
-    "notification":     "notify-send '{title}' '{body}'",
-    "take_note":        "echo '{content}' >> ~/iris_notes.txt",
-    "empty_trash":      "rm -rf ~/.local/share/Trash/*",
-    "wifi":             "nmcli radio wifi {state}",
-    "bluetooth":        "rfkill {bt_op} bluetooth 2>/dev/null || bluetoothctl power {bt_power}",
-    "flush_dns":        "sudo resolvectl flush-caches 2>/dev/null || sudo systemd-resolve --flush-caches",
-    "dark_mode":        "gsettings set org.gnome.desktop.interface color-scheme prefer-{color_scheme}",
-    "set_wallpaper":    "gsettings set org.gnome.desktop.background picture-uri 'file://{path}'",
-    "clipboard_copy":   "echo -n '{text}' | xclip -selection clipboard 2>/dev/null || echo -n '{text}' | xsel --clipboard --input",
-    "clipboard_read":   "xclip -selection clipboard -o 2>/dev/null || xsel --clipboard --output",
-    "set_env":          "export {key}='{value}'",
+    "run_command": "{command}",
+    "screenshot": "gnome-screenshot -f '{path}' 2>/dev/null || import '{path}'",
+    "notification": "notify-send '{title}' '{body}'",
+    "take_note": "echo '{content}' >> ~/iris_notes.txt",
+    "empty_trash": "rm -rf ~/.local/share/Trash/*",
+    "wifi": "nmcli radio wifi {state}",
+    "bluetooth": "rfkill {bt_op} bluetooth 2>/dev/null || bluetoothctl power {bt_power}",
+    "flush_dns": "sudo resolvectl flush-caches 2>/dev/null || sudo systemd-resolve --flush-caches",
+    "dark_mode": "gsettings set org.gnome.desktop.interface color-scheme prefer-{color_scheme}",
+    "set_wallpaper": "gsettings set org.gnome.desktop.background picture-uri 'file://{path}'",
+    "check_storage": "df -h /",
+    "disk_usage": "df -h {path}",
+    "clipboard_copy": "echo -n '{text}' | xclip -selection clipboard 2>/dev/null || echo -n '{text}' | xsel --clipboard --input",
+    "clipboard_read": "xclip -selection clipboard -o 2>/dev/null || xsel --clipboard --output",
+    "set_env": "export {key}='{value}'",
     "media_play_pause": "playerctl play-pause 2>/dev/null || dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.PlayPause",
-    "media_next":       "playerctl next 2>/dev/null || true",
-    "media_previous":   "playerctl previous 2>/dev/null || true",
-    "media_stop":       "playerctl stop 2>/dev/null || true",
+    "media_next": "playerctl next 2>/dev/null || true",
+    "media_previous": "playerctl previous 2>/dev/null || true",
+    "media_stop": "playerctl stop 2>/dev/null || true",
     # ── Window ─────────────────────────────────────────────────────────────
-    "window_close":     "xdotool getactivewindow windowclose 2>/dev/null || true",
-    "window_minimize":  "xdotool getactivewindow windowminimize 2>/dev/null || true",
-    "window_maximize":  "wmctrl -r :ACTIVE: -b toggle,maximized_vert,maximized_horz 2>/dev/null || true",
+    "window_close": "xdotool getactivewindow windowclose 2>/dev/null || true",
+    "window_minimize": "xdotool getactivewindow windowminimize 2>/dev/null || true",
+    "window_maximize": "wmctrl -r :ACTIVE: -b toggle,maximized_vert,maximized_horz 2>/dev/null || true",
 }
 
 
@@ -206,8 +244,8 @@ def _action_dict_to_cmd(action_dict: dict) -> str | None:
 
     # bluetooth on/off → rfkill unblock/block + bluetoothctl on/off
     state = str(d.get("state", "on")).lower()
-    d["bt_op"]    = "unblock" if state == "on" else "block"
-    d["bt_power"] = "on"      if state == "on" else "off"
+    d["bt_op"] = "unblock" if state == "on" else "block"
+    d["bt_power"] = "on" if state == "on" else "off"
 
     # dark_mode: state on → prefer-dark, off → prefer-light
     d["color_scheme"] = "dark" if state == "on" else "light"
@@ -230,7 +268,9 @@ def _exec_shell_cmd(cmd: str) -> str:
             parts = [
                 str(c.get("content", "")).strip()
                 for c in chunks
-                if isinstance(c, dict) and c.get("format") == "output" and c.get("content")
+                if isinstance(c, dict)
+                and c.get("format") == "output"
+                and c.get("content")
             ]
             return "\n".join(parts).strip() or "Done."
         except Exception as e:
@@ -258,17 +298,23 @@ def _run_oi_task(task: str) -> str:
             if not isinstance(chunk, dict):
                 continue
             chunk_type = chunk.get("type", "")
-            role       = chunk.get("role", "")
-            content    = chunk.get("content", "")
+            role = chunk.get("role", "")
+            content = chunk.get("content", "")
             if chunk_type == "message" and role == "assistant":
                 if isinstance(content, str) and content.strip():
                     parts.append(content.strip())
-            elif chunk_type == "console" and chunk.get("format") == "output" and content:
+            elif (
+                chunk_type == "console" and chunk.get("format") == "output" and content
+            ):
                 parts.append(str(content).strip())
             elif role == "computer" and content:
                 if isinstance(content, list):
                     for item in content:
-                        out = item.get("output", item.get("content", "")) if isinstance(item, dict) else ""
+                        out = (
+                            item.get("output", item.get("content", ""))
+                            if isinstance(item, dict)
+                            else ""
+                        )
                         if out:
                             parts.append(str(out).strip())
                 elif isinstance(content, str) and content.strip():
@@ -281,30 +327,31 @@ def _run_oi_task(task: str) -> str:
         return f"Could not execute via OI: {e}"
 
 
-
 # ─────────────────────────────────────────────────────────────────────────────
-import webbrowser
-import urllib.request
-import urllib.parse
-import urllib.error
 import ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from pathlib import Path
+import urllib.error
+import urllib.parse
+import urllib.request
 import warnings
+import webbrowser
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from pathlib import Path
+
 warnings.filterwarnings("ignore")
 
 try:
+    from rich.align import Align
+    from rich.box import DOUBLE, ROUNDED
     from rich.console import Console
-    from rich.panel import Panel
+    from rich.live import Live
     from rich.markdown import Markdown
+    from rich.panel import Panel
+    from rich.prompt import Prompt
     from rich.syntax import Syntax
     from rich.table import Table
     from rich.text import Text
-    from rich.live import Live
-    from rich.prompt import Prompt
-    from rich.align import Align
-    from rich.box import ROUNDED, DOUBLE
+
     console = Console()
     RICH_AVAILABLE = True
 except ImportError:
@@ -314,31 +361,114 @@ IS_INTERACTIVE = True
 
 ROUTER_KEYWORDS: dict = {
     "medical": [
-        "symptom", "symptoms", "diagnosis", "diagnose", "treatment", "medicine",
-        "medication", "doctor", "health", "disease", "pain", "hospital", "surgery",
-        "patient", "clinical", "therapy", "drug", "prescription", "fever", "injury",
-        "chronic", "infection", "vaccine", "anatomy", "blood", "heart", "lung",
+        "symptom",
+        "symptoms",
+        "diagnosis",
+        "diagnose",
+        "treatment",
+        "medicine",
+        "medication",
+        "doctor",
+        "health",
+        "disease",
+        "pain",
+        "hospital",
+        "surgery",
+        "patient",
+        "clinical",
+        "therapy",
+        "drug",
+        "prescription",
+        "fever",
+        "injury",
+        "chronic",
+        "infection",
+        "vaccine",
+        "anatomy",
+        "blood",
+        "heart",
+        "lung",
     ],
     "coding": [
-        "python", "javascript", "typescript", "function", "code", "debug", "error",
-        "import", "class", "algorithm", "variable", "loop", "array", "api", "sql",
-        "database", "framework", "library", "bug", "syntax", "compile", "runtime",
-        "async", "thread", "git", "docker", "linux", "bash", "script", "regex",
-        "html", "css", "react", "node", "flask", "django", "mlx", "pytorch",
+        "python",
+        "javascript",
+        "typescript",
+        "function",
+        "code",
+        "debug",
+        "error",
+        "import",
+        "class",
+        "algorithm",
+        "variable",
+        "loop",
+        "array",
+        "api",
+        "sql",
+        "database",
+        "framework",
+        "library",
+        "bug",
+        "syntax",
+        "compile",
+        "runtime",
+        "async",
+        "thread",
+        "git",
+        "docker",
+        "linux",
+        "bash",
+        "script",
+        "regex",
+        "html",
+        "css",
+        "react",
+        "node",
+        "flask",
+        "django",
+        "mlx",
+        "pytorch",
     ],
     "finance": [
-        "tax", "taxes", "budget", "expense", "expenses", "investment", "invest",
-        "stock", "stocks", "money", "salary", "income", "profit", "loss", "revenue",
-        "accounting", "bank", "loan", "mortgage", "interest", "rate", "crypto",
-        "bitcoin", "portfolio", "dividend", "inflation", "economy", "financial",
+        "tax",
+        "taxes",
+        "budget",
+        "expense",
+        "expenses",
+        "investment",
+        "invest",
+        "stock",
+        "stocks",
+        "money",
+        "salary",
+        "income",
+        "profit",
+        "loss",
+        "revenue",
+        "accounting",
+        "bank",
+        "loan",
+        "mortgage",
+        "interest",
+        "rate",
+        "crypto",
+        "bitcoin",
+        "portfolio",
+        "dividend",
+        "inflation",
+        "economy",
+        "financial",
     ],
 }
+
 
 def route_category(text: str) -> Optional[str]:
     lower = text.lower()
     scores: dict = {}
     for cat, keywords in ROUTER_KEYWORDS.items():
-        score = sum(1 for kw in keywords if re.search(r'\b' + re.escape(kw) + r'\b', lower))
+        score = sum(
+            1 for kw in keywords if re.search(r"\b" + re.escape(kw) + r"\b", lower)
+        )
         if score:
             scores[cat] = score
     if not scores:
@@ -346,6 +476,7 @@ def route_category(text: str) -> Optional[str]:
     best = max(scores, key=scores.__getitem__)
     logger.info(f"[Router] Category='{best}' (scores={scores})")
     return best
+
 
 import html as _html
 
@@ -375,6 +506,7 @@ _WEB_SEARCH_SKIP = re.compile(
     re.IGNORECASE,
 )
 
+
 def should_web_search(text: str) -> bool:
     """Return True when the query looks like a factual / informational question.
 
@@ -388,13 +520,14 @@ def should_web_search(text: str) -> bool:
         return False
     return bool(_WEB_SEARCH_TRIGGERS.search(text))
 
+
 def web_search(query: str, max_results: int = 5) -> str:
     """
     Search DuckDuckGo and return the top snippet results as plain text.
     Uses only the stdlib — no extra packages needed.
     """
     try:
-        q   = urllib.parse.quote_plus(query)
+        q = urllib.parse.quote_plus(query)
         url = f"https://html.duckduckgo.com/html/?q={q}"
         req = urllib.request.Request(
             url,
@@ -409,30 +542,32 @@ def web_search(query: str, max_results: int = 5) -> str:
         )
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
-        ctx.verify_mode    = ssl.CERT_NONE
+        ctx.verify_mode = ssl.CERT_NONE
 
         with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
             body = resp.read().decode("utf-8", errors="ignore")
 
-        titles   = re.findall(
+        titles = re.findall(
             r'class=["\']result__a["\'][^>]*>(.*?)</a>',
-            body, re.DOTALL,
+            body,
+            re.DOTALL,
         )
 
         snippets = re.findall(
             r'class=["\']result__snippet["\'][^>]*>(.*?)</(?:a|span)>',
-            body, re.DOTALL,
+            body,
+            re.DOTALL,
         )
 
         def clean(s: str) -> str:
-            s = re.sub(r'<[^>]+>', '', s)
+            s = re.sub(r"<[^>]+>", "", s)
             return _html.unescape(s).strip()
 
         results = []
         for i, (t, s) in enumerate(zip(titles[:max_results], snippets[:max_results])):
             t, s = clean(t), clean(s)
             if t or s:
-                results.append(f"[Result {i+1}] {t}\n{s}")
+                results.append(f"[Result {i + 1}] {t}\n{s}")
 
         if not results:
             return "(No web results found for this query.)"
@@ -442,14 +577,24 @@ def web_search(query: str, max_results: int = 5) -> str:
     except Exception as exc:
         return f"(Web search unavailable: {exc})"
 
+
 # Removed pyperclip dependency warning
 CLIPBOARD_AVAILABLE = True
 try:
-    from src.iris import ask_stream, get_device, solve_math, BookRetriever, analyze_image
+    from src.iris import (
+        BookRetriever,
+        analyze_image,
+        ask_stream,
+        get_device,
+        solve_math,
+    )
+
     IRIS_AVAILABLE = True
 except ImportError:
     IRIS_AVAILABLE = False
-    logger.warning("[WARNING] iris.py not found or dependencies missing. Running in rule-only mode.")
+    logger.warning(
+        "[WARNING] iris.py not found or dependencies missing. Running in rule-only mode."
+    )
 # Model display name — pulled from environment or iris.conf if available
 MLX_MODEL_ID = os.environ.get("IRIS_MODEL_ID", "")
 if not MLX_MODEL_ID:
@@ -460,7 +605,7 @@ if not MLX_MODEL_ID:
     except:
         MLX_MODEL_ID = "Iris AI"
 
-CONFIG_FILE  = "./config/control.conf"
+CONFIG_FILE = "./config/control.conf"
 
 _is_linux = platform.system() == "Linux"
 DEFAULT_CONFIG = {
@@ -469,32 +614,30 @@ DEFAULT_CONFIG = {
         "smtp_port": 587,
         "sender_address": "your_email@gmail.com",
         "sender_password": "your_app_password",
-        "contacts": {
-            "mom": "mom@example.com",
-            "dad": "dad@example.com"
-        }
+        "contacts": {"mom": "mom@example.com", "dad": "dad@example.com"},
     },
     "apps": {
-        "notepad":      "gedit" if _is_linux else "notepad.exe",
-        "calculator":   "gnome-calculator" if _is_linux else "calc.exe",
-        "paint":        "drawing" if _is_linux else "mspaint.exe",
-        "spotify":      "spotify",
-        "vscode":       "code",
-        "chrome":       "google-chrome",
-        "firefox":      "firefox",
-        "explorer":     "nautilus" if _is_linux else "explorer.exe",
-        "terminal":     "gnome-terminal" if _is_linux else "cmd.exe",
-        "settings":     "gnome-control-center" if _is_linux else "start ms-settings:",
-        "system_monitor":"gnome-system-monitor" if _is_linux else "taskmgr.exe",
-        "store":        "gnome-software" if _is_linux else "ms-windows-store:",
-        "camera":       "cheese" if _is_linux else "microsoft.windows.camera:",
-        "mail":         "thunderbird" if _is_linux else "outlook",
-        "calendar":     "gnome-calendar" if _is_linux else "outlookcal:",
-        "word":         "libreoffice --writer" if _is_linux else "winword.exe",
-        "excel":        "libreoffice --calc" if _is_linux else "excel.exe"
+        "notepad": "gedit" if _is_linux else "notepad.exe",
+        "calculator": "gnome-calculator" if _is_linux else "calc.exe",
+        "paint": "drawing" if _is_linux else "mspaint.exe",
+        "spotify": "spotify",
+        "vscode": "code",
+        "chrome": "google-chrome",
+        "firefox": "firefox",
+        "explorer": "nautilus" if _is_linux else "explorer.exe",
+        "terminal": "gnome-terminal" if _is_linux else "cmd.exe",
+        "settings": "gnome-control-center" if _is_linux else "start ms-settings:",
+        "system_monitor": "gnome-system-monitor" if _is_linux else "taskmgr.exe",
+        "store": "gnome-software" if _is_linux else "ms-windows-store:",
+        "camera": "cheese" if _is_linux else "microsoft.windows.camera:",
+        "mail": "thunderbird" if _is_linux else "outlook",
+        "calendar": "gnome-calendar" if _is_linux else "outlookcal:",
+        "word": "libreoffice --writer" if _is_linux else "winword.exe",
+        "excel": "libreoffice --calc" if _is_linux else "excel.exe",
     },
-    "browser": "default"
+    "browser": "default",
 }
+
 
 def load_config() -> dict:
     if not os.path.exists(CONFIG_FILE):
@@ -502,13 +645,18 @@ def load_config() -> dict:
         with open(CONFIG_FILE, "w") as f:
             json.dump(DEFAULT_CONFIG, f, indent=2)
         logger.info(f"[INFO] Created config template at {CONFIG_FILE}")
-        logger.info("       Edit it with your email credentials and app paths before sending mail.")
+        logger.info(
+            "       Edit it with your email credentials and app paths before sending mail."
+        )
     try:
         with open(CONFIG_FILE) as f:
             return json.load(f)
     except Exception as e:
-        logger.error(f"[ERROR] Failed to load {CONFIG_FILE}: {e}. Using default config.")
+        logger.error(
+            f"[ERROR] Failed to load {CONFIG_FILE}: {e}. Using default config."
+        )
         return DEFAULT_CONFIG
+
 
 _INTENTS = [
     (
@@ -585,7 +733,29 @@ _INTENTS = [
             re.IGNORECASE | re.VERBOSE,
         ),
     ),
+    (
+        "disk_usage",
+        re.compile(
+            r"""(?:check|show|get|see)\s+(?:disk\s+)?usage\s+(?:of\s+|for\s+)?(?P<path>.+)""",
+            re.IGNORECASE | re.VERBOSE,
+        ),
+    ),
+    (
+        "disk_usage_of",
+        re.compile(
+            r"""disk\s+usage\s+of\s+(?P<path>.+)""",
+            re.IGNORECASE | re.VERBOSE,
+        ),
+    ),
+    (
+        "check_storage",
+        re.compile(
+            r"""(?:check|show(?:\s+me)?|get(?:\s+me)?|see(?:\s+(?:me|my))?|what(?:\s+is)?(?:\s+my)?(?:\s+the)?|how\s+much)\s+(?:is|are)?\s*(?:disk\s+)?(?:storage|space|usage|free\s+space)(?:\s+left|\s+remaining|\s+available)?(?:\s+on\s+(?:my\s+)?(?:device|disk|computer|system|machine))?""",
+            re.IGNORECASE | re.VERBOSE,
+        ),
+    ),
 ]
+
 
 def detect_intent(text: str):
     t = text.strip()
@@ -595,8 +765,12 @@ def detect_intent(text: str):
             return intent_name, m
     return "ai_agent", None
 
+
 import os
-_prompt_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "training", "control", "control.md")
+
+_prompt_path = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "training", "control", "control.md"
+)
 try:
     with open(_prompt_path, "r", encoding="utf-8") as f:
         _content = f.read().strip()
@@ -610,18 +784,21 @@ try:
             _content = _content[:_train_idx].strip()
         else:
             _content = "\n".join(_content.splitlines()[:144]).strip()
-            
+
         if _content.startswith("SYSTEM:"):
             AI_AGENT_SYSTEM_PROMPT = _content[7:].strip()
         else:
             AI_AGENT_SYSTEM_PROMPT = _content
 except Exception as e:
     logger.warning(f"[WARNING] Failed to load training/control.md: {e}")
-    AI_AGENT_SYSTEM_PROMPT = "You are an AI PC assistant. Please respond with JSON actions."
+    AI_AGENT_SYSTEM_PROMPT = (
+        "You are an AI PC assistant. Please respond with JSON actions."
+    )
 
 MAX_SYS_PROMPT_CHARS = 4096
 
 _agent_prompt_cache = {"text": None, "mtime": 0}
+
 
 def _get_agent_system_prompt() -> str:
     """
@@ -633,7 +810,9 @@ def _get_agent_system_prompt() -> str:
     control.md — they will always be included.
     """
     global _agent_prompt_cache
-    path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "training", "control", "control.md")
+    path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "training", "control", "control.md"
+    )
     try:
         mtime = os.path.getmtime(path)
         if _agent_prompt_cache["text"] is None or mtime != _agent_prompt_cache["mtime"]:
@@ -649,7 +828,7 @@ def _get_agent_system_prompt() -> str:
                 content = content[:train_idx].strip()
             else:
                 content = "\n".join(content.splitlines()[:144]).strip()
-                
+
             text = content[7:].strip() if content.startswith("SYSTEM:") else content
             _agent_prompt_cache = {"text": text, "mtime": mtime}
         return _agent_prompt_cache["text"]
@@ -657,20 +836,24 @@ def _get_agent_system_prompt() -> str:
         logger.warning(f"[ERROR] Failed to load or truncate system prompt: {e}")
         return AI_AGENT_SYSTEM_PROMPT
 
+
 _reply_prefix_cache: dict = {"key": None, "prompt": None}
+
 
 def handle_run_code(code: str) -> str:
     """Execute Python code in a sandboxed subprocess and return stdout/stderr."""
     import tempfile
+
     if not code or not code.strip():
         return "No code provided to execute."
-    with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False, encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        suffix=".py", mode="w", delete=False, encoding="utf-8"
+    ) as f:
         f.write(code)
         tmp_path = f.name
     try:
         result = _shell(
-            ["python3", tmp_path],
-            capture_output=True, text=True, timeout=15
+            ["python3", tmp_path], capture_output=True, text=True, timeout=15
         )
         stdout = result.stdout.strip()
         stderr = result.stderr.strip()
@@ -691,9 +874,10 @@ def handle_run_code(code: str) -> str:
         except Exception:
             pass
 
+
 def parse_ai_response(text: str) -> dict | None:
     """Try to extract a JSON object from Iris's output."""
-    match = re.search(r'\{.*\}', text, re.DOTALL)
+    match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
         return None
     try:
@@ -701,11 +885,14 @@ def parse_ai_response(text: str) -> dict | None:
     except json.JSONDecodeError:
         return None
 
+
 def ai_agent_handle(user_input: str, retriever=None, history=None, **kwargs):
     """Generator that yields events for the frontend: tokens, actions, results."""
     history = history or []
 
-    force_role = kwargs.get("force_role") or getattr(ai_agent_handle, "force_role", None)
+    force_role = kwargs.get("force_role") or getattr(
+        ai_agent_handle, "force_role", None
+    )
     settings = kwargs.get("settings", {})
 
     if not force_role:
@@ -715,15 +902,25 @@ def ai_agent_handle(user_input: str, retriever=None, history=None, **kwargs):
             return
 
     from src.iris import ask_stream
+
     keep_loaded = kwargs.get("keep_loaded", False)
-    yield from ask_stream(user_input, history, retriever=retriever, force_role=force_role, settings=settings, keep_loaded=keep_loaded)
+    yield from ask_stream(
+        user_input,
+        history,
+        retriever=retriever,
+        force_role=force_role,
+        settings=settings,
+        keep_loaded=keep_loaded,
+    )
+
 
 def ai_agent_handle_pro(user_input: str, retriever=None, history=None, **kwargs):
     """Generator that yields events from Iris Pro (async) for the frontend or terminal."""
     import asyncio
-    import src.iris_pro as iris_pro
     import queue
     import threading
+
+    import src.iris_pro as iris_pro
 
     q = queue.Queue()
     mode = kwargs.get("settings", {}).get("mode", "smart")
@@ -731,13 +928,16 @@ def ai_agent_handle_pro(user_input: str, retriever=None, history=None, **kwargs)
     def run_async():
         async def task():
             try:
-                agen = iris_pro.ask_stream(user_input, history or [], mode=mode, workspace_root=os.getcwd())
+                agen = iris_pro.ask_stream(
+                    user_input, history or [], mode=mode, workspace_root=os.getcwd()
+                )
                 async for event in agen:
                     q.put(event)
             except Exception as e:
                 q.put(e)
             finally:
                 q.put(None)
+
         asyncio.run(task())
 
     t = threading.Thread(target=run_async)
@@ -748,29 +948,347 @@ def ai_agent_handle_pro(user_input: str, retriever=None, history=None, **kwargs)
         if item is None:
             break
         if isinstance(item, Exception):
-            yield {"type": "raw_response", "content": f"\n\n> ❌ **Iris Pro Error:** {item}"}
+            yield {
+                "type": "raw_response",
+                "content": f"\n\n> ❌ **Iris Pro Error:** {item}",
+            }
             break
         yield item
 
+
+def _handle_check_storage(action_dict: dict) -> str:
+    """Cross-platform disk usage check using shutil."""
+    import shutil
+    path = action_dict.get("path", "/")
+    if platform.system() == "Windows":
+        path = "C:\\"
+    try:
+        total, used, free = shutil.disk_usage(path)
+        if total == 0:
+            return f"Disk Usage for {path}: Unable to determine (total space is 0)"
+        total_gb = total / (1024**3)
+        used_gb = used / (1024**3)
+        free_gb = free / (1024**3)
+        percent = (used / total) * 100
+        return (
+            f"Disk Usage for {path}:\n"
+            f"  Total: {total_gb:.1f} GB\n"
+            f"  Used:  {used_gb:.1f} GB ({percent:.1f}%)\n"
+            f"  Free:  {free_gb:.1f} GB"
+        )
+    except Exception as e:
+        return f"Failed to check disk usage: {e}"
+
+
+def _dispatch_action(action: str, d: dict) -> str:
+    """Cross-platform action → handler dispatch. Returns None if no native
+    handler exists (caller then falls back to the template table / OI)."""
+    g = d.get  # shorthand
+
+    # ── Browser / web ────────────────────────────────────────────────────────
+    if action == "open_website":
+        return handle_website_from_url(g("url", ""))
+    if action == "web_search":
+        return web_search(g("query", ""))
+    if action == "youtube_video":
+        return handle_youtube_video_from_query(g("query") or g("name", ""))
+    if action == "youtube_channel":
+        return handle_youtube_channel_from_name(g("name") or g("query", ""))
+    if action == "spotify_song":
+        return handle_spotify_song(g("query") or g("name", ""))
+    if action in ("browser_task", "browser_login", "browser_autopilot"):
+        try:
+            from src.browser_agent import (
+                browser_autopilot,
+                browser_login,
+                browser_task,
+            )
+        except Exception as e:
+            return f"Browser automation unavailable: {e}"
+        if action == "browser_login":
+            return browser_login(g("url", ""), g("username", ""), g("password", ""))
+        if action == "browser_task":
+            return browser_task(g("url", ""), g("task", ""))
+        return browser_autopilot(
+            g("url", ""), g("task", ""), resume_path=g("resume_path")
+        )
+
+    # ── Apps / windows ───────────────────────────────────────────────────────
+    if action == "open_app":
+        return handle_app_by_name(g("name", ""))
+    if action == "close_app":
+        return handle_close_app_by_name(g("name", ""))
+    if action == "focus_app":
+        return handle_focus_app(g("name", ""))
+    if action == "open_settings":
+        return handle_open_settings()
+    if action == "open_terminal":
+        return handle_open_terminal(g("command"))
+    if action == "window_close":
+        return handle_window_close()
+    if action == "window_minimize":
+        return handle_window_minimize()
+    if action == "window_maximize":
+        return handle_window_maximize()
+    if action == "window_fullscreen":
+        return handle_window_fullscreen()
+    if action == "switch_tab":
+        return handle_switch_tab(g("direction", "next"))
+
+    # ── Files & folders ──────────────────────────────────────────────────────
+    if action == "open_file":
+        return handle_open_file(g("path", ""))
+    if action == "search_files":
+        return handle_search_files(g("query", ""), g("folder") or g("path", "."))
+    if action == "create_file":
+        return handle_create_file(g("path", ""), g("content", ""))
+    if action == "read_file":
+        return handle_read_file(g("path", ""))
+    if action == "append_file":
+        return handle_append_file(g("path", ""), g("content", ""))
+    if action == "replace_in_file":
+        return handle_replace_in_file(g("path", ""), g("find", ""), g("replace", ""))
+    if action == "fix_file":
+        return handle_fix_file(g("path", ""), g("instructions", ""))
+    if action == "move_file":
+        return handle_move_file(g("src", ""), g("dst", ""))
+    if action == "copy_file":
+        return handle_copy_file(g("src", ""), g("dst", ""))
+    if action == "delete_file":
+        return handle_delete_file(g("path", ""))
+    if action == "create_folder":
+        return handle_create_folder(g("path", ""))
+    if action == "rename_file":
+        return handle_rename_file(g("path", ""), g("new_name", ""))
+    if action == "compress_files":
+        return handle_compress_files(g("paths", []), g("output", ""))
+    if action == "extract_file":
+        return handle_extract_file(g("path", ""), g("dest") or g("dst", "."))
+    if action == "download_file":
+        return handle_download_file(g("url", ""), g("path", ""))
+    if action == "parse_resume":
+        try:
+            from src.browser_agent import parse_resume
+
+            return str(parse_resume(g("path", "")))
+        except Exception as e:
+            return f"Resume parsing unavailable: {e}"
+
+    # ── Terminal / code / vision ─────────────────────────────────────────────
+    if action == "run_command":
+        return handle_run_command(g("command", ""))
+    if action == "run_code":
+        return handle_run_code(g("code", ""))
+    if action == "analyze_image":
+        try:
+            from src.iris import analyze_image
+
+            return analyze_image(
+                g("image_path", ""), g("prompt", "Describe this image in detail.")
+            )
+        except Exception as e:
+            return f"Vision unavailable: {e}"
+    if action == "search_image_web":
+        return handle_search_image_web(g("image_path", ""))
+
+    # ── Dev-tool shims (prefix + run through the auto-installing runner) ──────
+    if action in ("git", "docker", "npm", "pip", "brew", "apt", "winget"):
+        sub = g("command", "")
+        return handle_run_command(f"{action} {sub}".strip())
+
+    # ── Email & communication ────────────────────────────────────────────────
+    if action == "send_email":
+        return handle_email_from_parts(
+            g("to", ""), g("subject", ""), g("body", ""), load_config()
+        )
+
+    # ── Media & audio ────────────────────────────────────────────────────────
+    if action in ("media_play_pause", "media_next", "media_previous", "media_stop"):
+        return handle_media(action.replace("media_", ""))
+    if action == "volume_up":
+        return handle_volume("up")
+    if action == "volume_down":
+        return handle_volume("down")
+    if action == "volume_mute":
+        return handle_volume("mute")
+    if action in ("volume_set", "set_volume"):
+        return handle_volume_set(_pct(g("percent", g("pct", 50))))
+    if action == "say":
+        return handle_say(g("text", ""))
+
+    # ── Display & appearance ─────────────────────────────────────────────────
+    if action == "brightness_up":
+        return handle_brightness("up")
+    if action == "brightness_down":
+        return handle_brightness("down")
+    if action in ("brightness_set", "set_brightness"):
+        return handle_brightness_set(_pct(g("percent", g("pct", 50))))
+    if action == "dark_mode":
+        return handle_dark_mode(g("state", "on"))
+    if action == "night_shift":
+        return handle_night_shift(g("state", "on"))
+    if action == "set_wallpaper":
+        return handle_set_wallpaper(g("path", ""))
+    if action == "screenshot":
+        return handle_screenshot(g("path", "~/Desktop/screenshot.png"))
+    if action == "screen_record":
+        return handle_screen_record(g("path", "~/Desktop/recording.mp4"), int(g("duration", 10)))
+
+    # ── Power & lock ─────────────────────────────────────────────────────────
+    if action == "lock_screen":
+        return handle_lock_screen()
+    if action == "sleep_computer":
+        return handle_sleep()
+    if action == "restart_computer":
+        return handle_restart()
+    if action == "shutdown_computer":
+        return handle_shutdown()
+    if action == "do_not_disturb":
+        return handle_dnd(g("state", "on"))
+
+    # ── System ───────────────────────────────────────────────────────────────
+    if action == "system_info":
+        return get_system_info(g("what", "all"))
+    if action in ("check_storage", "disk_usage", "disk_usage_of"):
+        return _handle_check_storage(d)
+    if action == "kill_process":
+        return handle_kill_process(g("name", ""))
+    if action == "clipboard_copy":
+        return clipboard_copy(g("text", ""))
+    if action == "clipboard_read":
+        return clipboard_read()
+    if action == "set_env":
+        return handle_set_env(g("key", ""), g("value", ""))
+    if action == "notification":
+        return handle_notification(g("title", "Iris"), g("body", ""))
+
+    # ── Network ──────────────────────────────────────────────────────────────
+    if action == "wifi":
+        return handle_wifi(g("state", "on"))
+    if action == "bluetooth":
+        return handle_bluetooth(g("state", "on"))
+    if action == "vpn":
+        return handle_vpn(g("vpn_action") or g("action_type", "connect"), g("name", ""))
+    if action == "network_speed_test":
+        return handle_speed_test()
+    if action == "flush_dns":
+        return handle_flush_dns()
+
+    # ── Miscellaneous ────────────────────────────────────────────────────────
+    if action == "take_note":
+        return handle_take_note(g("content", ""))
+    if action == "empty_trash":
+        return handle_empty_trash()
+    if action == "type_text":
+        return handle_type_text(g("text", ""))
+    if action == "press_keys":
+        return handle_press_keys(g("keys", ""))
+
+    return None
+
+
+def _pct(val) -> int:
+    """Coerce a percent-ish value ('70', '70%', 70) to an int in [0, 100]."""
+    try:
+        return max(0, min(100, int(float(str(val).replace("%", "").strip()))))
+    except (ValueError, TypeError):
+        return 50
+
+
+# Actions whose effects are hard to reverse or shared-state — gate behind a
+# confirmation unless the caller opts into full autonomy.
+_RISKY_ACTIONS = {
+    "delete_file",
+    "shutdown_computer",
+    "restart_computer",
+    "sleep_computer",
+    "empty_trash",
+    "kill_process",
+    "send_email",
+}
+
+_RISKY_CMD_RE = re.compile(
+    r"""(?xi)
+    \brm\s+-[rf]      |   # rm -rf / rm -f
+    \bsudo\b          |
+    \bmkfs\b          |
+    \bdd\s+if=        |
+    \b(shutdown|reboot|halt|poweroff)\b |
+    \bgit\s+push\b    |
+    \bgit\s+reset\s+--hard |
+    >\s*/dev/sd       |
+    :\s*>\s           |   # truncate
+    \bchmod\s+-R\b
+    """
+)
+
+
+def is_risky_action(action_dict: dict) -> bool:
+    """True when an action should be confirmed before running in auto mode."""
+    action = action_dict.get("action", "")
+    if action in _RISKY_ACTIONS:
+        return True
+    if action in ("run_command", "open_terminal"):
+        return bool(_RISKY_CMD_RE.search(str(action_dict.get("command", ""))))
+    return False
+
+
+def _confirm_risky(action_dict: dict) -> bool:
+    """Interactive y/N confirmation for a risky action. Returns True to proceed.
+
+    Non-interactive sessions default to refusing the action (safe default).
+    """
+    if not IS_INTERACTIVE:
+        return False
+    action = action_dict.get("action", "")
+    detail = json.dumps(
+        {k: v for k, v in action_dict.items() if k != "action"}, ensure_ascii=False
+    )
+    if RICH_AVAILABLE:
+        console.print(
+            f"  [bold red]⚠ Confirm risky action[/bold red]: "
+            f"[bold magenta]{action}[/bold magenta] {detail}"
+        )
+        ans = (
+            Prompt.ask("  [bold]Proceed?[/bold]", choices=["y", "n"], default="n")
+            .strip()
+            .lower()
+        )
+    else:
+        ans = input(f"  ⚠ Confirm risky action '{action}' {detail} — proceed? [y/N]: ").strip().lower()
+    return ans == "y"
+
+
 def execute_action_by_dict(action_dict: dict) -> str:
     """
-    Two-tier action executor:
-      1. Try the _LINUX_CMD template table → _exec_shell_cmd()  (offline, instant)
-      2. Unknown/complex actions → _run_oi_task()               (needs LLM)
+    Execute a single action dict.
+      1. Native cross-platform handler via _dispatch_action()   (macOS/Windows/Linux)
+      2. Linux template table → _exec_shell_cmd()               (offline fallback)
+      3. Unknown/complex actions → _run_oi_task()               (needs LLM)
     """
     action = action_dict.get("action", "chat")
 
-    # Pure conversation — nothing to execute
-    if action == "chat":
+    # Pure conversation / loop terminator — nothing to execute
+    if action in ("chat", "finish", "none", ""):
         return ""
 
-    # ── Tier 1: template-based shell execution (no LLM needed) ──────────────
+    # ── Tier 1: native cross-platform handler ────────────────────────────────
+    try:
+        result = _dispatch_action(action, action_dict)
+    except Exception as e:
+        logger.warning(f"[Dispatch] '{action}' raised: {e}")
+        return f"Action '{action}' failed: {e}"
+    if result is not None:
+        logger.info(f"[Action] {action} → handled natively")
+        return result
+
+    # ── Tier 2: Linux template-based shell execution ─────────────────────────
     cmd = _action_dict_to_cmd(action_dict)
     if cmd:
         logger.info(f"[CMD] {action} → {cmd[:100]}")
         return _exec_shell_cmd(cmd)
 
-    # ── Tier 2: delegate to OI chat() for unknown / complex actions ──────────
+    # ── Tier 3: delegate to OI chat() for unknown / complex actions ───────────
     task_parts = [f"Task: {action}"]
     for key, val in action_dict.items():
         if key != "action":
@@ -780,12 +1298,174 @@ def execute_action_by_dict(action_dict: dict) -> str:
     return _run_oi_task(task_description)
 
 
+_AGENT_LOOP_ADDENDUM = """
+
+# ===============================================================================
+# AGENT LOOP PROTOCOL
+# ===============================================================================
+You operate as a multi-step agent. A single request may need several actions.
+
+- Emit exactly ONE JSON action per turn (optionally preceded by a brief <think>).
+- After each action runs, you receive an `OBSERVATION:` message with the result.
+  Read it, then decide the next action.
+- When the task is fully complete, emit:
+  {"action": "finish", "summary": "<one-line summary of what you accomplished>"}
+- If the task is a single step, do that step, then on the next turn emit finish.
+- If an OBSERVATION shows an error, diagnose it and try a different action.
+- Use the "chat" action only for pure conversation that needs no execution.
+"""
+
+
+def _generate_control_action(messages: list, max_tokens: int = 1024) -> str:
+    """Run the local CONTROL model once over `messages`, return raw text."""
+    from src.iris import ModelRole, load_model
+
+    llm = load_model(ModelRole.CONTROL)
+    out = ""
+    for chunk in llm.create_chat_completion(
+        messages=messages, max_tokens=max_tokens, stream=True, temperature=0.1
+    ):
+        delta = chunk["choices"][0].get("delta", {})
+        if "content" in delta and delta["content"]:
+            out += delta["content"]
+    return out
+
+
+def agentic_control_loop(
+    user_query: str,
+    history: list = None,
+    max_steps: int = 8,
+    settings: dict = None,
+    model_callable=None,
+):
+    """Multi-step agent loop for the local CONTROL model.
+
+    Yields the same event dicts the UI/CLI already consume:
+      {"type": "status"|"token"|"action_result"|"raw_response", "content": ...}
+
+    The loop generates one JSON action, executes it (confirming risky ones unless
+    auto_confirm), feeds the result back as an OBSERVATION, and repeats until the
+    model emits {"action": "finish"} / "chat", or max_steps is reached.
+
+    `model_callable(messages) -> str` can be injected for testing; defaults to the
+    local CONTROL model.
+    """
+    history = history or []
+    settings = settings or {}
+    auto_confirm = bool(settings.get("auto_confirm", False))
+    gen = model_callable or _generate_control_action
+
+    sys_prompt = _get_agent_system_prompt() + _AGENT_LOOP_ADDENDUM
+    messages = [{"role": "system", "content": sys_prompt}]
+    for m in history[-6:]:
+        if m.get("role") in ("user", "assistant") and m.get("content"):
+            messages.append({"role": m["role"], "content": m["content"]})
+    messages.append({"role": "user", "content": user_query})
+
+    transcript = []  # human-facing summary of each step
+    parse_failures = 0
+
+    for step in range(max_steps):
+        yield {"type": "status", "content": f"Planning step {step + 1}…"}
+        try:
+            raw = gen(messages)
+        except Exception as e:
+            logger.error(f"[Agent] generation failed: {e}")
+            yield {"type": "status", "content": "Model generation failed."}
+            break
+
+        action_dict = parse_ai_response(raw)
+        if not action_dict:
+            parse_failures += 1
+            if parse_failures >= 2:
+                fail = "I couldn't translate that into an action I can run."
+                yield {"type": "token", "content": fail}
+                yield {"type": "raw_response", "content": fail}
+                if not settings.get("keep_loaded"):
+                    _unload_control_model()
+                return
+            messages.append({"role": "assistant", "content": raw})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "OBSERVATION: Your reply was not valid JSON. Reply with a single JSON action object.",
+                }
+            )
+            continue
+        parse_failures = 0
+
+        action = action_dict.get("action", "chat")
+        messages.append({"role": "assistant", "content": raw})
+
+        # ── Terminal actions ─────────────────────────────────────────────────
+        if action in ("finish", "none"):
+            summary = action_dict.get("summary", "")
+            final = summary or _join_transcript(transcript) or "Done."
+            yield {"type": "token", "content": final}
+            yield {"type": "raw_response", "content": final}
+            if not settings.get("keep_loaded"):
+                _unload_control_model()
+            return
+        if action == "chat":
+            reply = action_dict.get("response", "") or _join_transcript(transcript)
+            yield {"type": "token", "content": reply}
+            yield {"type": "raw_response", "content": reply}
+            if not settings.get("keep_loaded"):
+                _unload_control_model()
+            return
+
+        # ── Confirmation gate ─────────────────────────────────────────────────
+        if is_risky_action(action_dict) and not auto_confirm:
+            if not _confirm_risky(action_dict):
+                obs = f"Action '{action}' was cancelled by the user."
+                transcript.append(obs)
+                yield {"type": "status", "content": obs}
+                messages.append({"role": "user", "content": f"OBSERVATION: {obs}"})
+                continue
+
+        # ── Execute ───────────────────────────────────────────────────────────
+        yield {"type": "status", "content": f"Executing: {action}"}
+        result = execute_action_by_dict(action_dict)
+        result = (result or "Done.").strip()
+        transcript.append(f"{action}: {result}")
+        yield {
+            "type": "action_result",
+            "content": f"Action '{action}' Executed.\nResult:\n{result}",
+        }
+        messages.append(
+            {"role": "user", "content": f"OBSERVATION: {result[:2000]}"}
+        )
+
+    # max_steps reached without an explicit finish
+    final = _join_transcript(transcript) or "Reached the step limit."
+    yield {"type": "status", "content": "Step limit reached."}
+    yield {"type": "token", "content": final}
+    yield {"type": "raw_response", "content": final}
+    if not settings.get("keep_loaded"):
+        _unload_control_model()
+
+
+def _join_transcript(transcript: list) -> str:
+    if not transcript:
+        return ""
+    return "Here's what I did:\n" + "\n".join(f"- {t}" for t in transcript)
+
+
+def _unload_control_model():
+    try:
+        from src.iris import unload_model
+
+        unload_model()
+    except Exception:
+        pass
+
 
 def _open_url(url: str):
     if not url.startswith("http"):
         url = "https://" + url
     log_action("browser", f"Opening {url}")
     webbrowser.open(url)
+
 
 def handle_search_image_web(image_path: str) -> str:
     import os
@@ -797,7 +1477,17 @@ def handle_search_image_web(image_path: str) -> str:
     log_action("search", "Uploading image for reverse search...")
     img_url = None
 
-    cmd1 = ["curl", "-s", "-F", "reqtype=fileupload", "-F", "time=1h", "-F", f"fileToUpload=@{image_path}", "https://litterbox.catbox.moe/api.php"]
+    cmd1 = [
+        "curl",
+        "-s",
+        "-F",
+        "reqtype=fileupload",
+        "-F",
+        "time=1h",
+        "-F",
+        f"fileToUpload=@{image_path}",
+        "https://litterbox.catbox.moe/api.php",
+    ]
     try:
         res = _shell(cmd1, capture_output=True, text=True, timeout=8)
         out = res.stdout.strip()
@@ -808,7 +1498,14 @@ def handle_search_image_web(image_path: str) -> str:
 
     if not img_url:
         import json
-        cmd2 = ["curl", "-s", "-F", f"file=@{image_path}", "https://tmpfiles.org/api/v1/upload"]
+
+        cmd2 = [
+            "curl",
+            "-s",
+            "-F",
+            f"file=@{image_path}",
+            "https://tmpfiles.org/api/v1/upload",
+        ]
         try:
             res = _shell(cmd2, capture_output=True, text=True, timeout=15)
             data = json.loads(res.stdout)
@@ -823,14 +1520,14 @@ def handle_search_image_web(image_path: str) -> str:
 
     bing_url = f"https://www.bing.com/images/search?view=detailv2&iss=sbi&FORM=SBIHMP&q=imgurl:{urllib.parse.quote(img_url)}"
 
-    import urllib.request
-    import ssl
     import re
+    import ssl
+    import urllib.request
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept-Language": "en-US,en;q=0.9",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     }
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
@@ -846,12 +1543,19 @@ def handle_search_image_web(image_path: str) -> str:
         if title_match:
             title = title_match.group(1).replace("- Bing Images", "").strip()
 
-        clean_text = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.IGNORECASE|re.DOTALL)
-        clean_text = re.sub(r'<script[^>]*>.*?</script>', '', clean_text, flags=re.IGNORECASE|re.DOTALL)
+        clean_text = re.sub(
+            r"<style[^>]*>.*?</style>", "", html, flags=re.IGNORECASE | re.DOTALL
+        )
+        clean_text = re.sub(
+            r"<script[^>]*>.*?</script>",
+            "",
+            clean_text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
 
-        clean_text = re.sub(r'<[^>]+>', ' ', clean_text)
+        clean_text = re.sub(r"<[^>]+>", " ", clean_text)
 
-        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+        clean_text = re.sub(r"\s+", " ", clean_text).strip()
 
         return f"Silently performed reverse image search via Bing.\n\nPage Title: {title}\n\nVisible Page Text Snippet:\n{clean_text[:1000]}"
     except Exception as e:
@@ -860,14 +1564,17 @@ def handle_search_image_web(image_path: str) -> str:
 
     return "Silently searched Bing Visual Search, but could not reliably extract the visual match."
 
+
 def handle_website(match: re.Match):
     url = match.group(1).strip()
     _open_url(url)
     return f"Opening {url} in your browser."
 
+
 def handle_website_from_url(url: str):
     _open_url(url)
     return f"Opening {url}."
+
 
 def _launch_app(cmd: str):
     system = platform.system()
@@ -886,15 +1593,19 @@ def _launch_app(cmd: str):
             logger.warning(f"  [ERROR] Could not launch on Windows: {e}")
             return False
         try:
-            _popen(cmd, shell=True, stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
+            _popen(
+                cmd, shell=True, stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL
+            )
             return True
         except Exception as e2:
             logger.warning(f"  [ERROR] Could not launch: {e2}")
             return False
 
+
 def handle_app(match: re.Match, config: dict):
     app_name = match.group(1).strip().lower()
     return handle_app_by_name(app_name, config)
+
 
 def _resolve_app_command(app_name: str, config: dict = None):
     if config is None:
@@ -906,11 +1617,11 @@ def _resolve_app_command(app_name: str, config: dict = None):
             if key in app_name.lower() or app_name.lower() in key:
                 cmd = val
                 break
-                
+
     if cmd and platform.system() != "Windows":
         if cmd.lower().endswith(".exe") or cmd.lower().startswith("shell:"):
             cmd = None
-            
+
     if not cmd and platform.system() == "Linux":
         linux_defaults = {
             "settings": "gnome-control-center",
@@ -951,19 +1662,25 @@ def _resolve_app_command(app_name: str, config: dict = None):
             "screenshot": "gnome-screenshot",
             "scanner": "simple-scan",
             "help": "yelp",
-            "browser": "firefox"
+            "browser": "firefox",
         }
         for k, v in linux_defaults.items():
             if k in app_name.lower() or app_name.lower() in k:
                 cmd = v
                 break
-        
+
         if not cmd:
-            import glob, re
-            desktop_files = glob.glob("/usr/share/applications/*.desktop") + glob.glob(os.path.expanduser("~/.local/share/applications/*.desktop"))
+            import glob
+            import re
+
+            desktop_files = glob.glob("/usr/share/applications/*.desktop") + glob.glob(
+                os.path.expanduser("~/.local/share/applications/*.desktop")
+            )
             for desktop_file in desktop_files:
                 try:
-                    with open(desktop_file, "r", encoding="utf-8", errors="ignore") as f:
+                    with open(
+                        desktop_file, "r", encoding="utf-8", errors="ignore"
+                    ) as f:
                         name = ""
                         exec_cmd = ""
                         for line in f:
@@ -973,12 +1690,16 @@ def _resolve_app_command(app_name: str, config: dict = None):
                                 exec_cmd = line.split("=", 1)[1].strip()
                             if name and exec_cmd:
                                 break
-                        if name and (app_name.lower() in name or name in app_name.lower()) and exec_cmd:
-                            cmd = re.sub(r'%[a-zA-Z]', '', exec_cmd).strip()
+                        if (
+                            name
+                            and (app_name.lower() in name or name in app_name.lower())
+                            and exec_cmd
+                        ):
+                            cmd = re.sub(r"%[a-zA-Z]", "", exec_cmd).strip()
                             break
                 except Exception:
                     continue
-    
+
     if not cmd and platform.system() == "Windows":
         windows_defaults = {
             "settings": "ms-settings:",
@@ -998,17 +1719,24 @@ def _resolve_app_command(app_name: str, config: dict = None):
             "control panel": "control",
             "word": "winword",
             "excel": "excel",
-            "powerpoint": "powerpnt"
+            "powerpoint": "powerpnt",
         }
         cmd = windows_defaults.get(app_name.lower())
 
         if not cmd:
             try:
-                import subprocess, json
+                import json
+                import subprocess
+
                 CREATE_NO_WINDOW = 0x08000000
                 safe_name = app_name.replace("'", "''")
                 ps_cmd = f"$n='{safe_name}'; Get-StartApps | Where-Object {{ $_.Name.ToLower().Contains($n.ToLower()) }} | Select-Object -First 1 AppID | ConvertTo-Json"
-                res = _shell(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+                res = _shell(
+                    ["powershell", "-NoProfile", "-Command", ps_cmd],
+                    capture_output=True,
+                    text=True,
+                    creationflags=CREATE_NO_WINDOW,
+                )
                 if res.returncode == 0 and res.stdout.strip():
                     data = json.loads(res.stdout)
                     if data and "AppID" in data:
@@ -1020,6 +1748,7 @@ def _resolve_app_command(app_name: str, config: dict = None):
         cmd = app_name
     return cmd
 
+
 def handle_app_by_name(app_name: str, config: dict = None):
     cmd = _resolve_app_command(app_name, config)
     log_action("app", f"Launching: {cmd}")
@@ -1029,6 +1758,7 @@ def handle_app_by_name(app_name: str, config: dict = None):
     else:
         return f"I couldn't find '{app_name}'. Add it to {CONFIG_FILE} under 'apps'."
 
+
 def handle_close_app_by_name(app_name: str, config: dict = None):
     cmd = _resolve_app_command(app_name, config)
     exec_name = extract_executable_name(cmd)
@@ -1036,6 +1766,7 @@ def handle_close_app_by_name(app_name: str, config: dict = None):
         exec_name = app_name
     log_action("app", f"Closing app: {exec_name}")
     return handle_kill_process(exec_name)
+
 
 def handle_open_settings():
     system = platform.system()
@@ -1052,12 +1783,16 @@ def handle_open_settings():
     except Exception as e:
         return f"Failed to open settings: {e}"
 
+
 def _youtube_search_url(query: str) -> str:
     q = urllib.parse.quote_plus(query)
     return f"https://www.youtube.com/results?search_query={q}"
 
+
 def _youtube_find_first_video(query: str) -> str | None:
-    search_url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote_plus(query)
+    search_url = (
+        "https://www.youtube.com/results?search_query=" + urllib.parse.quote_plus(query)
+    )
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -1089,6 +1824,7 @@ def _youtube_find_first_video(query: str) -> str | None:
     if video_ids:
         return f"https://www.youtube.com/watch?v={video_ids[0]}"
     return None
+
 
 def _youtube_find_channel(query: str) -> str | None:
     search_url = (
@@ -1131,8 +1867,10 @@ def _youtube_find_channel(query: str) -> str | None:
         return f"https://www.youtube.com{handles[0]}"
     return None
 
+
 def handle_youtube_video(match: re.Match):
     return handle_youtube_video_from_query(match.group(1).strip())
+
 
 def handle_youtube_video_from_query(query: str):
     log_action("youtube", f"Searching for video: '{query}'")
@@ -1145,8 +1883,10 @@ def handle_youtube_video_from_query(query: str):
         _open_url(search_url)
         return f"Searching YouTube for '{query}'."
 
+
 def handle_youtube_channel(match: re.Match):
     return handle_youtube_channel_from_name(match.group(1).strip())
+
 
 def handle_youtube_channel_from_name(name: str):
     log_action("youtube", f"Searching for channel: '{name}'")
@@ -1159,21 +1899,26 @@ def handle_youtube_channel_from_name(name: str):
         _open_url(search_url)
         return f"Searching YouTube for channel '{name}'."
 
+
 def handle_spotify(match: re.Match):
     return handle_spotify_song(match.group(1).strip())
+
 
 def handle_spotify_song(query: str):
     log_action("spotify", f"Searching for: '{query}'")
     import urllib.parse
+
     q = urllib.parse.quote(query)
     url = f"https://open.spotify.com/search/{q}"
     _open_url(url)
     return f"Playing '{query}' on Spotify."
 
+
 def _resolve_contact(raw: str, contacts: dict) -> str:
     if raw and "@" in raw:
         return raw.strip()
     return contacts.get(raw.strip().lower(), raw or "")
+
 
 def _interactive_email_build(config: dict) -> dict | None:
     if not IS_INTERACTIVE:
@@ -1181,7 +1926,9 @@ def _interactive_email_build(config: dict) -> dict | None:
 
     contacts = config.get("email", {}).get("contacts", {})
     if RICH_AVAILABLE:
-        console.print("\n[bold cyan]── Compose Email ──────────────────────────────[/bold cyan]")
+        console.print(
+            "\n[bold cyan]── Compose Email ──────────────────────────────[/bold cyan]"
+        )
         raw_to = Prompt.ask("  [bold yellow]To (name or email)[/bold yellow]").strip()
     else:
         logger.info("\n  ── Compose Email ──────────────────────────────")
@@ -1192,17 +1939,27 @@ def _interactive_email_build(config: dict) -> dict | None:
     to_addr = _resolve_contact(raw_to, contacts)
     if not to_addr or "@" not in to_addr:
         if RICH_AVAILABLE:
-            console.print(f"  [red][!] '{raw_to}' not found in contacts and doesn't look like an email.[/red]")
-            to_addr = Prompt.ask("  [bold yellow]Enter full email address[/bold yellow]").strip()
+            console.print(
+                f"  [red][!] '{raw_to}' not found in contacts and doesn't look like an email.[/red]"
+            )
+            to_addr = Prompt.ask(
+                "  [bold yellow]Enter full email address[/bold yellow]"
+            ).strip()
         else:
-            logger.info(f"  [!] '{raw_to}' not found in contacts and doesn't look like an email.")
+            logger.info(
+                f"  [!] '{raw_to}' not found in contacts and doesn't look like an email."
+            )
             to_addr = input("  Enter full email address: ").strip()
         if not to_addr:
             return None
 
     if RICH_AVAILABLE:
-        subject = Prompt.ask("  [bold yellow]Subject[/bold yellow]", default="(no subject)").strip()
-        console.print("  [bold yellow]Body[/bold yellow] (type [bold green]END[/bold green] on a new line to finish):")
+        subject = Prompt.ask(
+            "  [bold yellow]Subject[/bold yellow]", default="(no subject)"
+        ).strip()
+        console.print(
+            "  [bold yellow]Body[/bold yellow] (type [bold green]END[/bold green] on a new line to finish):"
+        )
     else:
         subject = input("  Subject: ").strip() or "(no subject)"
         logger.info("  Body (type END on a new line to finish):")
@@ -1217,6 +1974,7 @@ def _interactive_email_build(config: dict) -> dict | None:
         lines.append(line)
     body = "\n".join(lines).strip()
     return {"to": to_addr, "subject": subject, "body": body}
+
 
 def _send_email(to: str, subject: str, body: str, config: dict) -> str:
     email_cfg = config.get("email", {})
@@ -1243,11 +2001,13 @@ def _send_email(to: str, subject: str, body: str, config: dict) -> str:
     except Exception as e:
         return f"Failed to send email: {e}"
 
+
 def handle_email(match: re.Match, config: dict) -> str:
     to_raw = (match.group("to") or "").strip()
     subject = (match.group("subject") or "").strip()
     body = (match.group("body") or "").strip()
     return handle_email_from_parts(to_raw, subject, body, config)
+
 
 def handle_email_from_parts(to_raw: str, subject: str, body: str, config: dict) -> str:
     contacts = config.get("email", {}).get("contacts", {})
@@ -1261,15 +2021,23 @@ def handle_email_from_parts(to_raw: str, subject: str, body: str, config: dict) 
         if not subject:
             if IS_INTERACTIVE:
                 if RICH_AVAILABLE:
-                    subject = Prompt.ask(f"  [bold yellow]Subject for email to {to_addr}[/bold yellow]", default="(no subject)").strip()
+                    subject = Prompt.ask(
+                        f"  [bold yellow]Subject for email to {to_addr}[/bold yellow]",
+                        default="(no subject)",
+                    ).strip()
                 else:
-                    subject = input(f"  Subject for email to {to_addr}: ").strip() or "(no subject)"
+                    subject = (
+                        input(f"  Subject for email to {to_addr}: ").strip()
+                        or "(no subject)"
+                    )
             else:
                 subject = "(no subject)"
         if not body:
             if IS_INTERACTIVE:
                 if RICH_AVAILABLE:
-                    console.print("  [bold yellow]Body[/bold yellow] (type [bold green]END[/bold green] on a new line to finish):")
+                    console.print(
+                        "  [bold yellow]Body[/bold yellow] (type [bold green]END[/bold green] on a new line to finish):"
+                    )
                 else:
                     logger.info("  Body (type END on a new line to finish):")
                 lines = []
@@ -1287,11 +2055,19 @@ def handle_email_from_parts(to_raw: str, subject: str, body: str, config: dict) 
 
     if IS_INTERACTIVE:
         if RICH_AVAILABLE:
-            console.print(f"\n[bold cyan]── Preview ─────────────────────────────────[/bold cyan]")
+            console.print(
+                f"\n[bold cyan]── Preview ─────────────────────────────────[/bold cyan]"
+            )
             console.print(f"  [bold yellow]To:[/bold yellow]      {to_addr}")
             console.print(f"  [bold yellow]Subject:[/bold yellow] {subject}")
             console.print(f"  [bold yellow]Body:[/bold yellow]\n{body}\n")
-            confirm = Prompt.ask("  [bold green]Send?[/bold green]", choices=["y", "n"], default="n").strip().lower()
+            confirm = (
+                Prompt.ask(
+                    "  [bold green]Send?[/bold green]", choices=["y", "n"], default="n"
+                )
+                .strip()
+                .lower()
+            )
         else:
             logger.info(f"\n  ── Preview ─────────────────────────────────")
             logger.info(f"  To:      {to_addr}")
@@ -1301,6 +2077,7 @@ def handle_email_from_parts(to_raw: str, subject: str, body: str, config: dict) 
         if confirm != "y":
             return "Email cancelled."
     return _send_email(to_addr, subject, body, config)
+
 
 def handle_open_file(path_str: str):
     path = Path(path_str).expanduser().resolve()
@@ -1318,6 +2095,7 @@ def handle_open_file(path_str: str):
     except Exception as e:
         return f"Could not open {path}: {e}"
 
+
 def handle_search_files(query: str, folder: str):
     folder_path = Path(folder).expanduser().resolve()
     if not folder_path.is_dir():
@@ -1334,152 +2112,155 @@ def handle_search_files(query: str, folder: str):
         return f"No files or folders matching '{query}' found."
     out = "Found:\n" + "\n".join(results[:10])
     if len(results) > 10:
-        out += f"\n... and {len(results)-10} more."
+        out += f"\n... and {len(results) - 10} more."
     return out
 
+
 COMMAND_PACKAGE_MAP = {
-    "ffmpeg": {
-        "Windows": "Gyan.FFmpeg",
-        "Darwin": "ffmpeg",
-        "Linux": "ffmpeg"
-    },
-    "git": {
-        "Windows": "Git.Git",
-        "Darwin": "git",
-        "Linux": "git"
-    },
-    "node": {
-        "Windows": "OpenJS.NodeJS",
-        "Darwin": "node",
-        "Linux": "nodejs"
-    },
-    "npm": {
-        "Windows": "OpenJS.NodeJS",
-        "Darwin": "node",
-        "Linux": "npm"
-    },
-    "npx": {
-        "Windows": "OpenJS.NodeJS",
-        "Darwin": "node",
-        "Linux": "npm"
-    },
-    "curl": {
-        "Windows": "cURL.cURL",
-        "Darwin": "curl",
-        "Linux": "curl"
-    },
-    "wget": {
-        "Windows": "GNU.Wget",
-        "Darwin": "wget",
-        "Linux": "wget"
-    },
-    "jq": {
-        "Windows": "jqlang.jq",
-        "Darwin": "jq",
-        "Linux": "jq"
-    },
+    "ffmpeg": {"Windows": "Gyan.FFmpeg", "Darwin": "ffmpeg", "Linux": "ffmpeg"},
+    "git": {"Windows": "Git.Git", "Darwin": "git", "Linux": "git"},
+    "node": {"Windows": "OpenJS.NodeJS", "Darwin": "node", "Linux": "nodejs"},
+    "npm": {"Windows": "OpenJS.NodeJS", "Darwin": "node", "Linux": "npm"},
+    "npx": {"Windows": "OpenJS.NodeJS", "Darwin": "node", "Linux": "npm"},
+    "curl": {"Windows": "cURL.cURL", "Darwin": "curl", "Linux": "curl"},
+    "wget": {"Windows": "GNU.Wget", "Darwin": "wget", "Linux": "wget"},
+    "jq": {"Windows": "jqlang.jq", "Darwin": "jq", "Linux": "jq"},
     "pandoc": {
         "Windows": "JohnMacFarlane.Pandoc",
         "Darwin": "pandoc",
-        "Linux": "pandoc"
+        "Linux": "pandoc",
     },
     "graphviz": {
         "Windows": "Graphviz.Graphviz",
         "Darwin": "graphviz",
-        "Linux": "graphviz"
+        "Linux": "graphviz",
     },
-    "dot": {
-        "Windows": "Graphviz.Graphviz",
-        "Darwin": "graphviz",
-        "Linux": "graphviz"
-    },
-    "nircmd": {
-        "Windows": "NirSoft.NirCmd",
-        "Darwin": None,
-        "Linux": None
-    },
+    "dot": {"Windows": "Graphviz.Graphviz", "Darwin": "graphviz", "Linux": "graphviz"},
+    "nircmd": {"Windows": "NirSoft.NirCmd", "Darwin": None, "Linux": None},
     "tesseract": {
         "Windows": "UB-Mannheim.TesseractOCR",
         "Darwin": "tesseract",
-        "Linux": "tesseract-ocr"
+        "Linux": "tesseract-ocr",
     },
     "python": {
         "Windows": "Python.Python.3.11",
         "Darwin": "python3",
-        "Linux": "python3"
+        "Linux": "python3",
     },
     "python3": {
         "Windows": "Python.Python.3.11",
         "Darwin": "python3",
-        "Linux": "python3"
+        "Linux": "python3",
     },
-    "make": {
-        "Windows": "Ezwinports.Make",
-        "Darwin": "make",
-        "Linux": "make"
-    },
+    "make": {"Windows": "Ezwinports.Make", "Darwin": "make", "Linux": "make"},
     "docker": {
         "Windows": "Docker.DockerDesktop",
         "Darwin": "docker",
-        "Linux": "docker.io"
-    }
+        "Linux": "docker.io",
+    },
 }
 
 SHELL_BUILTINS = {
     # Windows
-    "dir", "cd", "echo", "copy", "del", "md", "mkdir", "rd", "rmdir", "type", 
-    "ren", "rename", "move", "cls", "ver", "vol", "path", "set", "exit", "pause", 
-    "prompt", "title", "start",
+    "dir",
+    "cd",
+    "echo",
+    "copy",
+    "del",
+    "md",
+    "mkdir",
+    "rd",
+    "rmdir",
+    "type",
+    "ren",
+    "rename",
+    "move",
+    "cls",
+    "ver",
+    "vol",
+    "path",
+    "set",
+    "exit",
+    "pause",
+    "prompt",
+    "title",
+    "start",
     # Unix
-    "pwd", "local", "export", "alias", "unalias", "read", "unset", "history", 
-    "builtin", "bg", "fg", "jobs", "ls"
+    "pwd",
+    "local",
+    "export",
+    "alias",
+    "unalias",
+    "read",
+    "unset",
+    "history",
+    "builtin",
+    "bg",
+    "fg",
+    "jobs",
+    "ls",
 }
+
 
 def extract_executable_name(command_str: str) -> str:
     import shlex
+
     try:
         tokens = shlex.split(command_str)
     except Exception:
         tokens = command_str.split()
-    
+
     if not tokens:
         return ""
-    
+
     # Filter out environment variables at the start (e.g. VAR=value)
     start_idx = 0
-    while start_idx < len(tokens) and "=" in tokens[start_idx] and not tokens[start_idx].startswith("-"):
+    while (
+        start_idx < len(tokens)
+        and "=" in tokens[start_idx]
+        and not tokens[start_idx].startswith("-")
+    ):
         start_idx += 1
-        
+
     if start_idx >= len(tokens):
         return ""
-        
+
     exec_path = tokens[start_idx]
     # Get the basename without extension
     basename = os.path.basename(exec_path)
     name, ext = os.path.splitext(basename)
     return name.lower()
 
+
 def reload_system_path():
     system = platform.system()
     if system == "Windows":
         try:
             import winreg
+
             paths = []
             # Read user PATH
             try:
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ) as key:
+                with winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ
+                ) as key:
                     user_path, _ = winreg.QueryValueEx(key, "Path")
                     paths.extend(user_path.split(";"))
             except Exception:
                 pass
             # Read system PATH
             try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"System\CurrentControlSet\Control\Session Manager\Environment", 0, winreg.KEY_READ) as key:
+                with winreg.OpenKey(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    r"System\CurrentControlSet\Control\Session Manager\Environment",
+                    0,
+                    winreg.KEY_READ,
+                ) as key:
                     sys_path, _ = winreg.QueryValueEx(key, "Path")
                     paths.extend(sys_path.split(";"))
             except Exception:
                 pass
-            
+
             path_list = []
             for p in paths:
                 p_str = os.path.expandvars(p.strip())
@@ -1489,24 +2270,29 @@ def reload_system_path():
                 os.environ["PATH"] = ";".join(path_list)
                 logger.info("[System] Windows PATH reloaded from registry.")
         except Exception as e:
-            logger.warning(f"[Warning] Failed to reload Windows PATH from registry: {e}")
+            logger.warning(
+                f"[Warning] Failed to reload Windows PATH from registry: {e}"
+            )
     elif system == "Darwin":
         # Apple Silicon Homebrew path
         brew_bin = "/opt/homebrew/bin"
         if brew_bin not in os.environ.get("PATH", ""):
             os.environ["PATH"] = brew_bin + os.path.pathsep + os.environ.get("PATH", "")
 
+
 def install_command(exec_name: str) -> bool:
     system = platform.system()
     pkg_name = exec_name
-    
+
     if exec_name in COMMAND_PACKAGE_MAP:
         pkg_name = COMMAND_PACKAGE_MAP[exec_name].get(system)
         if not pkg_name:
             log_action("system", f"No mapped package for '{exec_name}' on {system}.")
             return False
 
-    log_action("system", f"Attempting to install '{pkg_name}' via platform package manager...")
+    log_action(
+        "system", f"Attempting to install '{pkg_name}' via platform package manager..."
+    )
 
     if system == "Windows":
         if not shutil.which("winget"):
@@ -1514,29 +2300,55 @@ def install_command(exec_name: str) -> bool:
             if pkg_name == "NirSoft.NirCmd":
                 log_action("system", "Attempting manual download of NirCmd...")
                 try:
+                    import io
                     import urllib.request
                     import zipfile
-                    import io
+
                     url = "https://www.nirsoft.net/utils/nircmd.zip"
-                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                    req = urllib.request.Request(
+                        url, headers={"User-Agent": "Mozilla/5.0"}
+                    )
                     with urllib.request.urlopen(req, timeout=15) as response:
                         with zipfile.ZipFile(io.BytesIO(response.read())) as z:
-                            target_dir = os.path.join(os.path.expanduser("~"), ".iris_bin")
+                            target_dir = os.path.join(
+                                os.path.expanduser("~"), ".iris_bin"
+                            )
                             os.makedirs(target_dir, exist_ok=True)
                             z.extract("nircmd.exe", target_dir)
-                            
+
                             try:
                                 import winreg
-                                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE) as key:
+
+                                with winreg.OpenKey(
+                                    winreg.HKEY_CURRENT_USER,
+                                    "Environment",
+                                    0,
+                                    winreg.KEY_READ | winreg.KEY_WRITE,
+                                ) as key:
                                     user_path, _ = winreg.QueryValueEx(key, "Path")
                                     if target_dir not in user_path.split(";"):
-                                        updated_path = user_path.rstrip(";") + ";" + target_dir
-                                        winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, updated_path)
+                                        updated_path = (
+                                            user_path.rstrip(";") + ";" + target_dir
+                                        )
+                                        winreg.SetValueEx(
+                                            key,
+                                            "Path",
+                                            0,
+                                            winreg.REG_EXPAND_SZ,
+                                            updated_path,
+                                        )
                             except Exception as e:
-                                log_action("system", f"Failed to update user PATH registry: {e}")
-                            
-                            os.environ["PATH"] = target_dir + os.pathsep + os.environ.get("PATH", "")
-                            log_action("system", "Successfully installed NirCmd manually.")
+                                log_action(
+                                    "system",
+                                    f"Failed to update user PATH registry: {e}",
+                                )
+
+                            os.environ["PATH"] = (
+                                target_dir + os.pathsep + os.environ.get("PATH", "")
+                            )
+                            log_action(
+                                "system", "Successfully installed NirCmd manually."
+                            )
                             return True
                 except Exception as e:
                     log_action("system", f"Manual download of NirCmd failed: {e}")
@@ -1550,7 +2362,10 @@ def install_command(exec_name: str) -> bool:
             reload_system_path()
             return True
         else:
-            log_action("system", f"winget installation failed (Exit {res.returncode}): {res.stderr or res.stdout}")
+            log_action(
+                "system",
+                f"winget installation failed (Exit {res.returncode}): {res.stderr or res.stdout}",
+            )
             return False
 
     elif system == "Darwin":
@@ -1565,7 +2380,10 @@ def install_command(exec_name: str) -> bool:
             reload_system_path()
             return True
         else:
-            log_action("system", f"brew installation failed (Exit {res.returncode}): {res.stderr or res.stdout}")
+            log_action(
+                "system",
+                f"brew installation failed (Exit {res.returncode}): {res.stderr or res.stdout}",
+            )
             return False
 
     elif system == "Linux":
@@ -1579,7 +2397,10 @@ def install_command(exec_name: str) -> bool:
         elif shutil.which("pacman"):
             cmd = f"sudo pacman -S --noconfirm {pkg_name}"
         else:
-            log_action("system", "No supported Linux package manager found (apt, dnf, yum, pacman).")
+            log_action(
+                "system",
+                "No supported Linux package manager found (apt, dnf, yum, pacman).",
+            )
             return False
 
         log_action("system", f"Running: {cmd}")
@@ -1588,10 +2409,14 @@ def install_command(exec_name: str) -> bool:
             log_action("system", f"Successfully installed '{pkg_name}'.")
             return True
         else:
-            log_action("system", f"Linux installation failed (Exit {res.returncode}): {res.stderr or res.stdout}")
+            log_action(
+                "system",
+                f"Linux installation failed (Exit {res.returncode}): {res.stderr or res.stdout}",
+            )
             return False
 
     return False
+
 
 def is_command_missing_error(code: int, stderr: str, exec_name: str) -> bool:
     if code in (9009, 127):
@@ -1601,27 +2426,40 @@ def is_command_missing_error(code: int, stderr: str, exec_name: str) -> bool:
         return True
     if "command not found" in lower_err:
         return True
-    if exec_name and "no such file or directory" in lower_err and exec_name in lower_err:
+    if (
+        exec_name
+        and "no such file or directory" in lower_err
+        and exec_name in lower_err
+    ):
         return True
     return False
 
+
 def handle_run_command(command: str):
     cmd_lower = command.strip().lower()
-    if platform.system() == "Windows" and (cmd_lower.startswith("open ") or cmd_lower.startswith("start ")):
-        app_name = command.strip()[command.strip().find(" ")+1:].strip()
-        log_action("intercept", f"Redirecting shell command '{command}' to native Windows app launcher.")
+    if platform.system() == "Windows" and (
+        cmd_lower.startswith("open ") or cmd_lower.startswith("start ")
+    ):
+        app_name = command.strip()[command.strip().find(" ") + 1 :].strip()
+        log_action(
+            "intercept",
+            f"Redirecting shell command '{command}' to native Windows app launcher.",
+        )
         return handle_app_by_name(app_name, load_config())
-        
+
     log_action("terminal", f"Running: {command}")
-    
+
     exec_name = extract_executable_name(command)
     is_missing = False
     if exec_name and exec_name not in SHELL_BUILTINS:
         if shutil.which(exec_name) is None:
             is_missing = True
-            
+
     if is_missing:
-        log_action("system", f"Command '{exec_name}' appears to be missing. Attempting automatic installation...")
+        log_action(
+            "system",
+            f"Command '{exec_name}' appears to be missing. Attempting automatic installation...",
+        )
         installed = install_command(exec_name)
         if not installed:
             return f"Error: Command '{exec_name}' is missing and automatic installation failed."
@@ -1632,12 +2470,21 @@ def handle_run_command(command: str):
         stderr = result.stderr.strip()
         code = result.returncode
 
-        if code != 0 and is_command_missing_error(code, stderr, exec_name) and not is_missing:
-            log_action("system", f"Command failed with missing executable error (Exit {code}). Attempting automatic installation...")
+        if (
+            code != 0
+            and is_command_missing_error(code, stderr, exec_name)
+            and not is_missing
+        ):
+            log_action(
+                "system",
+                f"Command failed with missing executable error (Exit {code}). Attempting automatic installation...",
+            )
             installed = install_command(exec_name)
             if installed:
                 log_action("terminal", f"Retrying: {command}")
-                result = _shell(command, shell=True, capture_output=True, text=True, timeout=30)
+                result = _shell(
+                    command, shell=True, capture_output=True, text=True, timeout=30
+                )
                 stdout = result.stdout.strip()
                 stderr = result.stderr.strip()
                 code = result.returncode
@@ -1645,27 +2492,36 @@ def handle_run_command(command: str):
         if code == 0:
             return f"Success (Exit 0):\n{stdout or '(No output)'}"[:1500]
         else:
-            return f"Error (Exit {code}):\n{stderr or stdout or '(No error message)'}"[:1500]
+            return f"Error (Exit {code}):\n{stderr or stdout or '(No error message)'}"[
+                :1500
+            ]
     except _subprocess.TimeoutExpired:
         return "Command timed out after 30 seconds."
     except Exception as e:
         if exec_name and not is_missing:
-            log_action("system", f"Execution failed: {e}. Attempting automatic installation...")
+            log_action(
+                "system", f"Execution failed: {e}. Attempting automatic installation..."
+            )
             installed = install_command(exec_name)
             if installed:
                 try:
                     log_action("terminal", f"Retrying: {command}")
-                    result = _shell(command, shell=True, capture_output=True, text=True, timeout=30)
+                    result = _shell(
+                        command, shell=True, capture_output=True, text=True, timeout=30
+                    )
                     stdout = result.stdout.strip()
                     stderr = result.stderr.strip()
                     code = result.returncode
                     if code == 0:
                         return f"Success (Exit 0):\n{stdout or '(No output)'}"[:1500]
                     else:
-                        return f"Error (Exit {code}):\n{stderr or stdout or '(No error message)'}"[:1500]
+                        return f"Error (Exit {code}):\n{stderr or stdout or '(No error message)'}"[
+                            :1500
+                        ]
                 except Exception as retry_e:
                     return f"Execution failed after retry: {retry_e}"
         return f"Execution failed: {e}"
+
 
 def handle_open_terminal(command: str = None):
     system = platform.system()
@@ -1673,7 +2529,6 @@ def handle_open_terminal(command: str = None):
     try:
         if system == "Darwin":
             if command:
-
                 escaped = command.replace('"', '\\"')
                 script = f'tell application "Terminal" to do script "{escaped}"'
                 _shell(["osascript", "-e", script])
@@ -1689,7 +2544,6 @@ def handle_open_terminal(command: str = None):
                 _popen(["cmd"])
             return "Opened Command Prompt."
         else:
-
             for term in ["gnome-terminal", "xterm", "konsole"]:
                 if shutil.which(term):
                     if command:
@@ -1700,6 +2554,7 @@ def handle_open_terminal(command: str = None):
             return "Could not find a terminal emulator."
     except Exception as e:
         return f"Failed to open terminal: {e}"
+
 
 def handle_volume(action: str):
     system = platform.system()
@@ -1713,12 +2568,12 @@ def handle_volume(action: str):
         else:
             return "Unknown volume action."
     elif system == "Windows":
-
         import ctypes
+
         VK_VOLUME_MUTE = 0xAD
         VK_VOLUME_DOWN = 0xAE
         VK_VOLUME_UP = 0xAF
-        
+
         def send_key(vk):
             ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
             ctypes.windll.user32.keybd_event(vk, 0, 2, 0)
@@ -1735,21 +2590,33 @@ def handle_volume(action: str):
         return f"Success: Volume adjusted ({action})."
     else:
         import shutil
+
         cmd = None
         if shutil.which("wpctl"):
-            if action == "up": cmd = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
-            elif action == "down": cmd = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
-            elif action == "mute": cmd = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
-            else: return "Unknown volume action."
+            if action == "up":
+                cmd = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+            elif action == "down":
+                cmd = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+            elif action == "mute":
+                cmd = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+            else:
+                return "Unknown volume action."
         elif shutil.which("pactl"):
-            if action == "up": cmd = "pactl set-sink-volume @DEFAULT_SINK@ +5%"
-            elif action == "down": cmd = "pactl set-sink-volume @DEFAULT_SINK@ -5%"
-            elif action == "mute": cmd = "pactl set-sink-mute @DEFAULT_SINK@ toggle"
-            else: return "Unknown volume action."
+            if action == "up":
+                cmd = "pactl set-sink-volume @DEFAULT_SINK@ +5%"
+            elif action == "down":
+                cmd = "pactl set-sink-volume @DEFAULT_SINK@ -5%"
+            elif action == "mute":
+                cmd = "pactl set-sink-mute @DEFAULT_SINK@ toggle"
+            else:
+                return "Unknown volume action."
         else:
-            return "Failed to adjust volume: No native audio server found (wpctl/pactl)."
+            return (
+                "Failed to adjust volume: No native audio server found (wpctl/pactl)."
+            )
     log_action("system", f"Adjusting volume: {action}")
     return handle_run_command(cmd)
+
 
 def handle_volume_set(pct: int):
     system = platform.system()
@@ -1792,13 +2659,17 @@ Add-Type -TypeDefinition $code
 """
         try:
             CREATE_NO_WINDOW = 0x08000000
-            _shell(["powershell", "-NoProfile", "-Command", ps_script], creationflags=CREATE_NO_WINDOW)
+            _shell(
+                ["powershell", "-NoProfile", "-Command", ps_script],
+                creationflags=CREATE_NO_WINDOW,
+            )
             log_action("system", f"Setting volume to {pct}%")
             return f"Success: Set volume to {pct}%"
         except Exception as e:
             return f"Failed to set volume: {e}"
     else:
         import shutil
+
         pct = max(0, min(100, pct))
         cmd = None
         if shutil.which("wpctl"):
@@ -1809,6 +2680,7 @@ Add-Type -TypeDefinition $code
             return "Failed to set volume: No native audio server found (wpctl/pactl)."
     log_action("system", f"Setting volume to {pct}%")
     return handle_run_command(cmd)
+
 
 def linux_get_brightness() -> int:
     import os
@@ -1832,8 +2704,10 @@ def linux_get_brightness() -> int:
     # 2. Native GNOME Mutter D-Bus (Wayland/X11 Ubuntu default)
     if shutil.which("gdbus"):
         res = _shell(
-            'gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.freedesktop.DBus.Properties.Get org.gnome.Mutter.DisplayConfig Backlight',
-            shell=True, capture_output=True, text=True
+            "gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.freedesktop.DBus.Properties.Get org.gnome.Mutter.DisplayConfig Backlight",
+            shell=True,
+            capture_output=True,
+            text=True,
         )
         if res.returncode == 0:
             max_match = re.search(r"'max':\s*<(\d+)>", res.stdout)
@@ -1843,12 +2717,14 @@ def linux_get_brightness() -> int:
                 curr = int(val_match.group(1))
                 if mx > 0:
                     return int((curr / mx) * 100)
-                
+
     # 3. Native KDE D-Bus fallback
     if shutil.which("qdbus"):
         res = _shell(
-            'qdbus org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement/Actions/BrightnessControl org.kde.Solid.PowerManagement.Actions.BrightnessControl.brightness',
-            shell=True, capture_output=True, text=True
+            "qdbus org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement/Actions/BrightnessControl org.kde.Solid.PowerManagement.Actions.BrightnessControl.brightness",
+            shell=True,
+            capture_output=True,
+            text=True,
         )
         if res.returncode == 0:
             try:
@@ -1858,12 +2734,13 @@ def linux_get_brightness() -> int:
 
     return -1
 
+
 def linux_set_brightness(pct: int) -> bool:
     import os
     import shutil
-    
+
     pct = max(0, min(100, pct))
-    
+
     # 1. Native brightnessctl (Dependency-free on Ubuntu, passwordless)
     if shutil.which("brightnessctl"):
         res = _shell(f"brightnessctl set {pct}%", shell=True, capture_output=True)
@@ -1886,16 +2763,19 @@ def linux_set_brightness(pct: int) -> bool:
                 continue
     if success:
         return True
-            
+
     # 3. Native GNOME Mutter D-Bus (Wayland/X11 Ubuntu default)
     if shutil.which("gdbus"):
         res = _shell(
-            'gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.freedesktop.DBus.Properties.Get org.gnome.Mutter.DisplayConfig Backlight',
-            shell=True, capture_output=True, text=True
+            "gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.freedesktop.DBus.Properties.Get org.gnome.Mutter.DisplayConfig Backlight",
+            shell=True,
+            capture_output=True,
+            text=True,
         )
         if res.returncode == 0:
             import re
-            serial_match = re.search(r'uint32\s+(\d+)', res.stdout)
+
+            serial_match = re.search(r"uint32\s+(\d+)", res.stdout)
             connector_match = re.search(r"'connector':\s*<'([^']+)'", res.stdout)
             max_match = re.search(r"'max':\s*<(\d+)>", res.stdout)
             if serial_match and connector_match and max_match:
@@ -1903,17 +2783,18 @@ def linux_set_brightness(pct: int) -> bool:
                 connector = connector_match.group(1)
                 mx = int(max_match.group(1))
                 target = int((pct / 100.0) * mx)
-                
+
                 set_cmd = f'gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.gnome.Mutter.DisplayConfig.SetBacklight {serial} "{connector}" {target}'
                 set_res = _shell(set_cmd, shell=True, capture_output=True)
                 if set_res.returncode == 0:
                     return True
-            
+
     # 3. Native KDE D-Bus fallback
     if shutil.which("qdbus"):
         res = _shell(
-            f'qdbus org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement/Actions/BrightnessControl org.kde.Solid.PowerManagement.Actions.BrightnessControl.setBrightness {pct}',
-            shell=True, capture_output=True
+            f"qdbus org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement/Actions/BrightnessControl org.kde.Solid.PowerManagement.Actions.BrightnessControl.setBrightness {pct}",
+            shell=True,
+            capture_output=True,
         )
         if res.returncode == 0:
             return True
@@ -1931,13 +2812,14 @@ def linux_set_brightness(pct: int) -> bool:
                 target = int((pct / 100.0) * mx)
                 res = _shell(
                     f"echo {target} | pkexec tee {br_path}",
-                    shell=True, capture_output=True
+                    shell=True,
+                    capture_output=True,
                 )
                 if res.returncode == 0:
                     return True
             except:
                 continue
-                
+
     return False
 
 
@@ -1946,13 +2828,21 @@ def handle_brightness(action: str):
     if system == "Darwin":
         try:
             import ctypes
-            cg = ctypes.CDLL('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
+
+            cg = ctypes.CDLL(
+                "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
+            )
             display_id = cg.CGMainDisplayID()
-            
-            ds = ctypes.CDLL('/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices')
-            ds.DisplayServicesGetBrightness.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_float)]
+
+            ds = ctypes.CDLL(
+                "/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices"
+            )
+            ds.DisplayServicesGetBrightness.argtypes = [
+                ctypes.c_int,
+                ctypes.POINTER(ctypes.c_float),
+            ]
             ds.DisplayServicesGetBrightness.restype = ctypes.c_int
-            
+
             val = ctypes.c_float()
             err = ds.DisplayServicesGetBrightness(display_id, ctypes.byref(val))
             if err == 0:
@@ -1960,11 +2850,17 @@ def handle_brightness(action: str):
                 step = 0.0625
                 new_val = current + step if action == "up" else current - step
                 new_val = max(0.0, min(1.0, new_val))
-                
-                ds.DisplayServicesSetBrightness.argtypes = [ctypes.c_int, ctypes.c_float]
+
+                ds.DisplayServicesSetBrightness.argtypes = [
+                    ctypes.c_int,
+                    ctypes.c_float,
+                ]
                 ds.DisplayServicesSetBrightness.restype = None
                 ds.DisplayServicesSetBrightness(display_id, new_val)
-                log_action("system", f"Adjusted brightness: {action} (from {current:.2f} to {new_val:.2f})")
+                log_action(
+                    "system",
+                    f"Adjusted brightness: {action} (from {current:.2f} to {new_val:.2f})",
+                )
                 return f"Brightness adjusted {action}."
         except Exception as e:
             step = 0.0625
@@ -1989,7 +2885,7 @@ $step = 10
             script += "$new = $current - $step\n"
         else:
             return "Unknown brightness action."
-            
+
         script += """
 if ($new -gt 100) { $new = 100 }
 if ($new -lt 0) { $new = 0 }
@@ -1997,7 +2893,10 @@ $methods.WmiSetBrightness(1, $new)
 """
         try:
             CREATE_NO_WINDOW = 0x08000000
-            _shell(["powershell", "-NoProfile", "-Command", script], creationflags=CREATE_NO_WINDOW)
+            _shell(
+                ["powershell", "-NoProfile", "-Command", script],
+                creationflags=CREATE_NO_WINDOW,
+            )
             log_action("system", f"Adjusted brightness: {action}")
             return f"Brightness adjusted {action}."
         except Exception as e:
@@ -2006,7 +2905,7 @@ $methods.WmiSetBrightness(1, $new)
         # Linux branch
         curr = linux_get_brightness()
         if curr == -1:
-            curr = 50 # Default fallback if we cannot query it
+            curr = 50  # Default fallback if we cannot query it
 
         step = 10
         new_val = curr + step if action == "up" else curr - step
@@ -2016,24 +2915,30 @@ $methods.WmiSetBrightness(1, $new)
         else:
             return "Failed to adjust brightness natively. You may need to grant write permissions to /sys/class/backlight or ensure D-Bus is running."
 
+
 def handle_brightness_set(pct: int):
     system = platform.system()
     if system == "Darwin":
         try:
             import ctypes
-            cg = ctypes.CDLL('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
+
+            cg = ctypes.CDLL(
+                "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
+            )
             display_id = cg.CGMainDisplayID()
-            
-            ds = ctypes.CDLL('/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices')
+
+            ds = ctypes.CDLL(
+                "/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices"
+            )
             ds.DisplayServicesSetBrightness.argtypes = [ctypes.c_int, ctypes.c_float]
             ds.DisplayServicesSetBrightness.restype = None
-            
+
             val = float(pct / 100.0)
             ds.DisplayServicesSetBrightness(display_id, val)
             log_action("system", f"Set brightness to {pct}% natively")
             return f"Brightness set to {pct}%."
         except Exception as e:
-            cmd = f"brightness {pct/100}"
+            cmd = f"brightness {pct / 100}"
             log_action("system", f"Setting brightness via CLI fallback to {pct}%")
             return handle_run_command(cmd)
     elif system == "Windows":
@@ -2041,7 +2946,9 @@ def handle_brightness_set(pct: int):
         try:
             CREATE_NO_WINDOW = 0x08000000
             _shell(cmd, shell=True, creationflags=CREATE_NO_WINDOW)
-            log_action("system", f"Setting brightness to {pct}% natively via PowerShell")
+            log_action(
+                "system", f"Setting brightness to {pct}% natively via PowerShell"
+            )
             return f"Brightness set to {pct}%."
         except Exception as e:
             return f"Failed to set brightness: {e}"
@@ -2052,33 +2959,50 @@ def handle_brightness_set(pct: int):
         else:
             return f"Failed to set brightness to {pct}%. You may need to grant write permissions to /sys/class/backlight or ensure D-Bus is running."
 
+
 def get_system_info(what: str = "all"):
     import platform as pf
+
     info = []
+
     def add(label, value):
         info.append(f"{label}: {value}")
+
     if what in ("cpu", "all"):
         add("CPU", pf.processor())
     if what in ("memory", "all"):
         try:
             import psutil
+
             mem = psutil.virtual_memory()
             add("RAM", f"{mem.total / (1024**3):.1f} GB total, {mem.percent}% used")
         except ImportError:
             if pf.system() == "Windows":
                 try:
-                    import subprocess, json
+                    import json
+                    import subprocess
+
                     CREATE_NO_WINDOW = 0x08000000
                     res = _shell(
-                        ["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize, FreePhysicalMemory | ConvertTo-Json"],
-                        capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
+                        [
+                            "powershell",
+                            "-NoProfile",
+                            "-Command",
+                            "Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize, FreePhysicalMemory | ConvertTo-Json",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        creationflags=CREATE_NO_WINDOW,
                     )
                     data = json.loads(res.stdout)
                     total_kb = float(data["TotalVisibleMemorySize"])
                     free_kb = float(data["FreePhysicalMemory"])
                     used_kb = total_kb - free_kb
                     percent = (used_kb / total_kb) * 100
-                    add("RAM", f"{total_kb / (1024**2):.1f} GB total, {percent:.1f}% used")
+                    add(
+                        "RAM",
+                        f"{total_kb / (1024**2):.1f} GB total, {percent:.1f}% used",
+                    )
                 except:
                     add("RAM", "Install psutil for memory info")
             else:
@@ -2086,6 +3010,7 @@ def get_system_info(what: str = "all"):
     if what in ("disk", "all"):
         try:
             import shutil
+
             path = "C:\\" if pf.system() == "Windows" else "/"
             total, used, free = shutil.disk_usage(path)
             add("Disk", f"{free / (1024**3):.1f} GB free / {total / (1024**3):.1f} GB")
@@ -2094,6 +3019,7 @@ def get_system_info(what: str = "all"):
     if what in ("ip", "all"):
         try:
             import socket
+
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
             ip = s.getsockname()[0]
@@ -2105,28 +3031,37 @@ def get_system_info(what: str = "all"):
         add("Hostname", pf.node())
     return "\n".join(info) if info else "No information available."
 
+
 def clipboard_copy(text: str):
     system = platform.system()
     try:
         if system == "Darwin":
-            _shell("pbcopy", input=text.encode('utf-8'))
+            _shell("pbcopy", input=text)
         elif system == "Windows":
-            _shell("powershell -command Set-Clipboard", input=text.encode('utf-8'))
+            _shell("powershell -command Set-Clipboard", input=text)
         else:
             import shutil
+
             if shutil.which("wl-copy"):
-                _shell("wl-copy", input=text.encode('utf-8'))
+                _shell("wl-copy", input=text)
             elif shutil.which("xclip"):
-                _shell(["xclip", "-selection", "clipboard"], input=text.encode('utf-8'))
+                _shell(["xclip", "-selection", "clipboard"], input=text)
             else:
                 try:
                     import tkinter as tk
-                    r = tk.Tk(); r.withdraw(); r.clipboard_clear(); r.clipboard_append(text); r.update(); r.destroy()
+
+                    r = tk.Tk()
+                    r.withdraw()
+                    r.clipboard_clear()
+                    r.clipboard_append(text)
+                    r.update()
+                    r.destroy()
                 except ImportError:
                     return "Clipboard copy failed: No native clipboard utility (wl-copy, xclip) or python3-tk found."
-        return f"Copied to clipboard: {text[:50]}{'...' if len(text)>50 else ''}"
+        return f"Copied to clipboard: {text[:50]}{'...' if len(text) > 50 else ''}"
     except Exception as e:
         return f"Clipboard copy failed: {e}"
+
 
 def clipboard_read():
     system = platform.system()
@@ -2134,88 +3069,143 @@ def clipboard_read():
         if system == "Darwin":
             content = _shell("pbpaste", capture_output=True, text=True).stdout
         elif system == "Windows":
-            content = _shell("powershell -command Get-Clipboard", capture_output=True, text=True).stdout
+            content = _shell(
+                "powershell -command Get-Clipboard", capture_output=True, text=True
+            ).stdout
         else:
             import shutil
+
             if shutil.which("wl-paste"):
                 content = _shell("wl-paste", capture_output=True, text=True).stdout
             elif shutil.which("xclip"):
-                content = _shell(["xclip", "-selection", "clipboard", "-o"], capture_output=True, text=True).stdout
+                content = _shell(
+                    ["xclip", "-selection", "clipboard", "-o"],
+                    capture_output=True,
+                    text=True,
+                ).stdout
             else:
                 try:
                     import tkinter as tk
-                    r = tk.Tk(); r.withdraw(); content = r.clipboard_get(); r.destroy()
+
+                    r = tk.Tk()
+                    r.withdraw()
+                    content = r.clipboard_get()
+                    r.destroy()
                 except ImportError:
                     return "Clipboard read failed: No native clipboard utility (wl-paste, xclip) or python3-tk found."
         return f"Clipboard: {content[:200]}" if content else "Clipboard is empty."
     except Exception as e:
         return f"Clipboard read failed: {e}"
 
+
 def handle_window_close():
     system = platform.system()
     if system == "Darwin":
-        _shell("osascript -e 'tell application \"System Events\" to keystroke \"w\" using command down'", shell=True)
+        _shell(
+            'osascript -e \'tell application "System Events" to keystroke "w" using command down\'',
+            shell=True,
+        )
     elif system == "Windows":
-        _shell('powershell -Command "(New-Object -ComObject WScript.Shell).SendKeys(\'%{F4}\')"', shell=True)
+        _shell(
+            "powershell -Command \"(New-Object -ComObject WScript.Shell).SendKeys('%{F4}')\"",
+            shell=True,
+        )
     else:
         _shell("xdotool getactivewindow windowclose", shell=True)
     return "Closed window."
 
+
 def handle_window_minimize():
     system = platform.system()
     if system == "Darwin":
-        _shell("osascript -e 'tell application \"System Events\" to keystroke \"m\" using command down'", shell=True)
+        _shell(
+            'osascript -e \'tell application "System Events" to keystroke "m" using command down\'',
+            shell=True,
+        )
     elif system == "Windows":
-        _shell('powershell -Command "(New-Object -ComObject Shell.Application).MinimizeAll()"', shell=True)
+        _shell(
+            'powershell -Command "(New-Object -ComObject Shell.Application).MinimizeAll()"',
+            shell=True,
+        )
     else:
         _shell("xdotool getactivewindow windowminimize", shell=True)
     return "Minimized window."
 
+
 def handle_window_maximize():
     system = platform.system()
     if system == "Darwin":
-        _shell("osascript -e 'tell application \"System Events\" to tell process (name of first application process whose frontmost is true) to click (first button whose subrole is \"AXZoomButton\") of first window'", shell=True)
+        _shell(
+            'osascript -e \'tell application "System Events" to tell process (name of first application process whose frontmost is true) to click (first button whose subrole is "AXZoomButton") of first window\'',
+            shell=True,
+        )
     elif system == "Windows":
-        _shell('powershell -Command "$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys(\'% {MAXIMIZE}\')"', shell=True)
+        _shell(
+            "powershell -Command \"$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('% {MAXIMIZE}')\"",
+            shell=True,
+        )
     else:
         _shell("xdotool getactivewindow windowsize 100% 100%", shell=True)
     return "Maximized window."
 
+
 def handle_window_fullscreen():
     system = platform.system()
     if system == "Darwin":
-        _shell("osascript -e 'tell application \"System Events\" to keystroke \"f\" using {command down, control down}'", shell=True)
+        _shell(
+            'osascript -e \'tell application "System Events" to keystroke "f" using {command down, control down}\'',
+            shell=True,
+        )
     elif system == "Windows":
-        _shell('powershell -Command "(New-Object -ComObject WScript.Shell).SendKeys(\'{F11}\')"', shell=True)
+        _shell(
+            "powershell -Command \"(New-Object -ComObject WScript.Shell).SendKeys('{F11}')\"",
+            shell=True,
+        )
     else:
         _shell("xdotool key F11", shell=True)
     return "Toggled fullscreen."
+
 
 def handle_switch_tab(direction: str):
     system = platform.system()
     if system == "Darwin":
         if direction == "next":
-            _shell("osascript -e 'tell application \"System Events\" to key code 48 using control down'", shell=True)
+            _shell(
+                "osascript -e 'tell application \"System Events\" to key code 48 using control down'",
+                shell=True,
+            )
         else:
-            _shell("osascript -e 'tell application \"System Events\" to key code 48 using {control down, shift down}'", shell=True)
+            _shell(
+                "osascript -e 'tell application \"System Events\" to key code 48 using {control down, shift down}'",
+                shell=True,
+            )
     elif system == "Windows":
         keys = "^{TAB}" if direction == "next" else "^+{TAB}"
-        _shell(f'powershell -Command "(New-Object -ComObject WScript.Shell).SendKeys(\'{keys}\')"', shell=True)
+        _shell(
+            f"powershell -Command \"(New-Object -ComObject WScript.Shell).SendKeys('{keys}')\"",
+            shell=True,
+        )
     else:
         keys = "ctrl+Tab" if direction == "next" else "ctrl+shift+Tab"
         _shell(f"xdotool key {keys}", shell=True)
     return f"Switched tab {direction}."
 
+
 def handle_wifi(state: str) -> str:
     system = platform.system()
     if system == "Darwin":
         try:
-            res = _shell("networksetup -listallhardwareports", shell=True, capture_output=True, text=True)
+            res = _shell(
+                "networksetup -listallhardwareports",
+                shell=True,
+                capture_output=True,
+                text=True,
+            )
             interface = "en0"
             lines = res.stdout.splitlines()
             for i, line in enumerate(lines):
                 if "Wi-Fi" in line and i + 1 < len(lines):
-                    interface = lines[i+1].split()[-1]
+                    interface = lines[i + 1].split()[-1]
                     break
             _shell(f"networksetup -setairportpower {interface} {state}", shell=True)
             return f"Wi-Fi turned {state}."
@@ -2224,7 +3214,9 @@ def handle_wifi(state: str) -> str:
     elif system == "Windows":
         admin_state = "enabled" if state == "on" else "disabled"
         try:
-            _shell(f'netsh interface set interface "Wi-Fi" admin={admin_state}', shell=True)
+            _shell(
+                f'netsh interface set interface "Wi-Fi" admin={admin_state}', shell=True
+            )
             return f"Wi-Fi turned {state}."
         except Exception as e:
             return f"Failed to set Wi-Fi: {e}"
@@ -2235,6 +3227,7 @@ def handle_wifi(state: str) -> str:
         except Exception as e:
             return f"Failed to set Wi-Fi: {e}"
 
+
 def handle_bluetooth(state: str) -> str:
     system = platform.system()
     on_val = "1" if state == "on" else "0"
@@ -2243,13 +3236,16 @@ def handle_bluetooth(state: str) -> str:
             res = _shell(f"blueutil -p {on_val}", shell=True, capture_output=True)
             if res.returncode == 0:
                 return f"Bluetooth turned {state}."
-            _shell("osascript -e 'tell application \"System Events\" to tell secondary click of menu bar item 1 of menu bar 1 of process \"ControlCenter\" to click'", shell=True)
+            _shell(
+                'osascript -e \'tell application "System Events" to tell secondary click of menu bar item 1 of menu bar 1 of process "ControlCenter" to click\'',
+                shell=True,
+            )
             return f"Attempted to set Bluetooth to {state} (install blueutil via brew for full reliability)."
         except Exception as e:
             return f"Failed to set Bluetooth: {e}"
     elif system == "Windows":
         try:
-            _shell('start ms-settings:bluetooth', shell=True)
+            _shell("start ms-settings:bluetooth", shell=True)
             return f"Opened Bluetooth settings to turn it {state}."
         except Exception as e:
             return f"Failed to open Bluetooth settings: {e}"
@@ -2262,25 +3258,33 @@ def handle_bluetooth(state: str) -> str:
             return f"Failed to set Bluetooth: {e}"
     return f"Bluetooth control not supported on {system}."
 
+
 def handle_vpn(action: str, name: str) -> str:
     system = platform.system()
     if system == "Darwin":
-        cmd = f"networksetup -{action}networkservice \"{name}\""
+        cmd = f'networksetup -{action}networkservice "{name}"'
         res = _shell(cmd, shell=True, capture_output=True, text=True)
-        return f"VPN {action} command executed: {res.stdout.strip() or res.stderr.strip()}"
+        return (
+            f"VPN {action} command executed: {res.stdout.strip() or res.stderr.strip()}"
+        )
     elif system == "Windows":
-        cmd = f"rasdial \"{name}\"" if action == "connect" else f"rasdial \"{name}\" /disconnect"
+        cmd = (
+            f'rasdial "{name}"'
+            if action == "connect"
+            else f'rasdial "{name}" /disconnect'
+        )
         _shell(cmd, shell=True)
         return f"VPN {action} command executed."
     elif system == "Linux":
         nmcli_action = "up" if action == "connect" else "down"
-        cmd = f"nmcli con {nmcli_action} id \"{name}\""
+        cmd = f'nmcli con {nmcli_action} id "{name}"'
         res = _shell(cmd, shell=True, capture_output=True, text=True)
         if res.returncode == 0:
             return f"VPN {action} command executed natively."
         else:
             return f"VPN {action} failed: {res.stderr.strip()}"
     return f"VPN control not supported on {system}."
+
 
 def handle_speed_test() -> str:
     system = platform.system()
@@ -2290,6 +3294,7 @@ def handle_speed_test() -> str:
             return res.stdout.strip()
     import time
     import urllib.request
+
     try:
         url = "http://speedtest.tele2.net/10MB.zip"
         start = time.time()
@@ -2301,10 +3306,13 @@ def handle_speed_test() -> str:
     except Exception as e:
         return f"Native speedtest failed: {e}"
 
+
 def handle_flush_dns() -> str:
     system = platform.system()
     if system == "Darwin":
-        _shell("sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder", shell=True)
+        _shell(
+            "sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder", shell=True
+        )
         return "DNS cache flushed (may prompt for sudo password)."
     elif system == "Windows":
         _shell("ipconfig /flushdns", shell=True)
@@ -2313,10 +3321,14 @@ def handle_flush_dns() -> str:
         _shell("resolvectl flush-caches || systemd-resolve --flush-caches", shell=True)
         return "DNS cache flushed."
 
+
 def handle_lock_screen() -> str:
     system = platform.system()
     if system == "Darwin":
-        _shell("osascript -e 'tell application \"System Events\" to keystroke \"q\" using {control down, command down}'", shell=True)
+        _shell(
+            'osascript -e \'tell application "System Events" to keystroke "q" using {control down, command down}\'',
+            shell=True,
+        )
         return "Screen locked."
     elif system == "Windows":
         _shell("rundll32.exe user32.dll,LockWorkStation", shell=True)
@@ -2324,6 +3336,7 @@ def handle_lock_screen() -> str:
     else:
         _shell("xdg-screensaver lock || gnome-screensaver-command -l", shell=True)
         return "Screen locked."
+
 
 def handle_sleep() -> str:
     system = platform.system()
@@ -2337,49 +3350,69 @@ def handle_sleep() -> str:
         _shell("systemctl suspend", shell=True)
         return "Sleeping computer."
 
+
 def handle_restart() -> str:
     system = platform.system()
     if system == "Darwin":
-        _shell("osascript -e 'tell application \"System Events\" to restart'", shell=True)
+        _shell(
+            "osascript -e 'tell application \"System Events\" to restart'", shell=True
+        )
     elif system == "Windows":
         _shell("shutdown /r /t 0", shell=True)
     else:
         _shell("shutdown -r now", shell=True)
     return "Restarting computer..."
 
+
 def handle_shutdown() -> str:
     system = platform.system()
     if system == "Darwin":
-        _shell("osascript -e 'tell application \"System Events\" to shut down'", shell=True)
+        _shell(
+            "osascript -e 'tell application \"System Events\" to shut down'", shell=True
+        )
     elif system == "Windows":
         _shell("shutdown /s /t 0", shell=True)
     else:
         _shell("shutdown -h now", shell=True)
     return "Shutting down computer..."
 
+
 def handle_dnd(state: str) -> str:
     system = platform.system()
     if system == "Darwin":
         pass
     elif system == "Windows":
-        _shell('start ms-settings:quietmoments', shell=True)
+        _shell("start ms-settings:quietmoments", shell=True)
         return f"Opened Focus Assist settings to turn {state}."
     else:
         val = "true" if state == "on" else "false"
-        _shell(f"gsettings set org.gnome.desktop.notifications show-banners {val}", shell=True)
+        _shell(
+            f"gsettings set org.gnome.desktop.notifications show-banners {val}",
+            shell=True,
+        )
     return f"Do Not Disturb set to {state}."
+
 
 def handle_dark_mode(state: str) -> str:
     system = platform.system()
     if system == "Darwin":
         val = "true" if state == "on" else "false"
-        _shell(f"osascript -e 'tell application \"System Events\" to tell appearance preferences to set dark mode to {val}'", shell=True)
+        _shell(
+            f"osascript -e 'tell application \"System Events\" to tell appearance preferences to set dark mode to {val}'",
+            shell=True,
+        )
         return f"Dark mode turned {state}."
     elif system == "Windows":
         try:
             import winreg
+
             val = 0 if state == "on" else 1
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", 0, winreg.KEY_SET_VALUE)
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                0,
+                winreg.KEY_SET_VALUE,
+            )
             winreg.SetValueEx(key, "AppsUseLightTheme", 0, winreg.REG_DWORD, val)
             winreg.SetValueEx(key, "SystemUsesLightTheme", 0, winreg.REG_DWORD, val)
             winreg.CloseKey(key)
@@ -2388,32 +3421,46 @@ def handle_dark_mode(state: str) -> str:
             return f"Failed to set dark mode: {e}"
     else:
         val = "prefer-dark" if state == "on" else "default"
-        _shell(f"gsettings set org.gnome.desktop.interface color-scheme '{val}'", shell=True)
+        _shell(
+            f"gsettings set org.gnome.desktop.interface color-scheme '{val}'",
+            shell=True,
+        )
         return f"Dark mode turned {state}."
+
 
 def handle_night_shift(state: str) -> str:
     system = platform.system()
     if system == "Windows":
-        _shell('start ms-settings:nightlight', shell=True)
+        _shell("start ms-settings:nightlight", shell=True)
         return f"Opened Night Light settings to turn {state}."
     elif system == "Linux":
         val = "true" if state == "on" else "false"
-        _shell(f"gsettings set org.gnome.settings-daemon.plugins.color night-light-enabled {val}", shell=True)
+        _shell(
+            f"gsettings set org.gnome.settings-daemon.plugins.color night-light-enabled {val}",
+            shell=True,
+        )
     return f"Night Shift turned {state}."
+
 
 def handle_set_wallpaper(path: str) -> str:
     system = platform.system()
     resolved_path = os.path.abspath(os.path.expanduser(path))
     if system == "Darwin":
-        cmd = f"osascript -e 'tell application \"Finder\" to set desktop picture to POSIX file \"{resolved_path}\"'"
+        cmd = f'osascript -e \'tell application "Finder" to set desktop picture to POSIX file "{resolved_path}"\''
         _shell(cmd, shell=True)
         return f"Wallpaper set to {resolved_path}."
     elif system == "Windows":
         import ctypes
+
         SPI_SETDESKWALLPAPER = 20
         SPIF_UPDATEINIFILE = 1
         SPIF_SENDWININICHANGE = 2
-        ctypes.windll.user32.SystemParametersInfoW(SPI_SETDESKWALLPAPER, 0, resolved_path, SPIF_UPDATEINIFILE | SPIF_SENDWININICHANGE)
+        ctypes.windll.user32.SystemParametersInfoW(
+            SPI_SETDESKWALLPAPER,
+            0,
+            resolved_path,
+            SPIF_UPDATEINIFILE | SPIF_SENDWININICHANGE,
+        )
         return f"Wallpaper set to {resolved_path}."
     elif system == "Linux":
         try:
@@ -2426,102 +3473,131 @@ def handle_set_wallpaper(path: str) -> str:
             return f"Failed to set wallpaper on Linux: {e}"
     return f"Wallpaper setting not supported on {system}."
 
+
 def handle_screenshot(path: str) -> str:
     resolved_path = os.path.abspath(os.path.expanduser(path))
     system = platform.system()
     if system == "Darwin":
-        _shell(f"screencapture \"{resolved_path}\"", shell=True)
+        _shell(f'screencapture "{resolved_path}"', shell=True)
     elif system == "Windows":
         try:
             from PIL import ImageGrab
+
             img = ImageGrab.grab()
             img.save(resolved_path)
         except Exception:
             return "Failed to save screenshot. Install PIL/Pillow on Windows."
     else:
         import shutil
+
         if shutil.which("gnome-screenshot"):
-            _shell(f"gnome-screenshot -f \"{resolved_path}\"", shell=True)
+            _shell(f'gnome-screenshot -f "{resolved_path}"', shell=True)
         elif shutil.which("spectacle"):
-            _shell(f"spectacle -b -n -o \"{resolved_path}\"", shell=True)
+            _shell(f'spectacle -b -n -o "{resolved_path}"', shell=True)
         elif shutil.which("grim"):
-            _shell(f"grim \"{resolved_path}\"", shell=True)
+            _shell(f'grim "{resolved_path}"', shell=True)
         elif shutil.which("scrot"):
-            _shell(f"scrot \"{resolved_path}\"", shell=True)
+            _shell(f'scrot "{resolved_path}"', shell=True)
         else:
             return "Failed to take screenshot: No native screenshot tool found (gnome-screenshot/spectacle/grim/scrot)."
     return f"Screenshot saved to {resolved_path}."
 
+
 def handle_screen_record(path: str, duration: int) -> str:
     system = platform.system()
     resolved_path = os.path.abspath(os.path.expanduser(path))
-    log_action("system", f"Starting screen recording for {duration} seconds to {resolved_path}...")
-    
+    log_action(
+        "system",
+        f"Starting screen recording for {duration} seconds to {resolved_path}...",
+    )
+
     if system == "Darwin":
-        _popen(f"screencapture -v -V {duration} \"{resolved_path}\"", shell=True)
+        _popen(f'screencapture -v -V {duration} "{resolved_path}"', shell=True)
         return f"Screen recording started for {duration} seconds. Saving to {resolved_path}."
     elif system == "Windows":
         import shutil
+
         if not shutil.which("ffmpeg"):
             return "Screen recording on Windows requires FFmpeg. Please install it (e.g. via Iris install command)."
-        cmd = f"ffmpeg -f gdigrab -framerate 30 -i desktop -t {duration} \"{resolved_path}\""
+        cmd = f'ffmpeg -f gdigrab -framerate 30 -i desktop -t {duration} "{resolved_path}"'
         _popen(cmd, shell=True, creationflags=0x08000000)
         return f"Screen recording started via FFmpeg for {duration} seconds."
     else:
         import shutil
+
         if not shutil.which("ffmpeg"):
             return "Screen recording on Linux requires FFmpeg. Please install it (e.g. sudo apt install ffmpeg)."
-        cmd = f"ffmpeg -f x11grab -framerate 30 -video_size 1920x1080 -i :0.0 -t {duration} \"{resolved_path}\""
+        cmd = f'ffmpeg -f x11grab -framerate 30 -video_size 1920x1080 -i :0.0 -t {duration} "{resolved_path}"'
         _popen(cmd, shell=True)
         return f"Screen recording started via FFmpeg for {duration} seconds."
+
 
 def handle_media(action: str) -> str:
     system = platform.system()
     if system == "Darwin":
         for app in ("Spotify", "Music", "iTunes"):
-            res = _shell(f"osascript -e 'application \"{app}\" is running'", shell=True, capture_output=True, text=True)
+            res = _shell(
+                f"osascript -e 'application \"{app}\" is running'",
+                shell=True,
+                capture_output=True,
+                text=True,
+            )
             if "true" in res.stdout.lower():
                 apple_action = action
-                if action == "play_pause": apple_action = "playpause"
-                _shell(f"osascript -e 'tell application \"{app}\" to {apple_action}'", shell=True)
+                if action == "play_pause":
+                    apple_action = "playpause"
+                _shell(
+                    f"osascript -e 'tell application \"{app}\" to {apple_action}'",
+                    shell=True,
+                )
                 return f"Media command '{action}' sent to {app}."
         return f"Media command '{action}' executed."
     elif system == "Windows":
         import ctypes
+
         VK_MEDIA_NEXT_TRACK = 0xB0
         VK_MEDIA_PREV_TRACK = 0xB1
         VK_MEDIA_STOP = 0xB2
         VK_MEDIA_PLAY_PAUSE = 0xB3
-        
+
         vk = None
-        if action == "play_pause": vk = VK_MEDIA_PLAY_PAUSE
-        elif action == "next": vk = VK_MEDIA_NEXT_TRACK
-        elif action == "previous": vk = VK_MEDIA_PREV_TRACK
-        elif action == "stop": vk = VK_MEDIA_STOP
-        
+        if action == "play_pause":
+            vk = VK_MEDIA_PLAY_PAUSE
+        elif action == "next":
+            vk = VK_MEDIA_NEXT_TRACK
+        elif action == "previous":
+            vk = VK_MEDIA_PREV_TRACK
+        elif action == "stop":
+            vk = VK_MEDIA_STOP
+
         if vk:
             ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
             ctypes.windll.user32.keybd_event(vk, 0, 2, 0)
         return f"Media command '{action}' executed."
     else:
         dbus_method = "PlayPause" if action == "play_pause" else action.capitalize()
-        script = f'''
+        script = f"""
 for player in $(dbus-send --session --dest=org.freedesktop.DBus --type=method_call --print-reply /org/freedesktop/DBus org.freedesktop.DBus.ListNames | grep org.mpris.MediaPlayer2 | awk -F'"' '{{print $2}}'); do
     dbus-send --print-reply --session --dest=$player /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.{dbus_method} >/dev/null 2>&1
 done
-'''
+"""
         _shell(script, shell=True)
         return f"Media command '{action}' executed natively."
+
 
 def handle_say(text: str) -> str:
     system = platform.system()
     if system == "Darwin":
-        _shell(f"say \"{text}\"", shell=True)
+        _shell(f'say "{text}"', shell=True)
     elif system == "Windows":
-        _shell(f"powershell -Command \"Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{text}')\"", shell=True)
+        _shell(
+            f"powershell -Command \"Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{text}')\"",
+            shell=True,
+        )
     else:
-        _shell(f"spd-say \"{text}\" || espeak \"{text}\"", shell=True)
+        _shell(f'spd-say "{text}" || espeak "{text}"', shell=True)
     return f"Said: '{text}'"
+
 
 def handle_kill_process(name: str) -> str:
     system = platform.system()
@@ -2531,21 +3607,25 @@ def handle_kill_process(name: str) -> str:
         return f"Killed process PID {pid}."
     else:
         if system == "Windows":
-            _shell(f"taskkill /F /IM \"{name}\" || taskkill /F /IM \"{name}.exe\"", shell=True)
+            _shell(
+                f'taskkill /F /IM "{name}" || taskkill /F /IM "{name}.exe"', shell=True
+            )
         elif system == "Darwin":
-            _shell(f"pkill -9 -i -f \"{name}\"", shell=True)
+            _shell(f'pkill -9 -i -f "{name}"', shell=True)
         else:
-            _shell(f"pkill -9 -i -f \"{name}\" || killall -9 -I \"{name}\"", shell=True)
+            _shell(f'pkill -9 -i -f "{name}" || killall -9 -I "{name}"', shell=True)
         return f"Sent terminate signal to process '{name}'."
+
 
 def handle_set_env(key: str, value: str) -> str:
     os.environ[key] = value
     return f"Environment variable {key} set to {value}."
 
+
 def handle_notification(title: str, body: str) -> str:
     system = platform.system()
     if system == "Darwin":
-        cmd = f"osascript -e 'display notification \"{body}\" with title \"{title}\"'"
+        cmd = f'osascript -e \'display notification "{body}" with title "{title}"\''
         _shell(cmd, shell=True)
     elif system == "Windows":
         ps = f'''
@@ -2562,8 +3642,10 @@ $notify.showballoontip(10,"{title}","{body}",[system.windows.forms.tooltipicon]:
         _shell(cmd, shell=True)
     return "Notification displayed."
 
+
 def handle_take_note(content: str) -> str:
     import datetime
+
     notes_path = os.path.expanduser("~/iris_notes.md")
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
@@ -2572,6 +3654,7 @@ def handle_take_note(content: str) -> str:
         return f"Note added to ~/iris_notes.md"
     except Exception as e:
         return f"Failed to save note: {e}"
+
 
 def handle_empty_trash() -> str:
     system = platform.system()
@@ -2583,17 +3666,25 @@ def handle_empty_trash() -> str:
         _shell("rm -rf ~/.local/share/Trash/files/* || gio trash --empty", shell=True)
     return "Trash emptied."
 
+
 def handle_type_text(text: str) -> str:
     system = platform.system()
     if system == "Darwin":
         escaped = text.replace('"', '\\"')
-        _shell(f"osascript -e 'tell application \"System Events\" to keystroke \"{escaped}\"'", shell=True)
+        _shell(
+            f'osascript -e \'tell application "System Events" to keystroke "{escaped}"\'',
+            shell=True,
+        )
     elif system == "Windows":
         escaped = text.replace("'", "''")
-        _shell(f"powershell -Command \"Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{escaped}')\"", shell=True)
+        _shell(
+            f"powershell -Command \"Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{escaped}')\"",
+            shell=True,
+        )
     else:
         _shell(["xdotool", "type", text])
     return f"Typed text: '{text}'"
+
 
 def handle_press_keys(keys: str) -> str:
     system = platform.system()
@@ -2603,27 +3694,36 @@ def handle_press_keys(keys: str) -> str:
         mods = parts[:-1]
         apple_mods = []
         for m in mods:
-            if m in ("cmd", "command"): apple_mods.append("command down")
-            elif m == "shift": apple_mods.append("shift down")
-            elif m in ("alt", "option"): apple_mods.append("option down")
-            elif m in ("ctrl", "control"): apple_mods.append("control down")
-        
+            if m in ("cmd", "command"):
+                apple_mods.append("command down")
+            elif m == "shift":
+                apple_mods.append("shift down")
+            elif m in ("alt", "option"):
+                apple_mods.append("option down")
+            elif m in ("ctrl", "control"):
+                apple_mods.append("control down")
+
         mods_str = ", ".join(apple_mods)
         if mods_str:
-            cmd = f"osascript -e 'tell application \"System Events\" to keystroke \"{key}\" using {{{mods_str}}}'"
+            cmd = f'osascript -e \'tell application "System Events" to keystroke "{key}" using {{{mods_str}}}\''
         else:
-            cmd = f"osascript -e 'tell application \"System Events\" to keystroke \"{key}\"'"
+            cmd = f'osascript -e \'tell application "System Events" to keystroke "{key}"\''
         _shell(cmd, shell=True)
     elif system == "Windows":
         import re
+
         ps_keys = keys.lower()
-        ps_keys = re.sub(r'ctrl\+', '^', ps_keys)
-        ps_keys = re.sub(r'shift\+', '+', ps_keys)
-        ps_keys = re.sub(r'alt\+', '%', ps_keys)
-        _shell(f"powershell -Command \"Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{{{ps_keys}}}')\"", shell=True)
+        ps_keys = re.sub(r"ctrl\+", "^", ps_keys)
+        ps_keys = re.sub(r"shift\+", "+", ps_keys)
+        ps_keys = re.sub(r"alt\+", "%", ps_keys)
+        _shell(
+            f"powershell -Command \"Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{{{ps_keys}}}')\"",
+            shell=True,
+        )
     else:
         _shell(["xdotool", "key", keys])
     return f"Pressed keys: {keys}."
+
 
 def handle_focus_app(name: str) -> str:
     system = platform.system()
@@ -2631,12 +3731,18 @@ def handle_focus_app(name: str) -> str:
         cmd = f"osascript -e 'tell application \"{name}\" to activate'"
         _shell(cmd, shell=True)
     elif system == "Windows":
-        _shell(f"powershell -Command \"(New-Object -ComObject WScript.Shell).AppActivate('{name}')\"", shell=True)
+        _shell(
+            f"powershell -Command \"(New-Object -ComObject WScript.Shell).AppActivate('{name}')\"",
+            shell=True,
+        )
     else:
         _shell(["wmctrl", "-a", name])
     return f"Focused app '{name}'."
 
-def handle_fix_file(path: str, instructions: str, model=None, tokenizer=None, device=None):
+
+def handle_fix_file(
+    path: str, instructions: str, model=None, tokenizer=None, device=None
+):
     if not path:
         return "Path required."
     path_obj = Path(path).expanduser().resolve()
@@ -2652,15 +3758,21 @@ def handle_fix_file(path: str, instructions: str, model=None, tokenizer=None, de
     log_action("ai", f"Modifying {path_obj.name}...")
 
     sys_prompt = (
-        "You are an expert software engineer. Analyze the provided file content and apply these instructions: " + instructions + "\n\n"
+        "You are an expert software engineer. Analyze the provided file content and apply these instructions: "
+        + instructions
+        + "\n\n"
         "Output ONLY the raw, complete, modified file content. Do NOT include markdown blocks. "
         "Do NOT add conversational text."
     )
     user_msg = f"Current Content of {path_obj.name}:\n\n{content}"
 
-    messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_msg}]
-    
-    from src.iris import load_model, ModelRole, unload_model
+    messages = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": user_msg},
+    ]
+
+    from src.iris import ModelRole, load_model, unload_model
+
     try:
         llm = load_model(ModelRole.CODE)
         res = llm.create_chat_completion(
@@ -2674,7 +3786,7 @@ def handle_fix_file(path: str, instructions: str, model=None, tokenizer=None, de
     finally:
         unload_model()
 
-    code_block_match = re.search(r'```[a-zA-Z]*\n(.*?)```', new_content, re.DOTALL)
+    code_block_match = re.search(r"```[a-zA-Z]*\n(.*?)```", new_content, re.DOTALL)
     if code_block_match:
         new_content = code_block_match.group(1).strip()
 
@@ -2688,16 +3800,24 @@ def handle_fix_file(path: str, instructions: str, model=None, tokenizer=None, de
     except Exception as e:
         return f"Write error: {e}"
 
+
 def load_iris_model():
     return None, None, None
 
-def iris_chat_reply(model, tokenizer, device, retriever, history: list, user_text: str) -> str:
+
+def iris_chat_reply(
+    model, tokenizer, device, retriever, history: list, user_text: str
+) -> str:
     """Standard chat reply incorporating the RAG Knowledge base and live web search."""
     if model is None:
         return "(Iris model not loaded — only PC-control commands work right now.)"
 
     rag_category = route_category(user_text)
-    context = retriever.retrieve(user_text, top_k=3, category=rag_category) if retriever else ""
+    context = (
+        retriever.retrieve(user_text, top_k=3, category=rag_category)
+        if retriever
+        else ""
+    )
 
     web_results = ""
     if should_web_search(user_text):
@@ -2722,29 +3842,33 @@ def iris_chat_reply(model, tokenizer, device, retriever, history: list, user_tex
     history.append({"role": "user", "content": user_text})
 
     prefix_msgs = [{"role": "system", "content": sys_prompt}] + history[-20:-1]
-    prefix_key  = hash(json.dumps(prefix_msgs, ensure_ascii=False, sort_keys=True))
+    prefix_key = hash(json.dumps(prefix_msgs, ensure_ascii=False, sort_keys=True))
 
-    if _reply_prefix_cache["key"] == prefix_key and _reply_prefix_cache["prompt"] is not None:
-
-        last_turn   = tokenizer.apply_chat_template(
+    if (
+        _reply_prefix_cache["key"] == prefix_key
+        and _reply_prefix_cache["prompt"] is not None
+    ):
+        last_turn = tokenizer.apply_chat_template(
             history[-1:], tokenize=False, add_generation_prompt=False
         )
         prompt = _reply_prefix_cache["prompt"] + last_turn
     else:
-
-        ctx    = [{"role": "system", "content": sys_prompt}] + history[-20:]
-        prompt = tokenizer.apply_chat_template(ctx, tokenize=False, add_generation_prompt=True)
+        ctx = [{"role": "system", "content": sys_prompt}] + history[-20:]
+        prompt = tokenizer.apply_chat_template(
+            ctx, tokenize=False, add_generation_prompt=True
+        )
 
         prefix_prompt = tokenizer.apply_chat_template(
             prefix_msgs, tokenize=False, add_generation_prompt=False
         )
-        _reply_prefix_cache["key"]    = prefix_key
+        _reply_prefix_cache["key"] = prefix_key
         _reply_prefix_cache["prompt"] = prefix_prompt
 
     reply = generate_reply(model, tokenizer, prompt, device)
 
     history.append({"role": "assistant", "content": reply})
     return reply
+
 
 HELP_TEXT = """
 Commands you can use (regex + AI):
@@ -2769,6 +3893,7 @@ NEW AI‑powered actions (just say what you want):
   quit / exit                      → close the controller
 """
 
+
 def log_action(action_type: str, message: str):
     icon_map = {
         "browser": "[bold blue]Browser[/bold blue]",
@@ -2780,7 +3905,7 @@ def log_action(action_type: str, message: str):
         "terminal": "[bold cyan]Terminal[/bold cyan]",
         "system": "[bold white]System[/bold white]",
         "ai": "[bold cyan]AI Coder[/bold cyan]",
-        "search": "[bold yellow]Search[/bold yellow]"
+        "search": "[bold yellow]Search[/bold yellow]",
     }
     prefix = icon_map.get(action_type.lower(), f"[bold cyan]{action_type}[/bold cyan]")
     if RICH_AVAILABLE:
@@ -2788,72 +3913,93 @@ def log_action(action_type: str, message: str):
         console.print(f"  [dim]{chevron}[/dim] {prefix}: {message}")
     else:
         logger.info(f"  [→ {action_type.capitalize()}] {message}")
+
+
 def print_banner():
     banner_text = r"""
-  _____  _____   _____   _____             _____ 
+  _____  _____   _____   _____             _____
  |_   _||  __ \ |_   _| / ____|    /\     |_   _|
-   | |  | |__) |  | |  | (___     /  \      | |  
-   | |  |  _  /   | |   \___ \   / /\ \     | |  
-  _| |_ | | \ \  _| |_  ____) | / ____ \   _| |_ 
+   | |  | |__) |  | |  | (___     /  \      | |
+   | |  |  _  /   | |   \___ \   / /\ \     | |
+  _| |_ | | \ \  _| |_  ____) | / ____ \   _| |_
  |_____||_|  \_\|_____||_____/ /_/    \_\ |_____|
-                                                 
+
     """
     if RICH_AVAILABLE:
         console.print(Align.center(Text(banner_text, style="bold cyan")))
-        console.print(Align.center(Text("Natural-language control of your computer, powered by Iris", style="italic green")))
+        console.print(
+            Align.center(
+                Text(
+                    "Natural-language control of your computer, powered by Iris",
+                    style="italic green",
+                )
+            )
+        )
         console.print()
     else:
         logger.info("=" * 60)
         logger.info("  Iris AI PC Agent (RAG Enabled)")
         logger.info("  Type 'help' for commands, 'quit' to exit.")
         logger.info("=" * 60)
+
+
 def print_system_status(model=None, retriever=None):
     if not RICH_AVAILABLE:
         return
     table = Table(show_header=False, box=ROUNDED, border_style="dim cyan", width=60)
     table.add_column("Key", style="bold yellow")
     table.add_column("Value", style="green")
-    
+
     import platform as pf
+
     model_name = "iris_14b_model" if os.path.isdir("./iris_14b_model") else MLX_MODEL_ID
     table.add_row("Model", model_name if IRIS_AVAILABLE else "Rule-only Mode")
     table.add_row("Device", str(get_device().type) if IRIS_AVAILABLE else "CPU")
     table.add_row("OS", f"{pf.system()} {pf.release()} ({pf.machine()})")
-    
+
     try:
         import psutil
+
         mem = psutil.virtual_memory()
         ram_info = f"{mem.total / (1024**3):.1f} GB total, {mem.percent}% used"
     except ImportError:
         ram_info = "N/A"
     table.add_row("Memory", ram_info)
-    
+
     rag_status = "Loaded" if retriever and retriever.chunks else "Disabled"
     if retriever and retriever.chunks:
         rag_status += f" ({len(retriever.chunks)} chunks)"
     table.add_row("RAG Database", rag_status)
-    
-    config_status = "Loaded (control.conf)" if os.path.exists(CONFIG_FILE) else "Using Defaults"
+
+    config_status = (
+        "Loaded (control.conf)" if os.path.exists(CONFIG_FILE) else "Using Defaults"
+    )
     table.add_row("Config", config_status)
-    
+
     console.print(Align.center(table))
 
+
 from rich.console import Group
+
 
 def format_assistant_message(content: str):
     if not content:
         return Text("")
-        
+
     think_content = ""
+
     def replace_think(match):
         nonlocal think_content
         think_content = match.group(1).strip()
         return ""
-    
-    work = re.sub(r'<think>([\s\S]*?)(?:</think>|$)', replace_think, content, flags=re.IGNORECASE)
-    
+
+    work = re.sub(
+        r"<think>([\s\S]*?)(?:</think>|$)", replace_think, content, flags=re.IGNORECASE
+    )
+
     action_text = ""
     chat_response = ""
+
     def replace_action(match):
         nonlocal action_text, chat_response
         raw_json = match.group(0)
@@ -2863,33 +4009,44 @@ def format_assistant_message(content: str):
             if action == "chat":
                 chat_response = obj.get("response", "").strip()
             else:
-                action_text = f"⚙️ Action: [bold magenta]{action}[/bold magenta] {json.dumps({k:v for k,v in obj.items() if k != 'action'}, ensure_ascii=False)}"
+                action_text = f"⚙️ Action: [bold magenta]{action}[/bold magenta] {json.dumps({k: v for k, v in obj.items() if k != 'action'}, ensure_ascii=False)}"
         except:
             chat_response = raw_json
         return ""
-        
+
     work = re.sub(r'\{[\s]*"action"[\s]*:[\s\S]*?\}', replace_action, work)
-    
+
     remaining = work.strip()
-    
+
     renderables = []
     if think_content:
         from rich.panel import Panel
-        renderables.append(Panel(Text.from_markup(f"[dim]{think_content}[/dim]"), title="[dim]Thinking[/dim]", title_align="left", border_style="dim", style="on #333333"))
-        
+
+        renderables.append(
+            Panel(
+                Text.from_markup(f"[dim]{think_content}[/dim]"),
+                title="[dim]Thinking[/dim]",
+                title_align="left",
+                border_style="dim",
+                style="on #333333",
+            )
+        )
+
     main_text = chat_response if chat_response else remaining
     if main_text:
         renderables.append(Markdown(main_text))
-        
+
     if action_text:
         renderables.append(Text.from_markup(action_text))
-        
+
     if not renderables:
         return Text("")
     return Group(*renderables)
 
+
 # Global scroll offset — number of rendered lines to skip from the top of the chat body
 _scroll_offset: int = 0
+
 
 def _render_body_lines(history, cols: int) -> list[str]:
     """Render the full chat history into a list of terminal-width text lines.
@@ -2903,7 +4060,11 @@ def _render_body_lines(history, cols: int) -> list[str]:
     for msg in history:
         role = "You" if msg["role"] == "user" else "Iris"
         role_style = "bold yellow" if msg["role"] == "user" else "bold green"
-        content_render = Markdown(msg["content"]) if msg["role"] == "user" else format_assistant_message(msg["content"])
+        content_render = (
+            Markdown(msg["content"])
+            if msg["role"] == "user"
+            else format_assistant_message(msg["content"])
+        )
         table.add_row(Text(role, style=role_style), content_render)
     with measure_console.capture() as cap:
         measure_console.print(table)
@@ -2925,8 +4086,10 @@ def draw_layout(model, tokenizer, retriever, history, status_text=None):
     cols, rows = shutil.get_terminal_size()
 
     import platform as pf
+
     try:
         import psutil
+
         mem = psutil.virtual_memory()
         ram_info = f"{mem.total / (1024**3):.1f}GB ({mem.percent}% used)"
     except Exception:
@@ -2964,7 +4127,7 @@ def draw_layout(model, tokenizer, retriever, history, status_text=None):
     console.print(Text(divider, style="dim cyan"))
 
     if not history:
-        welcome_md = """# Welcome to Iris AI CLI
+        welcome_md = """# Iris AI CLI
 
 This is a full-featured terminal interface for controlling your computer and chatting with Iris.
 
@@ -2987,8 +4150,8 @@ This is a full-featured terminal interface for controlling your computer and cha
         _scroll_offset = max(0, min(_scroll_offset, max_offset))
 
         # Which lines to show: offset from top (0 = very beginning, max_offset = end visible)
-        start = max_offset - _scroll_offset          # lines from top to start showing
-        end   = start + body_height
+        start = max_offset - _scroll_offset  # lines from top to start showing
+        end = start + body_height
         visible_lines = all_lines[start:end]
 
         # Print the sliced lines directly (they already have ANSI codes from the capture)
@@ -3016,12 +4179,13 @@ def get_prompt_text() -> str:
         cwd_short = cwd.replace(home, "~", 1)
     else:
         cwd_short = cwd
-    
+
     prompt = Text()
     prompt.append("\niris ", style="bold cyan")
     prompt.append(cwd_short, style="bold blue")
     prompt.append(" ❯ ", style="bold green")
     return prompt
+
 
 SLASH_COMMANDS = {
     "/help": "Show this help menu",
@@ -3032,8 +4196,9 @@ SLASH_COMMANDS = {
     "/model": "Show details of the active model and config parameters",
     "/exit": "Quit the controller",
     "/quit": "Quit the controller",
-    "/restart": "Restart the controller and model"
+    "/restart": "Restart the controller and model",
 }
+
 
 def show_help_menu():
     if not RICH_AVAILABLE:
@@ -3042,43 +4207,54 @@ def show_help_menu():
     table = Table(title="Iris CLI Commands", box=ROUNDED, border_style="cyan")
     table.add_column("Command", style="bold yellow")
     table.add_column("Description", style="green")
-    
+
     for cmd, desc in SLASH_COMMANDS.items():
         table.add_row(cmd, desc)
-        
+
     table.add_row("exit / quit", "Quit the controller")
     table.add_row("restart", "Restart the controller and model")
     table.add_row("help", "Show this help menu")
     table.add_row("clear", "Clear the screen")
-    
+
     console.print(table)
-    
+
     console.print("\n[bold cyan]Example Natural Language Requests:[/bold cyan]")
-    console.print("  • [bold green]Files[/bold green]: 'open the budget.xlsx', 'search for .pdf in Downloads'")
-    console.print("  • [bold green]System[/bold green]: 'ping google.com', 'how much RAM?'")
-    console.print("  • [bold green]Media[/bold green]: 'play shape of you on spotify', 'youtube: lofi hip hop'")
+    console.print(
+        "  • [bold green]Files[/bold green]: 'open the budget.xlsx', 'search for .pdf in Downloads'"
+    )
+    console.print(
+        "  • [bold green]System[/bold green]: 'ping google.com', 'how much RAM?'"
+    )
+    console.print(
+        "  • [bold green]Media[/bold green]: 'play shape of you on spotify', 'youtube: lofi hip hop'"
+    )
     console.print("  • [bold green]AI Coder[/bold green]: 'fix bugs in app.py'")
+
 
 def clear_screen(model=None, retriever=None):
     os.system("clear" if platform.system() != "Windows" else "cls")
     print_banner()
 
+
 def show_detailed_status(model, tokenizer, retriever):
     if not RICH_AVAILABLE:
         return
-    table = Table(title="System & Environment Status", box=ROUNDED, border_style="magenta")
+    table = Table(
+        title="System & Environment Status", box=ROUNDED, border_style="magenta"
+    )
     table.add_column("Parameter", style="bold yellow")
     table.add_column("Value", style="green")
-    
+
     import platform as pf
     import socket
-    
+
     table.add_row("Platform", pf.platform())
     table.add_row("Processor", pf.processor())
     table.add_row("Python Version", sys.version.split()[0])
-    
+
     try:
         import psutil
+
         mem = psutil.virtual_memory()
         table.add_row("RAM Total", f"{mem.total / (1024**3):.1f} GB")
         table.add_row("RAM Available", f"{mem.available / (1024**3):.1f} GB")
@@ -3087,14 +4263,14 @@ def show_detailed_status(model, tokenizer, retriever):
         table.add_row("CPU Load", f"{cpu_pct}%")
     except ImportError:
         pass
-        
+
     try:
         total, used, free = shutil.disk_usage("/")
         table.add_row("Disk Total", f"{total / (1024**3):.1f} GB")
         table.add_row("Disk Free", f"{free / (1024**3):.1f} GB")
     except:
         pass
-        
+
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -3103,13 +4279,14 @@ def show_detailed_status(model, tokenizer, retriever):
         table.add_row("Local IP", ip)
     except:
         pass
-        
+
     model_name = "iris_14b_model" if os.path.isdir("./iris_14b_model") else MLX_MODEL_ID
     table.add_row("Model Loaded", model_name if IRIS_AVAILABLE else "None")
     table.add_row("Device type", str(get_device().type) if IRIS_AVAILABLE else "N/A")
     table.add_row("RAG Chunks", str(len(retriever.chunks)) if retriever else "N/A")
-    
+
     console.print(table)
+
 
 def show_config():
     if not RICH_AVAILABLE:
@@ -3121,38 +4298,43 @@ def show_config():
         Syntax(config_str, "json", theme="monokai", line_numbers=True),
         title=f"Configuration: {CONFIG_FILE}",
         border_style="yellow",
-        box=ROUNDED
+        box=ROUNDED,
     )
     console.print(panel)
+
 
 def show_history(history):
     if not history:
         console.print("[yellow]No conversation history yet in this session.[/yellow]")
         return
-        
-    table = Table(title="Session History", box=ROUNDED, border_style="cyan", show_lines=True)
+
+    table = Table(
+        title="Session History", box=ROUNDED, border_style="cyan", show_lines=True
+    )
     table.add_column("Speaker", style="bold magenta", width=12)
     table.add_column("Message", style="white")
-    
+
     for msg in history:
         role = "You" if msg["role"] == "user" else "Iris"
         role_style = "bold yellow" if msg["role"] == "user" else "bold green"
         table.add_row(Text(role, style=role_style), Markdown(msg["content"]))
-        
+
     console.print(table)
+
 
 def show_model_details():
     if not IRIS_AVAILABLE:
         console.print("[red]Iris model is not available or not loaded.[/red]")
         return
-        
+
     from src.iris import load_generation_config
+
     cfg = load_generation_config()
-    
+
     table = Table(title="Active Model Settings", box=ROUNDED, border_style="green")
     table.add_column("Setting", style="bold yellow")
     table.add_column("Value", style="green")
-    
+
     model_name = "iris_14b_model" if os.path.isdir("./iris_14b_model") else MLX_MODEL_ID
     table.add_row("Model ID", model_name)
     table.add_row("Max New Tokens", str(cfg.get("max_new_tokens", 256)))
@@ -3160,8 +4342,9 @@ def show_model_details():
     table.add_row("Top P", str(cfg.get("top_p", 0.9)))
     table.add_row("Repetition Penalty", str(cfg.get("repetition_penalty", 1.0)))
     table.add_row("RAG Disabled", str(cfg.get("disable_rag", False)))
-    
+
     console.print(table)
+
 
 def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) -> str:
     """Read a line of input while allowing UP/DOWN arrow keys to scroll the chat.
@@ -3172,9 +4355,12 @@ def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) ->
     """
     global _scroll_offset
 
-    import sys, os
+    import os
+    import sys
+
     try:
-        import tty, termios
+        import termios
+        import tty
     except ImportError:
         # Windows — fall back to blocking input
         console.print(prompt_str, end="")
@@ -3277,21 +4463,30 @@ def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) ->
 
 def main():
     import argparse
+
     from src.iris import ModelRole
-    
+
     parser = argparse.ArgumentParser(description="Iris AI PC Agent")
-    parser.add_argument("--model", choices=[m.value for m in ModelRole], default=None,
-                        help="Force using a single specific model role for all queries (bypasses routing).")
-    parser.add_argument("--pro", action="store_true", help="Use Iris Pro (cloud models) instead of local Iris.")
+    parser.add_argument(
+        "--model",
+        choices=[m.value for m in ModelRole],
+        default=None,
+        help="Force using a single specific model role for all queries (bypasses routing).",
+    )
+    parser.add_argument(
+        "--pro",
+        action="store_true",
+        help="Use Iris Pro (cloud models) instead of local Iris.",
+    )
     args, _ = parser.parse_known_args()
-    
+
     global PRO_MODE
     PRO_MODE = args.pro
     if args.model:
         ai_agent_handle.force_role = ModelRole(args.model)
 
     config = load_config()
-    
+
     if RICH_AVAILABLE:
         sys.stdout.write("\033[?1049h")
         sys.stdout.write("\033[H")
@@ -3314,7 +4509,9 @@ def main():
         retriever = None
         if IRIS_AVAILABLE:
             if RICH_AVAILABLE:
-                console.print("[bold yellow]Initializing RAG Knowledge Base...[/bold yellow]")
+                console.print(
+                    "[bold yellow]Initializing RAG Knowledge Base...[/bold yellow]"
+                )
                 try:
                     retriever = BookRetriever(raw_data_dir="raw_data")
                     retriever.load_and_index()
@@ -3349,8 +4546,18 @@ def main():
                 continue
 
             lower = raw.lower()
-            
-            if raw.startswith("/") or lower in ("help", "clear", "exit", "quit", "status", "config", "history", "model", "restart"):
+
+            if raw.startswith("/") or lower in (
+                "help",
+                "clear",
+                "exit",
+                "quit",
+                "status",
+                "config",
+                "history",
+                "model",
+                "restart",
+            ):
                 cmd = raw.split()[0].lower()
                 if cmd == "/exit" or cmd == "/quit" or cmd in ("exit", "quit"):
                     break
@@ -3390,7 +4597,9 @@ def main():
                     continue
                 else:
                     if RICH_AVAILABLE:
-                        console.print(f"[red]Unknown command: {cmd}. Type /help for assistance.[/red]")
+                        console.print(
+                            f"[red]Unknown command: {cmd}. Type /help for assistance.[/red]"
+                        )
                         console.input("\nPress Enter to return to chat...")
                     else:
                         logger.info(f"Unknown command: {cmd}")
@@ -3400,82 +4609,140 @@ def main():
                 display_history = list(history)
                 display_history.append({"role": "user", "content": raw})
                 display_history.append({"role": "assistant", "content": ""})
-                
+
                 status_text = "Thinking..."
                 if RICH_AVAILABLE:
-                    draw_layout(model, tokenizer, retriever, display_history, status_text=status_text)
-                
+                    draw_layout(
+                        model,
+                        tokenizer,
+                        retriever,
+                        display_history,
+                        status_text=status_text,
+                    )
+
                 reply_parts = []
                 final_reply = None
-                
-                agent_gen = ai_agent_handle_pro(raw, retriever, history) if PRO_MODE else ai_agent_handle(raw, retriever, history)
-                
+
+                agent_gen = (
+                    ai_agent_handle_pro(raw, retriever, history)
+                    if PRO_MODE
+                    else ai_agent_handle(raw, retriever, history)
+                )
+
                 for event in agent_gen:
                     ev_type = event.get("type")
                     content = event.get("content", "")
-                    
+
                     if ev_type == "status":
                         status_text = content
                         if RICH_AVAILABLE:
-                            draw_layout(model, tokenizer, retriever, display_history, status_text=status_text)
+                            draw_layout(
+                                model,
+                                tokenizer,
+                                retriever,
+                                display_history,
+                                status_text=status_text,
+                            )
                         else:
                             logger.info(f"[{status_text}]")
                     elif ev_type == "clear":
                         reply_parts.clear()
                         display_history[-1]["content"] = ""
                         if RICH_AVAILABLE:
-                            draw_layout(model, tokenizer, retriever, display_history, status_text="Refining...")
+                            draw_layout(
+                                model,
+                                tokenizer,
+                                retriever,
+                                display_history,
+                                status_text="Refining...",
+                            )
                         else:
                             logger.info("\n--- Clearing generation buffer ---")
                     elif ev_type == "token":
                         reply_parts.append(content)
                         display_history[-1]["content"] = "".join(reply_parts)
                         if RICH_AVAILABLE:
-                            draw_layout(model, tokenizer, retriever, display_history, status_text="Responding...")
+                            draw_layout(
+                                model,
+                                tokenizer,
+                                retriever,
+                                display_history,
+                                status_text="Responding...",
+                            )
                         else:
                             logger.info(content, end="", flush=True)
                     elif ev_type == "action_result":
-                        display_history.insert(-1, {"role": "assistant", "content": f"Running action returned:\n{content.strip()}"})
+                        display_history.insert(
+                            -1,
+                            {
+                                "role": "assistant",
+                                "content": f"Running action returned:\n{content.strip()}",
+                            },
+                        )
                         if RICH_AVAILABLE:
-                            draw_layout(model, tokenizer, retriever, display_history, status_text="Executing action...")
+                            draw_layout(
+                                model,
+                                tokenizer,
+                                retriever,
+                                display_history,
+                                status_text="Executing action...",
+                            )
                         else:
                             logger.info(f"\n[Action Output]\n{content}")
                     elif ev_type == "raw_response":
                         final_reply = content
-                            
+
                 if final_reply is None:
                     final_reply = "".join(reply_parts)
                 history.append({"role": "user", "content": raw})
                 history.append({"role": "assistant", "content": final_reply})
-                
+
                 # Auto-save code blocks
                 try:
-                    code_blocks = re.findall(r'```(\w*)\n([\s\S]*?)```', final_reply)
+                    code_blocks = re.findall(r"```(\w*)\n([\s\S]*?)```", final_reply)
                     for i, (lang, code) in enumerate(code_blocks):
                         filename = None
                         for line in code.splitlines()[:3]:
-                            m = re.search(r'^\s*(?://|#|/\*|<!--)\s*([a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9]+)', line)
+                            m = re.search(
+                                r"^\s*(?://|#|/\*|<!--)\s*([a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9]+)",
+                                line,
+                            )
                             if m:
                                 filename = m.group(1).strip()
                                 break
                         if not filename:
                             ext = lang.strip().lower() or "txt"
-                            ext_map = {"python": "py", "javascript": "js", "typescript": "ts", "cpp": "cpp", "c": "c", "java": "java", "html": "html", "css": "css", "bash": "sh", "sh": "sh"}
+                            ext_map = {
+                                "python": "py",
+                                "javascript": "js",
+                                "typescript": "ts",
+                                "cpp": "cpp",
+                                "c": "c",
+                                "java": "java",
+                                "html": "html",
+                                "css": "css",
+                                "bash": "sh",
+                                "sh": "sh",
+                            }
                             ext = ext_map.get(ext, ext)
-                            filename = f"generated_code_{i+1}.{ext}"
-                        
-                        file_path = os.path.join(os.getcwd(), os.path.basename(filename))
+                            filename = f"generated_code_{i + 1}.{ext}"
+
+                        file_path = os.path.join(
+                            os.getcwd(), os.path.basename(filename)
+                        )
                         with open(file_path, "w", encoding="utf-8") as f:
                             f.write(code.strip() + "\n")
-                        
+
                         if RICH_AVAILABLE:
-                            console.print(f"[dim green]Auto-saved code block to: {file_path}[/dim green]")
+                            console.print(
+                                f"[dim green]Auto-saved code block to: {file_path}[/dim green]"
+                            )
                         else:
                             logger.info(f"Auto-saved code to: {file_path}")
                 except Exception as save_err:
                     if not RICH_AVAILABLE:
                         logger.warning(f"Failed to auto-save code block: {save_err}")
-                
+
             except Exception as e:
                 if RICH_AVAILABLE:
                     console.print(f"[red]Error: {e}[/red]")
@@ -3487,10 +4754,14 @@ def main():
             sys.stdout.write("\033[?1049l")
             sys.stdout.flush()
         logger.info("Goodbye!")
+
+
 def _resolve(path: str):
     """Expand ~ and environment variables, return a Path object."""
     from pathlib import Path
+
     return Path(os.path.expandvars(os.path.expanduser(path)))
+
 
 def handle_create_file(path: str, content: str = "") -> str:
     p = _resolve(path)
@@ -3500,6 +4771,7 @@ def handle_create_file(path: str, content: str = "") -> str:
         return f"File created: {p}"
     except Exception as e:
         return f"Could not create file: {e}"
+
 
 def handle_read_file(path: str) -> str:
     p = _resolve(path)
@@ -3513,6 +4785,7 @@ def handle_read_file(path: str) -> str:
     except Exception as e:
         return f"Could not read file: {e}"
 
+
 def handle_append_file(path: str, content: str) -> str:
     p = _resolve(path)
     try:
@@ -3522,6 +4795,7 @@ def handle_append_file(path: str, content: str) -> str:
         return f"Appended to: {p}"
     except Exception as e:
         return f"Could not append to file: {e}"
+
 
 def handle_replace_in_file(path: str, find: str, replace: str) -> str:
     p = _resolve(path)
@@ -3537,8 +4811,10 @@ def handle_replace_in_file(path: str, find: str, replace: str) -> str:
     except Exception as e:
         return f"Could not replace in file: {e}"
 
+
 def handle_move_file(src: str, dst: str) -> str:
     import shutil
+
     s, d = _resolve(src), _resolve(dst)
     try:
         d.parent.mkdir(parents=True, exist_ok=True)
@@ -3547,8 +4823,10 @@ def handle_move_file(src: str, dst: str) -> str:
     except Exception as e:
         return f"Could not move: {e}"
 
+
 def handle_copy_file(src: str, dst: str) -> str:
     import shutil
+
     s, d = _resolve(src), _resolve(dst)
     try:
         d.parent.mkdir(parents=True, exist_ok=True)
@@ -3560,13 +4838,17 @@ def handle_copy_file(src: str, dst: str) -> str:
     except Exception as e:
         return f"Could not copy: {e}"
 
+
 def handle_delete_file(path: str) -> str:
-    import platform, shutil
+    import platform
+    import shutil
+
     p = _resolve(path)
     if not p.exists():
         return f"File not found: {p}"
     try:
         import send2trash
+
         send2trash.send2trash(str(p))
         return f"Moved to Trash: {p}"
     except ImportError:
@@ -3578,6 +4860,7 @@ def handle_delete_file(path: str) -> str:
     except Exception as e:
         return f"Could not delete: {e}"
 
+
 def handle_create_folder(path: str) -> str:
     p = _resolve(path)
     try:
@@ -3585,6 +4868,7 @@ def handle_create_folder(path: str) -> str:
         return f"Folder created: {p}"
     except Exception as e:
         return f"Could not create folder: {e}"
+
 
 def handle_rename_file(path: str, new_name: str) -> str:
     p = _resolve(path)
@@ -3597,8 +4881,10 @@ def handle_rename_file(path: str, new_name: str) -> str:
     except Exception as e:
         return f"Could not rename: {e}"
 
+
 def handle_compress_files(paths: list, output: str) -> str:
     import zipfile
+
     out = _resolve(output)
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -3615,8 +4901,11 @@ def handle_compress_files(paths: list, output: str) -> str:
     except Exception as e:
         return f"Could not compress: {e}"
 
+
 def handle_extract_file(path: str, dest: str) -> str:
-    import zipfile, tarfile
+    import tarfile
+    import zipfile
+
     p = _resolve(path)
     d = _resolve(dest)
     try:
@@ -3634,8 +4923,11 @@ def handle_extract_file(path: str, dest: str) -> str:
     except Exception as e:
         return f"Could not extract: {e}"
 
+
 def handle_download_file(url: str, path: str) -> str:
-    import urllib.request, ssl
+    import ssl
+    import urllib.request
+
     p = _resolve(path)
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -3646,6 +4938,7 @@ def handle_download_file(url: str, path: str) -> str:
         return f"Downloaded to: {p}"
     except Exception as e:
         return f"Could not download: {e}"
+
 
 if __name__ == "__main__":
     main()
