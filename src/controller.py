@@ -718,6 +718,40 @@ def ai_agent_handle(user_input: str, retriever=None, history=None, **kwargs):
     keep_loaded = kwargs.get("keep_loaded", False)
     yield from ask_stream(user_input, history, retriever=retriever, force_role=force_role, settings=settings, keep_loaded=keep_loaded)
 
+def ai_agent_handle_pro(user_input: str, retriever=None, history=None, **kwargs):
+    """Generator that yields events from Iris Pro (async) for the frontend or terminal."""
+    import asyncio
+    import src.iris_pro as iris_pro
+    import queue
+    import threading
+
+    q = queue.Queue()
+    mode = kwargs.get("settings", {}).get("mode", "smart")
+
+    def run_async():
+        async def task():
+            try:
+                agen = iris_pro.ask_stream(user_input, history or [], mode=mode, workspace_root=os.getcwd())
+                async for event in agen:
+                    q.put(event)
+            except Exception as e:
+                q.put(e)
+            finally:
+                q.put(None)
+        asyncio.run(task())
+
+    t = threading.Thread(target=run_async)
+    t.start()
+
+    while True:
+        item = q.get()
+        if item is None:
+            break
+        if isinstance(item, Exception):
+            yield {"type": "raw_response", "content": f"\n\n> ❌ **Iris Pro Error:** {item}"}
+            break
+        yield item
+
 def execute_action_by_dict(action_dict: dict) -> str:
     """
     Two-tier action executor:
@@ -3248,8 +3282,11 @@ def main():
     parser = argparse.ArgumentParser(description="Iris AI PC Agent")
     parser.add_argument("--model", choices=[m.value for m in ModelRole], default=None,
                         help="Force using a single specific model role for all queries (bypasses routing).")
+    parser.add_argument("--pro", action="store_true", help="Use Iris Pro (cloud models) instead of local Iris.")
     args, _ = parser.parse_known_args()
     
+    global PRO_MODE
+    PRO_MODE = args.pro
     if args.model:
         ai_agent_handle.force_role = ModelRole(args.model)
 
@@ -3261,11 +3298,18 @@ def main():
         sys.stdout.flush()
 
     try:
-        if RICH_AVAILABLE:
-            console.print("[bold yellow]Loading Iris LLM Core...[/bold yellow]")
+        if not PRO_MODE:
+            if RICH_AVAILABLE:
+                console.print("[bold yellow]Loading Iris LLM Core...[/bold yellow]")
+            else:
+                logger.info("[INFO] Loading Iris LLM Core...")
+            model, tokenizer, device = load_iris_model()
         else:
-            logger.info("[INFO] Loading Iris LLM Core...")
-        model, tokenizer, device = load_iris_model()
+            model, tokenizer, device = None, None, None
+            if RICH_AVAILABLE:
+                console.print("[bold cyan]Using Iris Pro (Cloud API)...[/bold cyan]")
+            else:
+                logger.info("[INFO] Using Iris Pro (Cloud API)...")
 
         retriever = None
         if IRIS_AVAILABLE:
@@ -3363,7 +3407,10 @@ def main():
                 
                 reply_parts = []
                 final_reply = None
-                for event in ai_agent_handle(raw, retriever, history):
+                
+                agent_gen = ai_agent_handle_pro(raw, retriever, history) if PRO_MODE else ai_agent_handle(raw, retriever, history)
+                
+                for event in agent_gen:
                     ev_type = event.get("type")
                     content = event.get("content", "")
                     
@@ -3373,6 +3420,13 @@ def main():
                             draw_layout(model, tokenizer, retriever, display_history, status_text=status_text)
                         else:
                             logger.info(f"[{status_text}]")
+                    elif ev_type == "clear":
+                        reply_parts.clear()
+                        display_history[-1]["content"] = ""
+                        if RICH_AVAILABLE:
+                            draw_layout(model, tokenizer, retriever, display_history, status_text="Refining...")
+                        else:
+                            logger.info("\n--- Clearing generation buffer ---")
                     elif ev_type == "token":
                         reply_parts.append(content)
                         display_history[-1]["content"] = "".join(reply_parts)

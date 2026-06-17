@@ -743,12 +743,21 @@ function renderChatList(query = '') {
                 id = `@@@CODE_${index}@@@`;
                 if (!block.finished && isStreaming) {
                     const animDelay = -(Date.now() % 1000);
-                    html = `
-                        <div class="code-loading-box" style="margin: 12px 0; padding: 16px; background: rgba(30, 30, 30, 0.5); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; display: flex; align-items: center; gap: 12px;">
-                            <div style="width: 20px; height: 20px; border: 2px solid rgba(163, 133, 255, 0.3); border-top-color: #a385ff; border-radius: 50%; animation: spin-loader 1s linear infinite; animation-delay: ${animDelay}ms;"></div>
-                            <span style="color: rgba(255, 255, 255, 0.8); font-size: 14px; font-family: 'Inter', sans-serif;">Writing ${escapeHtml(block.lang || 'code')}...</span>
+                    let inner = escapeHtml(block.content);
+                    let streamingStatus = `
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: #a385ff; font-size: 13px;">
+                            <div style="width: 14px; height: 14px; border: 2px solid rgba(163, 133, 255, 0.3); border-top-color: #a385ff; border-radius: 50%; animation: spin-loader 1s linear infinite; animation-delay: ${animDelay}ms;"></div>
+                            <span>Writing ${escapeHtml(block.lang || 'code')}...</span>
                         </div>
                     `;
+                    if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+                        const codeMd = "```" + (block.lang || '') + "\n" + block.content + "\n```";
+                        const purifyConfig = { ADD_TAGS: ['math', 'mrow', 'mi', 'mo', 'mn', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mphantom', 'mpadded', 'mroot', 'mfrac', 'msub', 'msup', 'msubsup', 'munder', 'mover', 'munderover', 'mmultiscripts', 'msection', 'maction', 'annotation', 'semantics'], ADD_ATTR: ['mathvariant', 'mathcolor', 'mathsize', 'mathbackground', 'display', 'xmlns', 'class'] };
+                        let mdHtml = DOMPurify.sanitize(marked.parse(codeMd, { breaks: true, gfm: true }), purifyConfig);
+                        html = `<div>${streamingStatus}${mdHtml}</div>`;
+                    } else {
+                        html = `<div>${streamingStatus}<pre><code class="language-${escapeHtml(block.lang)}">${inner}</code></pre></div>`;
+                    }
                 } else if (block.hidden) {
                     // Auto-generate a file card for hidden blocks that weren't claimed by an explicit <file_card> tag
                     if (block.autoCard && block.content && !block.claimed) {
@@ -1157,6 +1166,14 @@ window.downloadCode = (btn, ext) => {
                             showTypingIndicator();
                         } else if (event.type === "raw_response") {
                             rawResponseText = event.content;
+                        } else if (event.type === "text" || event.type === "error") {
+                            if (!firstTokenReceived) {
+                                firstTokenReceived = true;
+                                removeTypingIndicator();
+                                aiMessageDiv.style.display = "";
+                            }
+                            currentResponseText += `\n\n> ⚠️ **${event.type === "error" ? "Error" : "System Notification"}**: ${event.content}\n\n`;
+                            scheduleRender();
                         }
                     } catch (e) { console.error("Event parse error", e); }
                 }
