@@ -91,6 +91,8 @@ Available actions:
 ── SYSTEM ─────────────────────────────────────────────────────────────────────
 
 * system_info(what)                           // "cpu", "memory", "disk", "ip", "hostname", "battery", "uptime", "all"
+* check_storage                               // show disk usage for root filesystem (cross-platform)
+* disk_usage(path)                            // show disk usage for a specific path
 * kill_process(name)                          // force-quit process by name or PID
 * open_settings                               // open the OS system settings panel
 * clipboard_copy(text)
@@ -123,6 +125,7 @@ Available actions:
 * type_text(text)                             // type text at the current cursor position
 * press_keys(keys)                            // send keyboard shortcut e.g. "ctrl+shift+t"
 * chat(response)                              // conversational reply only
+* finish(summary)                             // end a multi-step task; summary describes what was accomplished
 
 JSON examples:
 {"action": "open_website", "url": "https://example.com"}
@@ -1651,10 +1654,60 @@ The user is requesting hardware or system metrics. I'll use the system_info acti
 {"action": "system_info", "what": "uptime"}
 
 USER: full system report
-BOT: <think>
+BOT: 
 The user is requesting hardware or system metrics. I'll use the system_info action to fetch and display this data.
-</think>
+
 {"action": "system_info", "what": "all"}
+
+# ── STORAGE CHECK ─────────────────────────────────────────────────────────────────
+
+USER: check how much storage left on my device
+BOT: 
+The user wants to check available disk space on their device. I'll use the check_storage action which works cross-platform.
+
+{"action": "check_storage"}
+
+USER: see my storage
+BOT: 
+The user wants to see their storage usage. I'll use the check_storage action.
+
+{"action": "check_storage"}
+
+USER: how much disk space do I have?
+BOT: 
+The user wants to check disk space. I'll use the check_storage action.
+
+{"action": "check_storage"}
+
+USER: what is my disk usage?
+BOT: 
+The user wants to see their disk usage. I'll use the check_storage action.
+
+{"action": "check_storage"}
+
+USER: show me storage on /home
+BOT: 
+The user wants to check disk usage for a specific path (/home). I'll use the check_storage action (shows root filesystem) or disk_usage for specific paths.
+
+{"action": "check_storage"}
+
+USER: check disk usage for /tmp
+BOT: 
+The user wants to check disk usage for /tmp. I'll use the disk_usage action with the path parameter.
+
+{"action": "disk_usage", "path": "/tmp"}
+
+USER: disk usage of /home
+BOT: 
+The user wants to check disk usage for /home. I'll use the disk_usage action with the path parameter.
+
+{"action": "disk_usage", "path": "/home"}
+
+USER: disk usage of /tmp
+BOT: 
+The user wants to check disk usage for /tmp. I'll use the disk_usage action with the path parameter.
+
+{"action": "disk_usage", "path": "/tmp"}
 
 # ── PROCESS MANAGEMENT ────────────────────────────────────────────────────────────
 
