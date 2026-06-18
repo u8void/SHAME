@@ -211,7 +211,7 @@ def verify_and_refine(solution: str, problem: str,
                         # Numerically correct — still clean formatting below
                         pass
                     else:
-                        ground_int = int(ground) if ground == int(ground) else ground
+                        ground_int = int(ground) if (math.isfinite(ground) and math.isclose(ground, round(ground), abs_tol=1e-9)) else ground
                         corrected = solution.replace(boxed, str(ground_int), 1)
                         return corrected, True
                 except ValueError:

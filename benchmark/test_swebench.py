@@ -198,7 +198,7 @@ def run_swebench_benchmark(csv_path: str):
             f"Buggy Code:\n```python\n{prob['buggy_code']}```"
         )
 
-        response, t = run_inference(prompt)
+        response, t = run_inference(prompt, role=ModelRole.CODE, use_routing=False, keep_loaded=True)
         extracted_code = _extract_python_code(response)
 
         passed, test_err = run_swe_test(extracted_code, prob["test"])

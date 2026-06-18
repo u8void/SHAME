@@ -250,8 +250,8 @@ def _sandbox_recompute(problem: str, solution: str) -> str | None:
     if not numeric_expr or len(numeric_expr) < 1:
         return None
 
-    # Safety: only allow simple arithmetic
-    if re.search(r'[^0-9.\+\-\*\/\(\)]', numeric_expr):
+    # Safety: only allow simple arithmetic (^ is allowed; it's replaced with ** below)
+    if re.search(r'[^0-9.\+\-\*\/\(\)\^]', numeric_expr):
         return None
 
     try:

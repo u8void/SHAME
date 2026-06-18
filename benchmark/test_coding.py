@@ -131,8 +131,13 @@ def run_coding_benchmark(csv_path: str):
         
         t = round(t1 + t2 + t3, 2)
 
-        # The HF dataset only defines check(), we must call it
-        full_test_suite = f"{test_suite}\ncheck({entry_point})\n"
+        # The HF dataset only defines check(), we must call it.
+        # Guard: fallback built-in tests already include the call, avoid duplicating.
+        call_line = f"check({entry_point})"
+        if call_line.strip() not in test_suite:
+            full_test_suite = f"{test_suite}\n{call_line}\n"
+        else:
+            full_test_suite = test_suite
         passed, test_err = run_unit_tests(final_code, full_test_suite)
         
         if passed:

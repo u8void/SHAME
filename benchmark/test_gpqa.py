@@ -148,8 +148,14 @@ def run_gpqa_benchmark(csv_path: str):
 
     pct = (passed_count / len(items)) * 100 if items else 0
     print(f"\n  [GPQA Diamond][Iris Tiny] Score: {passed_count}/{len(items)} ({pct:.1f}%)\n")
-    random_baseline = 25.0
     print(f"  (Random baseline for 4-choice MCQ: 25.0% — human expert ~65%)")
+
+    # Unload model to prevent Metal GPU destructor crash on macOS
+    try:
+        from src.iris import unload_model
+        unload_model()
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "outputs")

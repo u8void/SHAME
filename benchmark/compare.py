@@ -289,7 +289,7 @@ def _compare_intervals(a_str: str, b_str: str) -> Tuple[bool, str]:
     return False, "interval_mismatch"
 
 def compare_degree(a_str: str, b_str: str) -> Tuple[bool, str]:
-    """Compare degree values: 36^\circ vs 36"""
+    r"""Compare degree values: 36^\circ vs 36"""
     a_match = re.match(r'^([\d.]+)\s*\\?\s*circ\s*$', a_str)
     b_match = re.match(r'^([\d.]+)\s*\\?\s*circ\s*$', b_str)
     if a_match and b_match:
