@@ -28,7 +28,7 @@ Iris AI has three configuration layers:
 
   "models": {
     "triage": "iris_001.gguf",
-    "router": "iris_002.gguf",
+    "router": "iris_004.gguf",
     "control": "iris_003.gguf",
     "math": "iris_004.gguf",
     "code": "iris_005.gguf",

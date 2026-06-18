@@ -20,6 +20,48 @@ from typing import Dict, List, Optional, Tuple
 
 
 
+def _extract_python_code(raw: str) -> str:
+    """Robustly extract only the Python code from LLM's response, handling backticks/markdown."""
+    # Try to extract content inside ```python ... ``` or ``` ... ```
+    m = re.search(r"```(?:python)?\n(.*?)```", raw, re.DOTALL | re.IGNORECASE)
+    if m:
+        code = m.group(1)
+    else:
+        # Fallback: if there are no closing backticks but it starts with backticks, strip the first line
+        raw_stripped = raw.strip()
+        if raw_stripped.startswith("```"):
+            lines = raw_stripped.split("\n")
+            if len(lines) > 1:
+                code = "\n".join(lines[1:]).strip("`")
+            else:
+                code = raw_stripped.strip("`")
+        else:
+            code = raw_stripped
+
+    # Clean up minor indentation artifacts (like accidental leading spaces on flat lines)
+    cleaned_lines = []
+    in_block = False
+    for line in code.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            cleaned_lines.append("")
+            continue
+        
+        # If we are not currently in a block and the line has leading spaces, strip them
+        if not in_block and line.startswith(" "):
+            line = line.lstrip()
+            
+        cleaned_lines.append(line)
+        
+        # Check if this line introduces a block (ends with :)
+        if stripped.endswith(":"):
+            in_block = True
+        elif in_block and not line.startswith(" "):
+            # Exit block when we hit a non-indented line
+            in_block = False
+
+    return "\n".join(cleaned_lines).strip()
+
 def _make_driver(headless: bool = False):
     """Return a configured Chrome WebDriver."""
     from selenium import webdriver
@@ -37,10 +79,16 @@ def _make_driver(headless: bool = False):
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
-    opts.add_argument(
-        "user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    )
+    import platform
+    sys_name = platform.system()
+    if sys_name == "Windows":
+        ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    elif sys_name == "Linux":
+        ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    else:
+        ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+    opts.add_argument(f"user-agent={ua}")
 
     try:
         driver = webdriver.Chrome(options=opts)
@@ -541,6 +589,11 @@ def browser_autopilot(
             prompt_parts.append("  time.sleep(n)          — wait for page load")
             prompt_parts.append("")
             prompt_parts.append("RULES:")
+            prompt_parts.append("- Do NOT import selenium.")
+            prompt_parts.append("- Do NOT initialize a new webdriver or create a new driver instance.")
+            prompt_parts.append("- Do NOT call driver.get().")
+            prompt_parts.append("- ONLY use the provided helper functions.")
+            prompt_parts.append("- The 'id' parameter in functions (e.g. click_element(id), fill_element(id, text)) MUST be the exact integer 'id' from the CURRENT PAGE SNAPSHOT elements list (e.g., click_element(5) or fill_element(12, 'value')). Do NOT invent string IDs like 'search_input' or 'search_button'.")
             prompt_parts.append("- Complete AS MUCH as possible this turn.")
             prompt_parts.append("- If you see a submit/next/continue button AND all required fields are filled, CLICK IT.")
             prompt_parts.append("- If you reach a confirmation page ('thank you', 'application submitted'), print('DONE').")
@@ -554,13 +607,9 @@ def browser_autopilot(
                 system_prompt="You are a Selenium automation expert.",
                 user_prompt=code_prompt,
                 max_tokens=1024,
-                role=ModelRole.ROUTER,
+                role=ModelRole.CODE,
             )
-            raw_code = raw_code.strip()
-            if raw_code.startswith("```"):
-                raw_code = "\n".join(raw_code.split("\n")[1:])
-            if raw_code.endswith("```"):
-                raw_code = "\n".join(raw_code.split("\n")[:-1])
+            raw_code = _extract_python_code(raw_code)
 
             print(f"  [Browser] Generated {len(raw_code)} bytes of automation code")
 
@@ -570,8 +619,8 @@ def browser_autopilot(
                     exec(raw_code, helpers)
                 output = captured.getvalue().strip()
             except Exception as exec_err:
-                output = f"Error: {exec_err}"
-                print(f"  [Browser] Turn {turn} failed: {exec_err}")
+                output = f"Error: {exec_err}\nCode was:\n{raw_code}"
+                print(f"  [Browser] Turn {turn} failed: {exec_err}\nGenerated Code:\n{raw_code}")
 
             turn_log.append({"turn": turn, "url": driver.current_url, "title": driver.title, "output": output})
 
@@ -623,6 +672,7 @@ def browser_task(url: str, task: str, existing_driver=None) -> str:
     driver = existing_driver if existing_driver else _make_driver(headless=False)
     from .iris import generate_internal_code, ModelRole
 
+    raw_code = ""
     try:
         if url:
             driver.get(url)
@@ -631,26 +681,29 @@ def browser_task(url: str, task: str, existing_driver=None) -> str:
         helpers = _make_helpers(driver)
 
         code_prompt = f"""You are a Selenium automation expert.
-Functions: click_element(id), fill_element(id, text), time.sleep(n)
+
+CRITICAL RULES:
+- Do NOT import selenium.
+- Do NOT initialize a webdriver or create a new driver instance (e.g. no `driver = webdriver.Chrome()`).
+- Do NOT call driver.get().
+- Only use the provided functions: click_element, fill_element, time.sleep.
+- The 'id' parameter in functions (e.g. click_element(id), fill_element(id, text)) MUST be the exact integer 'id' from the Page snapshot (for example: click_element(12) or fill_element(5, 'some text')). Do NOT invent semantic string IDs like 'search_input' or 'search_button'.
+- Output ONLY raw Python code. No markdown.
+
+Available Functions: click_element(id), fill_element(id, text), time.sleep(n)
 
 Page snapshot:
 {json.dumps(snapshot.get('elements', []), indent=2, ensure_ascii=False)}
 
-Task: {task}
-
-Output ONLY raw Python code. No markdown."""
+Task: {task}"""
 
         raw_code = generate_internal_code(
             system_prompt="You are a Selenium automation expert.",
             user_prompt=code_prompt,
             max_tokens=512,
-            role=ModelRole.ROUTER,
+            role=ModelRole.CODE,
         )
-        raw_code = raw_code.strip()
-        if raw_code.startswith("```"):
-            raw_code = "\n".join(raw_code.split("\n")[1:])
-        if raw_code.endswith("```"):
-            raw_code = "\n".join(raw_code.split("\n")[:-1])
+        raw_code = _extract_python_code(raw_code)
 
         captured = io.StringIO()
         with redirect_stdout(captured):
@@ -659,12 +712,13 @@ Output ONLY raw Python code. No markdown."""
 
         return f"✅ Browser task complete. Final page: **{driver.title}**\n\n{output}"
     except Exception as e:
-        return f"❌ Browser task failed: {e}"
+        return f"❌ Browser task failed: {e}\n\nGenerated Python code:\n```python\n{raw_code}\n```"
 
 
 def browser_login(url: str, username: str, password: str) -> str:
     """Quick login helper."""
     driver = _make_driver(headless=False)
+    code = ""
     try:
         driver.get(url)
         time.sleep(2.5)
@@ -673,15 +727,17 @@ def browser_login(url: str, username: str, password: str) -> str:
         from .iris import generate_internal_code, ModelRole
         prompt = (
             f"Log into this page with username '{username}' and password '{password}'.\n"
+            "CRITICAL: Do NOT import selenium or initialize a webdriver. Only use fill_element(id, text) and click_element(id).\n"
             f"Page elements: {json.dumps(_page_snapshot(driver).get('elements', []), indent=2)}\n"
-            "Use fill_element(id, text) and click_element(id). Output raw Python only."
+            "Output raw Python only."
         )
         code = generate_internal_code(
             system_prompt="Login automation expert.",
-            user_prompt=prompt, max_tokens=256, role=ModelRole.ROUTER
-        ).strip()
+            user_prompt=prompt, max_tokens=256, role=ModelRole.CODE
+        )
+        code = _extract_python_code(code)
         exec(code, helpers)
         time.sleep(2)
         return f"✅ Logged in. Currently at: **{driver.title}** — {driver.current_url}"
     except Exception as e:
-        return f"❌ Login failed: {e}"
+        return f"❌ Login failed: {e}\n\nGenerated Python code:\n```python\n{code}\n```"

@@ -52,7 +52,7 @@ ROLE_MODEL_MAP = {
 
 ROLE_TO_GGUF = {
     "triage":    "iris_001.gguf",
-    "router":    "iris_002.gguf",
+    "router":    "iris_004.gguf",
     "control":   "iris_003.gguf",
     "math":      "iris_004.gguf",
     "code":      "iris_005.gguf",
@@ -994,7 +994,7 @@ def download_all_models(roles_to_train: List[str] = None):
         # Fallback — hardcoded medium tier
         fallback = {
             "iris_001.gguf": ("https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf", "Qwen3-4B-Q4_K_M.gguf"),
-            "iris_002.gguf": ("https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf", "qwen2.5-coder-7b-instruct-q4_k_m.gguf"),
+            "iris_004.gguf": ("https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf", "qwen2.5-coder-7b-instruct-q4_k_m.gguf"),
             "iris_003.gguf": ("https://huggingface.co/Qwen/Qwen2.5-Math-7B-Instruct-GGUF/resolve/main/qwen2.5-math-7b-instruct-q4_k_m.gguf", "qwen2.5-math-7b-instruct-q4_k_m.gguf"),
             "iris_004.gguf": ("https://huggingface.co/unsloth/Qwen3-Coder-14B-GGUF/resolve/main/Qwen3-Coder-14B-Q4_K_M.gguf", "Qwen3-Coder-14B-Q4_K_M.gguf"),
             "iris_005.gguf": ("https://huggingface.co/unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf", "DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"),
@@ -1007,7 +1007,7 @@ def download_all_models(roles_to_train: List[str] = None):
                 if r in ("triage", "router", "general"):
                     needed_ggufs.add("iris_001.gguf")
                 elif r == "control":
-                    needed_ggufs.add("iris_002.gguf")
+                    needed_ggufs.add("iris_004.gguf")
                 elif r == "math":
                     needed_ggufs.add("iris_003.gguf")
                 elif r == "code":

@@ -634,9 +634,7 @@ def apply_to_config(cfg: dict, hw: Optional[HardwareProfile] = None) -> dict:
     _auto_or_missing("use_mlock",       hw.use_mlock)
 
     # Context allocation
-    ctx = cfg.get("n_ctx_allocation", "auto")
-    if str(ctx).lower() == "auto":
-        cfg["n_ctx_allocation"] = hw.ctx_default
+    # Keep it as "auto" so that load_model can apply role-specific ceilings instead of a flat default.
 
     # Size profile (only if not explicitly set)
     if cfg.get("size", "auto") in ("auto", "", None):

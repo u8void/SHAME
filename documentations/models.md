@@ -7,7 +7,7 @@ Iris uses **8 distinct roles**, each backed by a specialized GGUF model. The rol
 | Role | Enum Value | GGUF File | Context | System Prompt |
 |------|-----------|-----------|---------|---------------|
 | **Triage** | `triage` | `iris_001.gguf` | 2048 | Classify query intent, output routing tag |
-| **Router** | `router` | `iris_002.gguf` | 2048 | Output JSON action matrices for automation |
+| **Router** | `router` | `iris_004.gguf` | 2048 | Output JSON action matrices for automation |
 | **Control** | `control` | `iris_003.gguf` | 2048 | Output automation actions in JSON |
 | **Math** | `math` | `iris_004.gguf` | 4096 | Solve math/algorithmic problems step-by-step |
 | **Code** | `code` | `iris_005.gguf` | 8192 | Generate working production-quality code |

@@ -459,7 +459,7 @@ def main():
     print(f"Loaded {len(data)} commands from {source_path}.")
     
     llm = None
-    model_path = "models/iris_002.gguf"
+    model_path = "models/iris_004.gguf"
     
     results = []
     llm_calls = 0

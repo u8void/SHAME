@@ -70,17 +70,49 @@ try:
 
     _oi.llm.supports_functions = False
     _oi.llm.supports_vision = False
-    # Point OI at a local llama.cpp server if one is running; otherwise
-    # OI stays silent (offline=True means it won't crash on missing keys).
-    _oi.llm.api_base = os.environ.get("IRIS_OI_API_BASE", "http://localhost:11434")
-    _oi.llm.model = os.environ.get("IRIS_OI_MODEL", "ollama/mistral")
+    
+    # ── Iris Native Memory Bridge ──────────────────────────────────────────
+    # Wire Open Interpreter directly to the already-loaded Iris .gguf model!
+    # This prevents loading the 4GB+ model a second time in RAM.
+    def _iris_native_oi_llm(*args, **kwargs):
+        from src.iris import _model_pool, load_model, ModelRole
+        
+        # Use the currently active model (which is now your 3B Coder model!)
+        # This completely skips loading it a second time, making it instant.
+        if not _model_pool:
+            load_model(ModelRole.CONTROL)
+            
+        active_role = next(reversed(_model_pool))
+        model_obj = _model_pool[active_role]
+        
+        clean_kwargs = {
+            "messages": kwargs.get("messages", []),
+            "stream": True,
+            "max_tokens": 1024,
+            "temperature": 0.2
+        }
+        
+        # Yield OpenAI-compatible chunks natively from llama-cpp-python
+        for chunk in model_obj.create_chat_completion(**clean_kwargs):
+            yield chunk
+
+    _oi.llm.completions = _iris_native_oi_llm
+    _oi.llm.api_base = None
+    _oi.llm.model = "iris-native"
+    _oi.llm.context_window = 8192
+    _oi.llm.max_tokens = 1024
+    _oi.computer.languages = [lang for lang in _oi.computer.languages if lang.__name__ == "Python"]
 
     _oi.system_message = (
         "You are Iris, an AI PC assistant. "
-        "The user will describe a task. "
-        "Translate it into the appropriate shell or Python commands "
-        "and execute them accurately and safely on the user's machine. "
-        "Be concise. Do not ask follow-up questions."
+        "Write and execute ONLY Python code to fulfill the user's request. NEVER write raw Bash or Shell commands.\n"
+        "CRITICAL RULES:\n"
+        "1. NEVER use 'sudo' or administrative privileges.\n"
+        "2. ALWAYS launch desktop/GUI applications or files using non-blocking, fully-detached background processes so they DO NOT block the execution flow.\n"
+        "   Before launching, ALWAYS verify if the executable is available on the system path using `shutil.which`. If it does not exist (for example, 'whatsapp' or 'spotify' is not installed), fall back to opening its web interface in the default browser using Python's built-in `webbrowser` module (e.g., `webbrowser.open('https://web.whatsapp.com')`).\n"
+        "   When launching an executable, redirect stdout/stderr to subprocess.DEVNULL and set start_new_session=True. Example: import subprocess, shutil, webbrowser; cmd = 'gnome-control-center'; subprocess.Popen([cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True) if shutil.which(cmd) else webbrowser.open('https://example.com')\n"
+        "3. NEVER wait for GUI applications to exit, NEVER call .wait(), and NEVER write monitoring loops (e.g., polling with .poll() or using time.sleep) to check if the process is still running. Once you start the process with Popen, the task is complete. Return immediately.\n"
+        "4. To close/kill an application, write Python code to terminate its processes. Keep in mind that some launcher commands differ from the running process names: 'google-chrome' runs as 'chrome', 'libreoffice' runs as 'soffice' or 'soffice.bin', and 'gnome-terminal' runs as 'gnome-terminal-server'. Be careful to terminate the correct process names, and avoid matching substring patterns that might terminate this agent workspace (e.g., do not kill 'chrome-sandbox' or 'antigravity')."
     )
 
     OI_AVAILABLE = True
@@ -142,254 +174,14 @@ def _popen(cmd, shell: bool = False, **kw) -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 5 ── Action → Shell Command template table (offline, no LLM needed)
 # ═══════════════════════════════════════════════════════════════════════════
-import urllib.parse as _ulparse
-
-_LINUX_CMD: dict = {
-    # ── Apps ───────────────────────────────────────────────────────────────
-    "open_app": "{name} &",
-    "close_app": "pkill -f '{name}' 2>/dev/null; true",
-    "focus_app": "wmctrl -a '{name}' 2>/dev/null || true",
-    "kill_process": "pkill -f '{name}' 2>/dev/null; true",
-    "open_terminal": "gnome-terminal &",
-    "open_settings": "gnome-control-center &",
-    # ── Web / media ────────────────────────────────────────────────────────
-    "open_website": "xdg-open '{url}' &",
-    "web_search": "xdg-open 'https://www.google.com/search?q={query_enc}' &",
-    "youtube_video": "xdg-open 'https://www.youtube.com/results?search_query={query_enc}' &",
-    "youtube_channel": "xdg-open 'https://www.youtube.com/results?search_query={name_enc}+channel' &",
-    "spotify_song": "xdg-open 'https://open.spotify.com/search/{query_enc}' &",
-    # ── Volume ─────────────────────────────────────────────────────────────
-    "volume_up": "pactl set-sink-volume @DEFAULT_SINK@ +10%",
-    "volume_down": "pactl set-sink-volume @DEFAULT_SINK@ -10%",
-    "volume_mute": "pactl set-sink-mute @DEFAULT_SINK@ toggle",
-    "volume_set": "pactl set-sink-volume @DEFAULT_SINK@ {percent}%",
-    "set_volume": "pactl set-sink-volume @DEFAULT_SINK@ {percent}%",
-    # ── Brightness ─────────────────────────────────────────────────────────
-    "brightness_up": "brightnessctl set +10% 2>/dev/null || xrandr --output $(xrandr | grep ' connected' | head -1 | cut -d' ' -f1) --brightness 1.0",
-    "brightness_down": "brightnessctl set 10%- 2>/dev/null || true",
-    "brightness_set": "brightnessctl set {percent}% 2>/dev/null || true",
-    "set_brightness": "brightnessctl set {percent}% 2>/dev/null || true",
-    # ── Power ──────────────────────────────────────────────────────────────
-    "lock_screen": "loginctl lock-session",
-    "sleep_computer": "systemctl suspend",
-    "restart_computer": "reboot",
-    "shutdown_computer": "shutdown now",
-    # ── Files ──────────────────────────────────────────────────────────────
-    "open_file": "xdg-open '{path}' &",
-    "create_file": "mkdir -p \"$(dirname '{path}')\" && printf '%s' '{content}' > '{path}'",
-    "read_file": "cat '{path}'",
-    "delete_file": "rm -f '{path}'",
-    "create_folder": "mkdir -p '{path}'",
-    "move_file": "mv '{src}' '{dst}'",
-    "copy_file": "cp -r '{src}' '{dst}'",
-    "rename_file": "mv '{path}' \"$(dirname '{path}')/{new_name}\"",
-    "download_file": "wget -q -O '{path}' '{url}'",
-    "compress_files": "zip '{output}' {paths_str}",
-    "extract_file": "unzip -o '{path}' -d '{dest}'",
-    # ── System ─────────────────────────────────────────────────────────────
-    "run_command": "{command}",
-    "screenshot": "gnome-screenshot -f '{path}' 2>/dev/null || import '{path}'",
-    "notification": "notify-send '{title}' '{body}'",
-    "take_note": "echo '{content}' >> ~/iris_notes.txt",
-    "empty_trash": "rm -rf ~/.local/share/Trash/*",
-    "wifi": "nmcli radio wifi {state}",
-    "bluetooth": "rfkill {bt_op} bluetooth 2>/dev/null || bluetoothctl power {bt_power}",
-    "flush_dns": "sudo resolvectl flush-caches 2>/dev/null || sudo systemd-resolve --flush-caches",
-    "dark_mode": "gsettings set org.gnome.desktop.interface color-scheme prefer-{color_scheme}",
-    "set_wallpaper": "gsettings set org.gnome.desktop.background picture-uri 'file://{path}'",
-    "check_storage": "df -h /",
-    "disk_usage": "df -h {path}",
-    "clipboard_copy": "echo -n '{text}' | xclip -selection clipboard 2>/dev/null || echo -n '{text}' | xsel --clipboard --input",
-    "clipboard_read": "xclip -selection clipboard -o 2>/dev/null || xsel --clipboard --output",
-    "set_env": "export {key}='{value}'",
-    "media_play_pause": "playerctl play-pause 2>/dev/null || dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.PlayPause",
-    "media_next": "playerctl next 2>/dev/null || true",
-    "media_previous": "playerctl previous 2>/dev/null || true",
-    "media_stop": "playerctl stop 2>/dev/null || true",
-    # ── Window ─────────────────────────────────────────────────────────────
-    "window_close": "xdotool getactivewindow windowclose 2>/dev/null || true",
-    "window_minimize": "xdotool getactivewindow windowminimize 2>/dev/null || true",
-    "window_maximize": "wmctrl -r :ACTIVE: -b toggle,maximized_vert,maximized_horz 2>/dev/null || true",
-}
-
-
-def _action_dict_to_cmd(action_dict: dict) -> str | None:
-    """Translate an action dict to a Linux shell command using the template table."""
-    action = action_dict.get("action", "")
-    template = _LINUX_CMD.get(action)
-    if not template:
-        return None
-
-    d = dict(action_dict)
-
-    # URL-encode string fields that may appear in URLs
-    for key in ("query", "name", "content", "title", "body", "text"):
-        if key in d and isinstance(d[key], str):
-            d[f"{key}_enc"] = _ulparse.quote_plus(d[key])
-
-    # Normalise percent values (strip %, convert to int string)
-    for pkey in ("percent", "pct"):
-        if pkey in d:
-            val = str(d[pkey]).replace("%", "").strip()
-            try:
-                d["percent"] = str(int(float(val)))
-            except ValueError:
-                d["percent"] = "50"
-            break
-    if "percent" not in d:
-        d["percent"] = "50"
-
-    # bluetooth on/off → rfkill unblock/block + bluetoothctl on/off
-    state = str(d.get("state", "on")).lower()
-    d["bt_op"] = "unblock" if state == "on" else "block"
-    d["bt_power"] = "on" if state == "on" else "off"
-
-    # dark_mode: state on → prefer-dark, off → prefer-light
-    d["color_scheme"] = "dark" if state == "on" else "light"
-
-    # compress_files: list of paths → space-separated quoted strings
-    paths = d.get("paths", [])
-    d["paths_str"] = " ".join(f"'{p}'" for p in paths) if paths else ""
-
-    try:
-        return template.format_map(d)
-    except KeyError:
-        return None
+# (Removed hardcoded _LINUX_CMD and _action_dict_to_cmd to fully rely on Open Interpreter for dynamic OS commands)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Smart action resolver — handles any verb_subject action offline, no LLM
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Maps subject keywords → real Linux process / command name
-_SUBJECT_MAP: dict[str, str] = {
-    # System tools
-    "settings":        "gnome-control-center",
-    "control_center":  "gnome-control-center",
-    "terminal":        "gnome-terminal",
-    "console":         "gnome-terminal",
-    "shell":           "gnome-terminal",
-    "calculator":      "gnome-calculator",
-    "files":           "nautilus",
-    "file_manager":    "nautilus",
-    "explorer":        "nautilus",
-    "monitor":         "gnome-system-monitor",
-    "system_monitor":  "gnome-system-monitor",
-    "task_manager":    "gnome-system-monitor",
-    "text_editor":     "gedit",
-    "editor":          "gedit",
-    "notepad":         "gedit",
-    "disk":            "gnome-disk-utility",
-    "disks":           "gnome-disk-utility",
-    "software":        "gnome-software",
-    "store":           "gnome-software",
-    "calendar":        "gnome-calendar",
-    "contacts":        "gnome-contacts",
-    "clock":           "gnome-clocks",
-    "clocks":          "gnome-clocks",
-    "maps":            "gnome-maps",
-    "weather":         "gnome-weather",
-    "camera":          "cheese",
-    "screenshot":      "gnome-screenshot",
-    "photos":          "shotwell",
-    "image_viewer":    "eog",
-    "archive":         "file-roller",
-    "archive_manager": "file-roller",
-    "printer":         "system-config-printer",
-    # Browsers
-    "chrome":          "google-chrome",
-    "chromium":        "chromium-browser",
-    "firefox":         "firefox",
-    "browser":         "xdg-open https://",
-    "edge":            "microsoft-edge",
-    # Dev tools
-    "vscode":          "code",
-    "code":            "code",
-    "sublime":         "subl",
-    "vim":             "vim",
-    "nvim":            "nvim",
-    "git":             "git",
-    "docker":          "docker",
-    # Media
-    "spotify":         "spotify",
-    "vlc":             "vlc",
-    "video":           "totem",
-    "music":           "rhythmbox",
-    "rhythmbox":       "rhythmbox",
-    # Office
-    "libreoffice":     "libreoffice",
-    "writer":          "libreoffice --writer",
-    "calc":            "libreoffice --calc",
-    "impress":         "libreoffice --impress",
-    "word":            "libreoffice --writer",
-    "excel":           "libreoffice --calc",
-    # Comms
-    "thunderbird":     "thunderbird",
-    "mail":            "thunderbird",
-    "email":           "thunderbird",
-    "slack":           "slack",
-    "discord":         "discord",
-    "telegram":        "telegram-desktop",
-    "zoom":            "zoom",
-    "teams":           "teams",
-    "skype":           "skype",
-    # Misc
-    "steam":           "steam",
-    "obs":             "obs",
-    "gimp":            "gimp",
-    "inkscape":        "inkscape",
-    "blender":         "blender",
-}
-
-# Maps verb keywords → shell command template  ({cmd} = resolved process name)
-_VERB_PATTERNS: dict[str, str] = {
-    "open":    "{cmd} &",
-    "launch":  "{cmd} &",
-    "start":   "{cmd} &",
-    "show":    "{cmd} &",
-    "run":     "{cmd} &",
-    "close":   "pkill -f '{cmd}' 2>/dev/null; true",
-    "kill":    "pkill -9 -f '{cmd}' 2>/dev/null; true",
-    "stop":    "pkill -f '{cmd}' 2>/dev/null; true",
-    "quit":    "pkill -f '{cmd}' 2>/dev/null; true",
-    "exit":    "pkill -f '{cmd}' 2>/dev/null; true",
-    "hide":    "pkill -f '{cmd}' 2>/dev/null; true",
-    "restart": "pkill -f '{cmd}' 2>/dev/null; sleep 0.5; {cmd} &",
-    "relaunch": "pkill -f '{cmd}' 2>/dev/null; sleep 0.5; {cmd} &",
-    "focus":   "wmctrl -a '{cmd}' 2>/dev/null || {cmd} &",
-    "minimize": "xdotool search --name '{cmd}' windowminimize 2>/dev/null || true",
-    "maximize": "xdotool search --name '{cmd}' windowactivate 2>/dev/null || true",
-}
-
-
-def _smart_action_resolve(action_dict: dict) -> str | None:
-    """
-    Tier-3 offline resolver: splits any action like 'close_settings' or
-    'restart_spotify' into (verb, subject), resolves subject → process name,
-    then generates a shell command — no LLM or API key required.
-
-    Returns None if the action cannot be decomposed.
-    """
-    action = action_dict.get("action", "")
-    parts = action.lower().split("_", 1)          # e.g. ['close', 'settings']
-    if len(parts) != 2:
-        return None
-
-    verb, subject = parts[0], parts[1]
-
-    verb_template = _VERB_PATTERNS.get(verb)
-    if not verb_template:
-        return None
-
-    # Resolve subject → real command; fall back to subject itself (e.g. 'gedit')
-    cmd = _SUBJECT_MAP.get(subject, subject.replace("_", "-"))
-
-    # Allow action_dict to override with an explicit 'name' or 'app' field
-    cmd = action_dict.get("name") or action_dict.get("app") or cmd
-
-    shell_cmd = verb_template.format(cmd=cmd)
-    logger.info(f"[SmartResolve] '{action}' → '{shell_cmd}'")
-    return shell_cmd
+# (Removed hardcoded _SUBJECT_MAP, _VERB_PATTERNS, and _smart_action_resolve to fully rely on Open Interpreter)
 
 
 def _exec_shell_cmd(cmd: str) -> str:
@@ -414,7 +206,7 @@ def _run_oi_task(task: str) -> str:
     try:
         _oi.messages = []
         parts = []
-        for chunk in _oi.chat(task, display=False, stream=True, blocking=True):
+        for chunk in _oi.chat(task, display=True, stream=True, blocking=True):
             if not isinstance(chunk, dict):
                 continue
             chunk_type = chunk.get("type", "")
@@ -1105,9 +897,18 @@ def _dispatch_action(action: str, d: dict) -> str:
     handler exists (caller then falls back to the template table / OI)."""
     g = d.get  # shorthand
 
+    def clean_url(url_val):
+        if not url_val:
+            return ""
+        # Match markdown links like [text](url)
+        m = re.match(r'^\[.*?\]\((.*?)\)$', str(url_val).strip())
+        if m:
+            return m.group(1).strip()
+        return str(url_val).strip()
+
     # ── Browser / web ────────────────────────────────────────────────────────
     if action == "open_website":
-        return handle_website_from_url(g("url", ""))
+        return handle_website_from_url(clean_url(g("url", "")))
     if action == "web_search":
         return web_search(g("query", ""))
     if action == "youtube_video":
@@ -1125,67 +926,23 @@ def _dispatch_action(action: str, d: dict) -> str:
             )
         except Exception as e:
             return f"Browser automation unavailable: {e}"
+        url_clean = clean_url(g("url", ""))
         if action == "browser_login":
-            return browser_login(g("url", ""), g("username", ""), g("password", ""))
+            return browser_login(url_clean, g("username", ""), g("password", ""))
         if action == "browser_task":
-            return browser_task(g("url", ""), g("task", ""))
+            return browser_task(url_clean, g("task", ""))
         return browser_autopilot(
-            g("url", ""), g("task", ""), resume_path=g("resume_path")
+            url_clean, g("task", ""), resume_path=g("resume_path")
         )
 
-    # ── Apps / windows ───────────────────────────────────────────────────────
-    if action == "open_app":
-        return handle_app_by_name(g("name", ""))
-    if action == "close_app":
-        return handle_close_app_by_name(g("name", ""))
-    if action == "focus_app":
-        return handle_focus_app(g("name", ""))
-    if action == "open_settings":
-        return handle_open_settings()
-    if action == "open_terminal":
-        return handle_open_terminal(g("command"))
-    if action == "window_close":
-        return handle_window_close()
-    if action == "window_minimize":
-        return handle_window_minimize()
-    if action == "window_maximize":
-        return handle_window_maximize()
-    if action == "window_fullscreen":
-        return handle_window_fullscreen()
-    if action == "switch_tab":
-        return handle_switch_tab(g("direction", "next"))
+    # ── Miscellaneous / Core plugins ─────────────────────────────────────────
+    if action == "gui_action":
+        try:
+            from src.gui_agent import perform_gui_action
+            return perform_gui_action(g("task", ""))
+        except Exception as e:
+            return f"GUI automation unavailable: {e}"
 
-    # ── Files & folders ──────────────────────────────────────────────────────
-    if action == "open_file":
-        return handle_open_file(g("path", ""))
-    if action == "search_files":
-        return handle_search_files(g("query", ""), g("folder") or g("path", "."))
-    if action == "create_file":
-        return handle_create_file(g("path", ""), g("content", ""))
-    if action == "read_file":
-        return handle_read_file(g("path", ""))
-    if action == "append_file":
-        return handle_append_file(g("path", ""), g("content", ""))
-    if action == "replace_in_file":
-        return handle_replace_in_file(g("path", ""), g("find", ""), g("replace", ""))
-    if action == "fix_file":
-        return handle_fix_file(g("path", ""), g("instructions", ""))
-    if action == "move_file":
-        return handle_move_file(g("src", ""), g("dst", ""))
-    if action == "copy_file":
-        return handle_copy_file(g("src", ""), g("dst", ""))
-    if action == "delete_file":
-        return handle_delete_file(g("path", ""))
-    if action == "create_folder":
-        return handle_create_folder(g("path", ""))
-    if action == "rename_file":
-        return handle_rename_file(g("path", ""), g("new_name", ""))
-    if action == "compress_files":
-        return handle_compress_files(g("paths", []), g("output", ""))
-    if action == "extract_file":
-        return handle_extract_file(g("path", ""), g("dest") or g("dst", "."))
-    if action == "download_file":
-        return handle_download_file(g("url", ""), g("path", ""))
     if action == "parse_resume":
         try:
             from src.browser_agent import parse_resume
@@ -1194,11 +951,26 @@ def _dispatch_action(action: str, d: dict) -> str:
         except Exception as e:
             return f"Resume parsing unavailable: {e}"
 
-    # ── Terminal / code / vision ─────────────────────────────────────────────
-    if action == "run_command":
-        return handle_run_command(g("command", ""))
-    if action == "run_code":
-        return handle_run_code(g("code", ""))
+    # ── Hardcoded OS Actions ─────────────────────────────────────────────────
+    if action in ("volume_up", "volume_down", "volume_mute"):
+        from src.system_actions import set_volume
+        return set_volume(action, g("amount", "5%"))
+    if action in ("brightness_up", "brightness_down"):
+        from src.system_actions import set_brightness
+        return set_brightness(action, g("amount", "5%"))
+    if action in ("lock_screen", "sleep_computer", "shutdown_computer", "restart_computer"):
+        from src.system_actions import control_power
+        return control_power(action)
+    if action in ("read_clipboard", "write_clipboard"):
+        from src.system_actions import manage_clipboard
+        return manage_clipboard(action, g("text", ""))
+    if action == "open_app":
+        from src.system_actions import open_app
+        app_name = g("name", "")
+        result = open_app(app_name)
+        logger.info(f"[Action] open_app → handled natively")
+        return result
+
     if action == "analyze_image":
         try:
             from src.iris import analyze_image
@@ -1211,101 +983,12 @@ def _dispatch_action(action: str, d: dict) -> str:
     if action == "search_image_web":
         return handle_search_image_web(g("image_path", ""))
 
-    # ── Dev-tool shims (prefix + run through the auto-installing runner) ──────
-    if action in ("git", "docker", "npm", "pip", "brew", "apt", "winget"):
-        sub = g("command", "")
-        return handle_run_command(f"{action} {sub}".strip())
-
-    # ── Email & communication ────────────────────────────────────────────────
     if action == "send_email":
         return handle_email_from_parts(
             g("to", ""), g("subject", ""), g("body", ""), load_config()
         )
 
-    # ── Media & audio ────────────────────────────────────────────────────────
-    if action in ("media_play_pause", "media_next", "media_previous", "media_stop"):
-        return handle_media(action.replace("media_", ""))
-    if action == "volume_up":
-        return handle_volume("up")
-    if action == "volume_down":
-        return handle_volume("down")
-    if action == "volume_mute":
-        return handle_volume("mute")
-    if action in ("volume_set", "set_volume"):
-        return handle_volume_set(_pct(g("percent", g("pct", 50))))
-    if action == "say":
-        return handle_say(g("text", ""))
-
-    # ── Display & appearance ─────────────────────────────────────────────────
-    if action == "brightness_up":
-        return handle_brightness("up")
-    if action == "brightness_down":
-        return handle_brightness("down")
-    if action in ("brightness_set", "set_brightness"):
-        return handle_brightness_set(_pct(g("percent", g("pct", 50))))
-    if action == "dark_mode":
-        return handle_dark_mode(g("state", "on"))
-    if action == "night_shift":
-        return handle_night_shift(g("state", "on"))
-    if action == "set_wallpaper":
-        return handle_set_wallpaper(g("path", ""))
-    if action == "screenshot":
-        return handle_screenshot(g("path", "~/Desktop/screenshot.png"))
-    if action == "screen_record":
-        return handle_screen_record(g("path", "~/Desktop/recording.mp4"), int(g("duration", 10)))
-
-    # ── Power & lock ─────────────────────────────────────────────────────────
-    if action == "lock_screen":
-        return handle_lock_screen()
-    if action == "sleep_computer":
-        return handle_sleep()
-    if action == "restart_computer":
-        return handle_restart()
-    if action == "shutdown_computer":
-        return handle_shutdown()
-    if action == "do_not_disturb":
-        return handle_dnd(g("state", "on"))
-
-    # ── System ───────────────────────────────────────────────────────────────
-    if action == "system_info":
-        return get_system_info(g("what", "all"))
-    if action in ("check_storage", "disk_usage", "disk_usage_of"):
-        return _handle_check_storage(d)
-    if action == "kill_process":
-        return handle_kill_process(g("name", ""))
-    if action == "clipboard_copy":
-        return clipboard_copy(g("text", ""))
-    if action == "clipboard_read":
-        return clipboard_read()
-    if action == "set_env":
-        return handle_set_env(g("key", ""), g("value", ""))
-    if action == "notification":
-        return handle_notification(g("title", "Iris"), g("body", ""))
-
-    # ── Network ──────────────────────────────────────────────────────────────
-    if action == "wifi":
-        return handle_wifi(g("state", "on"))
-    if action == "bluetooth":
-        return handle_bluetooth(g("state", "on"))
-    if action == "vpn":
-        return handle_vpn(g("vpn_action") or g("action_type", "connect"), g("name", ""))
-    if action == "network_speed_test":
-        return handle_speed_test()
-    if action == "flush_dns":
-        return handle_flush_dns()
-
-    # ── Miscellaneous ────────────────────────────────────────────────────────
-    if action == "take_note":
-        return handle_take_note(g("content", ""))
-    if action == "empty_trash":
-        return handle_empty_trash()
-    if action == "type_text":
-        return handle_type_text(g("text", ""))
-    if action == "press_keys":
-        return handle_press_keys(g("keys", ""))
-
     return None
-
 
 def _pct(val) -> int:
     """Coerce a percent-ish value ('70', '70%', 70) to an int in [0, 100]."""
@@ -1382,9 +1065,8 @@ def _confirm_risky(action_dict: dict) -> bool:
 def execute_action_by_dict(action_dict: dict) -> str:
     """
     Execute a single action dict.
-      1. Native cross-platform handler via _dispatch_action()   (macOS/Windows/Linux)
-      2. Linux template table → _exec_shell_cmd()               (offline, no LLM)
-      3. Unknown action → returns a descriptive error message   (no LLM required)
+      1. Core native plugins (browser, email, youtube, etc.) via _dispatch_action()
+      2. Dynamic execution via Open Interpreter for all system and file operations
     """
     action = action_dict.get("action", "chat")
 
@@ -1392,40 +1074,27 @@ def execute_action_by_dict(action_dict: dict) -> str:
     if action in ("chat", "finish", "none", ""):
         return ""
 
-    # ── Tier 1: native cross-platform handler ────────────────────────────────
+    # ── Tier 1: Core native plugins ──────────────────────────────────────────
     try:
         result = _dispatch_action(action, action_dict)
     except Exception as e:
         logger.warning(f"[Dispatch] '{action}' raised: {e}")
         return f"Action '{action}' failed: {e}"
     if result is not None:
-        logger.info(f"[Action] {action} → handled natively")
+        logger.info(f"[Action] {action} → handled natively (simple)")
         return result
 
-    # ── Tier 2: Linux template-based shell execution ─────────────────────────
-    cmd = _action_dict_to_cmd(action_dict)
-    if cmd:
-        logger.info(f"[CMD] {action} → {cmd[:100]}")
-        return _exec_shell_cmd(cmd)
-
-    # ── Tier 3: smart verb+noun decomposer (offline, no LLM) ────────────────────
-    # Splits e.g. 'close_settings' → verb='close', subject='settings' →
-    # resolves to 'pkill -f gnome-control-center'. No API key needed.
-    smart_cmd = _smart_action_resolve(action_dict)
-    if smart_cmd:
-        logger.info(f"[SmartResolve] {action} → executing: {smart_cmd[:100]}")
-        return _exec_shell_cmd(smart_cmd)
-
-    # ── Tier 4: OI fallback (only if offline=False and local server is up) ──────
-    # _run_oi_task() is safe to call here because _oi.offline=True prevents any
-    # external API call; it will only work if a local llama.cpp/Ollama server is
-    # reachable at IRIS_OI_API_BASE (default: localhost:11434).
-    logger.warning(f"[Action] Unknown action '{action}' — trying OI fallback")
-    task_parts = [f"Task: {action}"]
+    # ── Tier 2: Open Interpreter via 3B model for complex actions ─────────────
+    logger.info(f"[Action] {action} → routing to 3B+OI for complex execution")
+    task_parts = [f"Please perform the following action on my system:\nAction: {action}"]
     for key, val in action_dict.items():
         if key != "action":
-            task_parts.append(f"  {key}: {val}")
-    return _run_oi_task("\n".join(task_parts))
+            task_parts.append(f"{key}: {val}")
+    task_str = "\n".join(task_parts)
+    
+    # Load the 3B model into OI before running
+    _prime_oi_with_3b()
+    return _run_oi_task(task_str)
 
 
 _AGENT_LOOP_ADDENDUM = """
@@ -1446,11 +1115,106 @@ You operate as a multi-step agent. A single request may need several actions.
 """
 
 
-def _generate_control_action(messages: list, max_tokens: int = 1024) -> str:
-    """Run the local CONTROL model once over `messages`, return raw text."""
-    from src.iris import ModelRole, load_model
+# ═══════════════════════════════════════════════════════════════════════════
+# DUAL-MODEL CONTROL ROUTING
+# 0.5B (CONTROL) → simple/native actions  |  3B+OI (CODE) → complex tasks
+# ═══════════════════════════════════════════════════════════════════════════
 
-    llm = load_model(ModelRole.CONTROL)
+# Actions that the 0.5B model handles fully — no OI or 3B needed.
+_SIMPLE_ACTIONS: set = {
+    # App management
+    "open_app", "close_app", "focus_app",
+    # Window management
+    "window_close", "window_minimize", "window_maximize", "window_fullscreen", "switch_tab",
+    # Volume / audio
+    "volume_up", "volume_down", "volume_mute", "volume_set",
+    "media_play_pause", "media_next", "media_previous", "media_stop",
+    # Brightness / display
+    "brightness_up", "brightness_down", "brightness_set",
+    "dark_mode", "night_shift", "set_wallpaper",
+    # Power
+    "lock_screen", "sleep_computer", "shutdown_computer", "restart_computer",
+    "do_not_disturb",
+    # Clipboard
+    "clipboard_copy", "clipboard_read", "read_clipboard", "write_clipboard",
+    # Simple system info
+    "system_info", "check_storage", "disk_usage",
+    # Simple file ops
+    "create_file", "delete_file", "create_folder", "rename_file",
+    "move_file", "copy_file", "open_file",
+    # Simple input
+    "type_text", "press_keys", "say", "take_note", "notification",
+    # Screenshot
+    "screenshot",
+    # Network simple toggles
+    "wifi", "bluetooth",
+    # YouTube (deterministic)
+    "youtube_video", "youtube_channel",
+    # Terminal / quick commands
+    "run_command", "open_terminal",
+}
+
+# Actions that REQUIRE the 3B model + Open Interpreter.
+_COMPLEX_ACTIONS: set = {
+    "gui_action",
+    "browser_task", "browser_autopilot", "browser_login",
+    "send_email",
+    "web_search",
+    "run_code",
+    "download_file",
+    "parse_resume",
+    "compress_files", "extract_file",
+    "replace_in_file", "fix_file", "append_file", "read_file",
+    "search_files",
+    "npm", "pip", "git", "docker", "brew", "apt", "winget",
+    "network_speed_test", "flush_dns", "vpn",
+    "kill_process",
+    "screen_record",
+    "set_env",
+    "search_image_web", "analyze_image",
+    "spotify_song", "open_website",
+}
+
+
+def _is_complex_action(action: str) -> bool:
+    """Return True if the action should be handled by 3B+OI instead of 0.5B."""
+    if action in _COMPLEX_ACTIONS:
+        return True
+    # Any action not explicitly listed as simple is treated as complex
+    if action not in _SIMPLE_ACTIONS:
+        return True
+    return False
+
+
+def _prime_oi_with_3b():
+    """Ensure OI's native LLM bridge is wired to the 3B CODE model."""
+    if not OI_AVAILABLE:
+        return
+    from src.iris import ModelRole, load_model, _model_pool
+    # Load the 3B model into the pool so OI picks it up
+    try:
+        load_model(ModelRole.CODE)
+        logger.info("[OI] Primed with 3B CODE model for complex action.")
+    except Exception as e:
+        logger.warning(f"[OI] Could not prime 3B model: {e}")
+
+
+def _generate_control_action(messages: list, user_query: str = "", max_tokens: int = 1024) -> str:
+    """Run the appropriate model over `messages`, return raw text.
+    
+    - Simple queries → 0.5B CONTROL model (fast, low memory)
+    - Complex queries → 3B CODE model (smarter, handles GUI/browser/email)
+    """
+    from src.iris import ModelRole, load_model
+    from src.iris import _is_complex_control
+
+    if _is_complex_control(user_query, []):
+        logger.info("[Model] Complex control → using 3B CODE model")
+        llm = load_model(ModelRole.CODE)
+    else:
+        logger.info("[Model] Simple control → using 0.5B CONTROL model")
+        llm = load_model(ModelRole.CONTROL)
+
     out = ""
     for chunk in llm.create_chat_completion(
         messages=messages, max_tokens=max_tokens, stream=True, temperature=0.1
@@ -1483,7 +1247,7 @@ def agentic_control_loop(
     history = history or []
     settings = settings or {}
     auto_confirm = bool(settings.get("auto_confirm", False))
-    gen = model_callable or _generate_control_action
+    gen = model_callable or (lambda msgs: _generate_control_action(msgs, user_query=user_query))
 
     sys_prompt = _get_agent_system_prompt() + _AGENT_LOOP_ADDENDUM
     messages = [{"role": "system", "content": sys_prompt}]
@@ -1527,6 +1291,12 @@ def agentic_control_loop(
         action = action_dict.get("action", "chat")
         messages.append({"role": "assistant", "content": raw})
 
+        # ── Model/execution-tier label ─────────────────────────────────────────
+        if _is_complex_action(action):
+            yield {"type": "status", "content": f"Complex action '{action}' → 3B+OI"}
+        else:
+            yield {"type": "status", "content": f"Simple action '{action}' → native handler"}
+
         # ── Terminal actions ─────────────────────────────────────────────────
         if action in ("finish", "none"):
             summary = action_dict.get("summary", "")
@@ -1562,9 +1332,23 @@ def agentic_control_loop(
             "type": "action_result",
             "content": f"Action '{action}' Executed.\nResult:\n{result}",
         }
-        messages.append(
-            {"role": "user", "content": f"OBSERVATION: {result[:2000]}"}
-        )
+        # ── Inject GUI continuation hint after open_app for messaging tasks ──
+        observation_content = f"OBSERVATION: {result[:2000]}"
+        if action == "open_app" and result.startswith("✅"):
+            _original_task_lower = user_query.lower()
+            _gui_followup_keywords = {
+                "whatsapp", "telegram", "message", "send", "text", "chat",
+                "click", "type", "search for", "open the chat", "im iris"
+            }
+            if any(kw in _original_task_lower for kw in _gui_followup_keywords):
+                app_opened = action_dict.get("name", "the app")
+                observation_content = (
+                    f"OBSERVATION: {result}\n"
+                    f"{app_opened} is now open on screen. "
+                    f"The original task is NOT complete yet — you must continue. "
+                    f"Use gui_action with a detailed step-by-step task description to finish: {user_query}"
+                )
+        messages.append({"role": "user", "content": observation_content})
 
     # max_steps reached without an explicit finish
     final = _join_transcript(transcript) or "Reached the step limit."
@@ -3852,14 +3636,33 @@ def handle_kill_process(name: str) -> str:
         os.kill(pid, 9)
         return f"Killed process PID {pid}."
     else:
+        # Resolve common process name aliases (e.g. google-chrome runs as chrome)
+        aliases = []
+        name_lower = name.lower()
+        if name_lower in ("google-chrome", "chrome"):
+            aliases = ["google-chrome", "chrome"]
+        elif name_lower == "libreoffice":
+            aliases = ["libreoffice", "soffice", "soffice.bin"]
+        elif name_lower == "gnome-terminal":
+            aliases = ["gnome-terminal", "gnome-terminal-server"]
+
         if system == "Windows":
-            _shell(
-                f'taskkill /F /IM "{name}" || taskkill /F /IM "{name}.exe"', shell=True
-            )
+            targets = [name, f"{name}.exe"]
+            for a in aliases:
+                targets.extend([a, f"{a}.exe"])
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_targets = [x for x in targets if not (x in seen or seen.add(x))]
+            cmd = " || ".join(f'taskkill /F /IM "{t}"' for t in unique_targets)
+            _shell(cmd, shell=True)
         elif system == "Darwin":
-            _shell(f'pkill -9 -i -f "{name}"', shell=True)
+            targets = [name] + [a for a in aliases if a != name]
+            cmd = " || ".join(f'pkill -9 -i -x "{t}"' for t in targets)
+            _shell(cmd, shell=True)
         else:
-            _shell(f'pkill -9 -i -f "{name}" || killall -9 -I "{name}"', shell=True)
+            targets = [name] + [a for a in aliases if a != name]
+            cmd = " || ".join(f'pkill -9 -i -x "{t}" || killall -9 -I "{t}"' for t in targets)
+            _shell(cmd, shell=True)
         return f"Sent terminate signal to process '{name}'."
 
 
@@ -4386,7 +4189,7 @@ This is a full-featured terminal interface for controlling your computer and cha
         console.print(Markdown(welcome_md))
     else:
         # Render the entire chat to lines, then apply scroll window
-        all_lines = _render_body_lines(history, cols)
+        all_lines = _render_body_lines(history, cols - 2)
         total_lines = len(all_lines)
 
         # Auto-scroll to bottom whenever new content arrives (offset 0 = bottom)
@@ -4625,35 +4428,35 @@ def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) ->
         # Print prompt
         console.print(prompt_str, end="")
         sys.stdout.flush()
-
+ 
         while True:
             ch = sys.stdin.read(1)
-
+ 
             if ch == "\r" or ch == "\n":
                 # Enter pressed — submit
                 sys.stdout.write("\r\n")
                 sys.stdout.flush()
                 break
-
+ 
             elif ch == "\x03":
                 # Ctrl-C
                 raise KeyboardInterrupt
-
+ 
             elif ch == "\x04":
                 # Ctrl-D / EOF
                 raise EOFError
-
+ 
             elif ch == "\x7f" or ch == "\x08":
                 # Backspace
                 if buf:
                     buf.pop()
                     sys.stdout.write("\b \b")
                     sys.stdout.flush()
-
+ 
             elif ch == "\x1b":
                 # Escape sequence — read 2 more bytes
                 seq = sys.stdin.read(2)
-                if seq == "[A":
+                if seq in ("[A", "OA"):
                     # UP arrow — scroll up (show older content)
                     _scroll_offset = min(_scroll_offset + (body_height // 3), 9999)
                     termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
@@ -4662,7 +4465,7 @@ def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) ->
                     console.print(prompt_str, end="")
                     sys.stdout.write("".join(buf))
                     sys.stdout.flush()
-                elif seq == "[B":
+                elif seq in ("[B", "OB"):
                     # DOWN arrow — scroll down (show newer content)
                     _scroll_offset = max(_scroll_offset - (body_height // 3), 0)
                     termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
@@ -4691,14 +4494,14 @@ def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) ->
                     console.print(prompt_str, end="")
                     sys.stdout.write("".join(buf))
                     sys.stdout.flush()
-                # Ignore other escape sequences (left/right arrows, fn keys, etc.)
-
+                # Ignore other escape sequences (left/right arrows, mouse clicks, fn keys, etc.)
+ 
             elif ch >= " ":
                 # Printable character
                 buf.append(ch)
                 sys.stdout.write(ch)
                 sys.stdout.flush()
-
+ 
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 

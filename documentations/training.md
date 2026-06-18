@@ -238,7 +238,7 @@ python train.py --train-role code --iters 0 --skip-training
 ```
 models/
 ├── iris_001.gguf  (triage)
-├── iris_002.gguf  (router)
+├── iris_004.gguf  (router)
 ├── iris_003.gguf  (control)
 ├── iris_004.gguf  (math)
 ├── iris_005.gguf  (code)

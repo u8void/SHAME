@@ -15,7 +15,7 @@
   "gguf": {
     "triage": "iris_001.gguf",
     "router": "iris_001.gguf",
-    "control": "iris_002.gguf",
+    "control": "iris_004.gguf",
     "math": "iris_003.gguf",
     "code": "iris_004.gguf",
     "reasoning": "iris_005.gguf",

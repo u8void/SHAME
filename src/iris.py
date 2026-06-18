@@ -160,7 +160,7 @@ CONFIG_PATH = os.path.join(os.path.dirname(_HERE), "config", "iris.conf")
 DEFAULT_MODEL_FILES: Dict[str, str] = {
     "triage":    "iris_001.gguf",
     "router":    "iris_001.gguf",
-    "control":   "iris_002.gguf",
+    "control":   "iris_004.gguf",
     "math":      "iris_003.gguf",
     "code":      "iris_004.gguf",
     "reasoning": "iris_005.gguf",
@@ -173,7 +173,7 @@ _MODEL_SOURCES: Dict[str, list] = {
     "iris_001.gguf": [
         ("unsloth/Qwen3-4B-GGUF", "Qwen3-4B-Q4_K_M.gguf"),
     ],
-    "iris_002.gguf": [
+    "iris_004.gguf": [
         ("Qwen/Qwen2.5-Coder-7B-Instruct-GGUF", "qwen2.5-coder-7b-instruct-q4_k_m.gguf"),
     ],
     "iris_003.gguf": [
@@ -236,7 +236,7 @@ TRIAGE_SYSTEM_PROMPT = (
     "   [ROUTE: MATH]              — math problems, equations, proofs\n"
     "   [ROUTE: CODE_SIMPLE]       — small code snippets, functions, HTML/CSS/JS UI elements, or programming problems\n"
     "   [ROUTE: CODE_COMPLEX]      — full projects, multi-file code, games, complete websites or web apps\n"
-    "   [ROUTE: CONTROL]           — OS/PC commands: open apps, run commands, check system\n\n"
+    "   [ROUTE: CONTROL]           — OS/PC commands, app controls, messaging, browser automation (log in, WhatsApp/Telegram messaging, form filling, clicking web buttons), email, system checks, power control\n\n"
     "CRITICAL ROUTING RULE:\n"
     "- If the user asks to 'solve in c++', 'write a script', 'create a website', 'write html/css', or pastes a large algorithmic problem description, you MUST route to [ROUTE: CODE_SIMPLE], [ROUTE: CODE_COMPLEX], or [ROUTE: MATH].\n"
     "- OVERRIDE RULE: If the prompt contains 'build a landing page', 'HTML', or 'Tailwind', you MUST choose [ROUTE: CODE_COMPLEX]. Do not choose [ROUTE: CONTROL] even if the website design mentions mock terminal commands.\n"
@@ -248,6 +248,8 @@ TRIAGE_SYSTEM_PROMPT = (
     "User: create a tailwind css landing page → [ROUTE: CODE_COMPLEX]\n"
     "User: 2+2 → [ROUTE: MATH]\n"
     "User: open spotify → [ROUTE: CONTROL]\n"
+    "User: send a whatsapp message to Mom saying hello → [ROUTE: CONTROL]\n"
+    "User: login to github for me → [ROUTE: CONTROL]\n"
     "User: hi → Hello! How can I help you today?\n\n"
     "Output ONLY the tag. No explanation. No other text."
 )
@@ -820,15 +822,24 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
 
     control_keywords = {
         "open", "close", "launch", "start", "run", "play", "send", "copy",
-        "kill", "stop", "quit", "exit", "terminate",
-        "set volume", "set brightness",
-        "brightness", "clipboard", "email", "spotify", "youtube", "terminal", "command",
+        "kill", "stop", "quit", "exit", "terminate", "reboot", "suspend", "hibernate", "poweroff",
+        "set volume", "set brightness", "set", "volume", "brightness", "mute", "unmute",
+        "increase volume", "decrease volume", "volume level", "brightness level",
+        "clipboard", "email", "spotify", "youtube", "terminal", "command",
         "lock screen", "sleep", "restart", "shutdown", "check storage", "free storage",
-        "disk usage", "disk space", "free space", "storage left",
-        "system info", "wifi", "bluetooth", "take note", "screenshot", "record",
+        "disk usage", "disk space", "free space", "storage left", "disk", "storage",
+        "system info", "wifi", "bluetooth", "take note", "screenshot", "record", "screen record",
         "check memory", "check battery", "empty trash", "type text", "press key",
-        "volume", "mute", "unmute", "increase volume", "decrease volume",
-        "dark mode", "night mode", "wallpaper", "notification",
+        "dark mode", "night mode", "wallpaper", "notification", "alert", "notify",
+        "message", "text", "whatsapp", "telegram", "quiz", "autopilot", "login", "browser",
+        "maximize", "minimize", "fullscreen", "switch tab", "close window",
+        "delete file", "delete folder", "create file", "create folder", "move file", "copy file",
+        "rename", "unzip", "extract", "compress", "zip file", "download file",
+        "git pull", "git push", "git commit", "docker run", "docker ps", "npm install", "pip install",
+        "apt update", "apt install", "winget install", "brew install",
+        "vpn connect", "vpn disconnect", "speed test", "flush dns",
+        "type", "press", "say", "do not disturb", "dnd", "read clipboard", "write clipboard",
+        "open settings", "system settings", "control panel",
     }
     for kw in control_keywords:
         if q.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", q):
@@ -848,7 +859,9 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
         "storage", "disk space", "disk usage", "free space", "hard drive",
         "battery", "battery percentage", "battery life", "ram", "memory usage",
         "cpu usage", "wifi", "wi-fi", "bluetooth", "volume level", "brightness level",
-        "system info", "specs", "disk",
+        "system info", "specs", "disk", "internet speed", "vpn status", "processes running",
+        "running tasks", "cpu", "gpu", "gpu usage", "ip", "ip address", "hostname", "uptime",
+        "clipboard content",
     }
     status_intent_words = {
         "check", "how much", "how many", "what's my", "what is my", "show me",
@@ -943,6 +956,14 @@ def classify_task(
             pass
         else:
             return result, None
+
+    # CONTROL LOOP STICKY ROUTING
+    # Ensure that if we are in an active control loop, we stick to TaskType.CONTROL
+    if history:
+        for msg in history:
+            c = msg.get("content", "")
+            if "OBSERVATION:" in c or '{"action":' in c:
+                return TaskType.CONTROL, None
 
     # STICKY ROUTING OPTIMIZATION
     # If the user is in a continuous chat, and we already have a massive model loaded in RAM,
@@ -1441,6 +1462,61 @@ def _stream_tokens(
             break
 
 
+def _is_complex_control(query: str, history: List[Dict[str, str]]) -> bool:
+    """Return True if the query requires the 3B model + Open Interpreter.
+    
+    Simple tasks (open app, volume, brightness, power, clipboard, etc.) → False (0.5B)
+    Complex tasks (GUI automation, messaging, browser forms, email, jobs) → True (3B+OI)
+    """
+    q = query.lower()
+    
+    # --- Explicit complex action keywords ---
+    complex_indicators = {
+        # GUI automation
+        "click", "gui", "mouse", "drag", "right-click", "double-click",
+        # Messaging platforms
+        "whatsapp", "telegram", "send a message", "send message", "text him",
+        "text her", "message him", "message her",
+        # Browser complex tasks
+        "browser_task", "browser_autopilot", "browser_login",
+        "fill form", "fill out", "fill in", "web form", "checkout",
+        "login to", "log in to", "sign in to",
+        "apply for", "job application", "submit application", "resume",
+        # Email
+        "send email", "send an email", "compose email",
+        # Code execution
+        "run code", "execute code", "run script",
+        # Download / install
+        "download file", "download from",
+        # Advanced file ops
+        "search inside", "replace in", "fix the file",
+        # Network
+        "speed test", "flush dns", "vpn connect",
+        # Screen recording
+        "screen record", "record screen",
+    }
+    if any(ind in q for ind in complex_indicators):
+        return True
+    
+    # --- Simple actions that should NOT trigger 3B ---
+    simple_patterns = {
+        "open ", "close ", "launch ", "start ", "kill ",
+        "volume", "mute", "brightness", "dark mode",
+        "lock screen", "sleep", "shutdown", "restart", "reboot",
+        "clipboard", "copy to clipboard", "paste from clipboard",
+        "take note", "note this", "screenshot",
+        "wifi", "bluetooth", "toggle",
+        "media", "play", "pause", "next track", "previous track",
+        "wallpaper", "notification",
+    }
+    # If a clear simple keyword is found, return False immediately
+    for pat in simple_patterns:
+        if q.startswith(pat) or f" {pat}" in q:
+            return False
+    
+    return False
+
+
 def ask_stream(
     user_query: str,
     history: List[Dict[str, str]],
@@ -1638,7 +1714,14 @@ def ask_stream(
 
         yield {"type": "status", "content": "Generating computer command..."}
         control_messages = [{"role": "system", "content": _get_agent_system_prompt()}, {"role": "user", "content": user_query}]
-        control_llm = load_model(ModelRole.CONTROL)
+        
+        # Decide if we route to the fast 0.5B model or the smart 3B model
+        if _is_complex_control(user_query, history):
+            logger.info("[Routing] Complex control detected. Loading 3B model (ModelRole.CODE) for control action.")
+            control_llm = load_model(ModelRole.CODE)
+        else:
+            logger.info("[Routing] Simple control detected. Loading 0.5B model (ModelRole.CONTROL) for control action.")
+            control_llm = load_model(ModelRole.CONTROL)
         
         action_json = ""
         for chunk in control_llm.create_chat_completion(messages=control_messages, max_tokens=1024, stream=True, temperature=0.1):

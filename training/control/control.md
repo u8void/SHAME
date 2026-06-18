@@ -181,6 +181,7 @@ CRITICAL RULES:
 20. If you use analyze_image and cannot definitively identify the person or object, automatically follow up with search_image_web(image_path).
 21. Use browser_autopilot for complex multi-step autonomous browser tasks. Use parse_resume when extracting details from a resume PDF.
 22. If the user says "open", "launch", "start", or "run" an application — ALWAYS use open_app. NEVER use open_website unless they say "web".
+23. If the user asks to control, click, type, or interact with a desktop graphical interface (GUI), use gui_action with a detailed task description.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -653,15 +654,40 @@ Analyzing the user request: 'order the best mechanical keyboard on amazon'. I've
 
 USER: text ahmed on whatsapp that I will be late
 BOT: <think>
-Analyzing the user request: 'text ahmed on whatsapp that I will be late'. I've identified 'browser_task' as the most appropriate tool to fulfill this task.
+This is a multi-step task: open WhatsApp, find Ahmed's chat, and send a message. I will first open the app, then the agent loop will continue with gui_action to complete the rest.
 </think>
-{"action": "browser_task", "url": "[https://web.whatsapp.com](https://web.whatsapp.com)", "task": "wait for chats to load, find the chat with Ahmed, click it, type 'I will be late', and click send"}
+{"action": "open_app", "name": "whatsapp"}
+
+OBSERVATION: ✅ Opened 'whatsapp' (via Chrome PWA).
+
+{"action": "gui_action", "task": "WhatsApp is now open. Click the search bar at the top left, type 'Ahmed', wait for the results, click on 'Ahmed's' chat, click the message input box at the bottom, type 'I will be late', and press Enter to send."}
+
+USER: open whatsapp search for Ahmed Barakat, open the chat, send im iris to him
+BOT: <think>
+Multi-step task: open WhatsApp PWA, search for Ahmed Barakat, open his chat, and send "im iris". First open the app, then use gui_action for the interaction steps.
+</think>
+{"action": "open_app", "name": "whatsapp"}
+
+OBSERVATION: ✅ Opened 'whatsapp' (via Chrome PWA).
+
+{"action": "gui_action", "task": "WhatsApp Web is open in Chrome. Click the search bar (the search icon or magnifier icon at the top of the left panel), type 'Ahmed Barakat', wait 1 second for results to appear, click on the chat for 'Ahmed Barakat', then click on the message input box at the bottom of the chat, type 'im iris', and press Enter to send the message."}
+
+USER: click the search bar on whatsapp and type ahmed
+BOT: <think>
+The user wants to interact with the desktop GUI. I will use gui_action with the task.
+</think>
+{"action": "gui_action", "task": "click the search bar, type ahmed, and press enter"}
 
 USER: message john on telegram saying hello
 BOT: <think>
-Analyzing the user request: 'message john on telegram saying hello'. I've identified 'browser_task' as the most appropriate tool to fulfill this task.
+Multi-step task: open Telegram, find John's chat, type hello and send. First open the app.
 </think>
-{"action": "browser_task", "url": "[https://web.telegram.org](https://web.telegram.org)", "task": "wait for chats to load, find the chat with John, type 'hello', and press enter"}
+{"action": "open_app", "name": "telegram"}
+
+OBSERVATION: ✅ Opened 'telegram' (via Chrome PWA).
+
+{"action": "gui_action", "task": "Telegram is open. Click the search bar at the top, type 'John', wait for results, click on John's chat, click the message input box, type 'hello', and press Enter to send."}
+
 
 USER: post on facebook that I just graduated
 BOT: {"action": "browser_task", "url": "[https://www.facebook.com](https://www.facebook.com)", "task": "click 'What\'s on your mind', type 'I just graduated!', and click Post"}
