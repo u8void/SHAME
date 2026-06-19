@@ -1462,61 +1462,6 @@ def _stream_tokens(
             break
 
 
-def _is_complex_control(query: str, history: List[Dict[str, str]]) -> bool:
-    """Return True if the query requires the 3B model + Open Interpreter.
-    
-    Simple tasks (open app, volume, brightness, power, clipboard, etc.) → False (0.5B)
-    Complex tasks (GUI automation, messaging, browser forms, email, jobs) → True (3B+OI)
-    """
-    q = query.lower()
-    
-    # --- Explicit complex action keywords ---
-    complex_indicators = {
-        # GUI automation
-        "click", "gui", "mouse", "drag", "right-click", "double-click",
-        # Messaging platforms
-        "whatsapp", "telegram", "send a message", "send message", "text him",
-        "text her", "message him", "message her",
-        # Browser complex tasks
-        "browser_task", "browser_autopilot", "browser_login",
-        "fill form", "fill out", "fill in", "web form", "checkout",
-        "login to", "log in to", "sign in to",
-        "apply for", "job application", "submit application", "resume",
-        # Email
-        "send email", "send an email", "compose email",
-        # Code execution
-        "run code", "execute code", "run script",
-        # Download / install
-        "download file", "download from",
-        # Advanced file ops
-        "search inside", "replace in", "fix the file",
-        # Network
-        "speed test", "flush dns", "vpn connect",
-        # Screen recording
-        "screen record", "record screen",
-    }
-    if any(ind in q for ind in complex_indicators):
-        return True
-    
-    # --- Simple actions that should NOT trigger 3B ---
-    simple_patterns = {
-        "open ", "close ", "launch ", "start ", "kill ",
-        "volume", "mute", "brightness", "dark mode",
-        "lock screen", "sleep", "shutdown", "restart", "reboot",
-        "clipboard", "copy to clipboard", "paste from clipboard",
-        "take note", "note this", "screenshot",
-        "wifi", "bluetooth", "toggle",
-        "media", "play", "pause", "next track", "previous track",
-        "wallpaper", "notification",
-    }
-    # If a clear simple keyword is found, return False immediately
-    for pat in simple_patterns:
-        if q.startswith(pat) or f" {pat}" in q:
-            return False
-    
-    return False
-
-
 def ask_stream(
     user_query: str,
     history: List[Dict[str, str]],
@@ -1680,43 +1625,31 @@ def ask_stream(
     if task_type == TaskType.CONTROL:
         from src.controller import (
             _get_agent_system_prompt, parse_ai_response, execute_action_by_dict,
-            detect_intent,
         )
 
-        # ── Fast path: deterministic YouTube intent regexes ──────────────────
-        # youtube_video / youtube_channel already have well-tested regexes in
-        # controller.detect_intent. Routing "open X on youtube" through the
-        # LLM is unnecessary and risky here: the model has no real knowledge
-        # of valid YouTube video IDs, so it can hallucinate a URL (e.g.
-        # malformed "watch=title" links, or fabricated/unavailable video
-        # IDs) instead of using the real, verified lookup in
-        # handle_youtube_video_from_query. Checking the deterministic
-        # matcher first avoids that failure mode for the common phrasing it
-        # covers, and falls through to the LLM for anything else.
-        # (Other entries in detect_intent's _INTENTS list use action names /
-        # named groups that don't line up with _dispatch_action's expected
-        # keys, so only the two verified-safe YouTube intents are wired up
-        # here rather than reviving the whole list.)
-        intent_name, intent_match = detect_intent(user_query)
-        if intent_name in ("youtube_video", "youtube_channel") and intent_match:
-            fast_query = intent_match.group(1).strip()
-            fast_action_dict = {"action": intent_name, "query": fast_query}
-            yield {"type": "status", "content": f"Executing: {intent_name}"}
-            result = execute_action_by_dict(fast_action_dict)
-            reply_text = f"Action '{intent_name}' executed.\n\nResult:\n{result}"
-            yield {"type": "action_result", "content": f"Action '{intent_name}' Executed.\nResult:\n{result}"}
-            yield {"type": "token", "content": reply_text}
-            yield {"type": "raw_response", "content": reply_text}
-            if not _keep_loaded:
-                unload_model()
-            return
+        from src.system_actions import get_hardcoded_action_json
+        hardcoded_json = get_hardcoded_action_json(user_query)
+        if hardcoded_json:
+            action_dict = parse_ai_response(hardcoded_json)
+            if action_dict:
+                action_name = action_dict.get("action", "unknown")
+                yield {"type": "status", "content": f"Executing: {action_name}"}
+                result = execute_action_by_dict(action_dict)
+                reply_text = f"Action '{action_name}' executed.\n\nResult:\n{result}"
+                yield {"type": "action_result", "content": f"Action '{action_name}' Executed.\nResult:\n{result}"}
+                yield {"type": "token", "content": reply_text}
+                yield {"type": "raw_response", "content": reply_text}
+                if not _keep_loaded:
+                    unload_model()
+                return
 
 
         yield {"type": "status", "content": "Generating computer command..."}
         control_messages = [{"role": "system", "content": _get_agent_system_prompt()}, {"role": "user", "content": user_query}]
         
         # Decide if we route to the fast 0.5B model or the smart 3B model
-        if _is_complex_control(user_query, history):
+        from src.system_actions import is_complex_control
+        if is_complex_control(user_query, history):
             logger.info("[Routing] Complex control detected. Loading 3B model (ModelRole.CODE) for control action.")
             control_llm = load_model(ModelRole.CODE)
         else:

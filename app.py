@@ -808,7 +808,7 @@ def shutdown_endpoint():
 
 
 if __name__ == "__main__":
-    if PRO_
+    if PRO_MODE:
         mode_label = "IRIS PRO (OpenRouter Multi-Agent API)"
     else:
         mode_label = "Local GGUF Multi-Model Routing System"

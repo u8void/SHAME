@@ -182,6 +182,7 @@ CRITICAL RULES:
 21. Use browser_autopilot for complex multi-step autonomous browser tasks. Use parse_resume when extracting details from a resume PDF.
 22. If the user says "open", "launch", "start", or "run" an application — ALWAYS use open_app. NEVER use open_website unless they say "web".
 23. If the user asks to control, click, type, or interact with a desktop graphical interface (GUI), use gui_action with a detailed task description.
+24. NEVER use web_search for system actions, coding, or package installations (e.g., install htop). Only use web_search if the user explicitly asks a factual question or asks you to look something up online.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 
