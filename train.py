@@ -122,6 +122,7 @@ def parse_args():
     parser.add_argument("--download-models", "--download-all", action="store_true", dest="download_models",
                         help="Download all models for the selected tier and continue automatically")
     parser.add_argument("--download-only", action="store_true", help="Download all models for the selected tier and exit without training")
+    parser.add_argument("--skip-download", action="store_true", help="Skip downloading models and start training automatically")
     parser.add_argument("--skip-gguf", action="store_true", help="Skip merge and GGUF conversion")
     parser.add_argument("--resume", action="store_true", help="Resume training from the last successful checkpoint/model")
     
@@ -867,7 +868,7 @@ def main():
     print(f"[INFO] Target training device: {target.upper()}")
     print(f"[INFO] Roles to train: {roles_to_train}")
 
-    if not has_downloaded:
+    if not has_downloaded and not getattr(args, "skip_download", False):
         download_all_models(roles_to_train)
 
     model_override = getattr(args, "_model_override", None)
