@@ -1,16 +1,4 @@
-"""
-syntax_checker.py — Lightweight, language-aware syntax checker for Iris AI.
-==========================================================================
- Catches syntax errors in generated code blocks before delivery.
- Uses stdlib parsers (AST for Python) and system CLI tools as available.
- Catches errors for: Python, JS/TS, C/C++, Bash, Go, Rust.
 
-Contract:
----------
-When a syntax error is found during coding tasks, the router will yield a syntax error event:
-    yield {"type": "syntax_error", "content": f"Syntax error detected in {language}: {error_msg}"}
-The frontend must handle "syntax_error" events (e.g. by showing a warning banner).
-"""
 
 import os
 import re
@@ -21,7 +9,7 @@ import tempfile
 from typing import Optional, List, Tuple
 
 def guess_language_from_content(code: str) -> str:
-    """Guess the programming language of a code block based on common syntax markers."""
+    
     if re.search(r'\bdef\s+\w+\s*\(|import\s+\w+|\bif\s+__name__\s*==', code):
         return "python"
     if re.search(r'#include\s+<[^>]+>|#include\s+"[^"]+"|\bint\s+main\s*\(', code):
@@ -37,7 +25,7 @@ def guess_language_from_content(code: str) -> str:
     return "unknown"
 
 def extract_code_blocks(text: str) -> List[Tuple[str, str]]:
-    """Extract language tags and code content for all fenced code blocks."""
+    
     pattern = re.compile(r'```(\w*)\n([\s\S]*?)```', re.MULTILINE)
     blocks = []
     for m in pattern.finditer(text):
@@ -190,14 +178,7 @@ CHECKERS = {
 }
 
 def check_syntax(code_output: str, language: Optional[str] = None) -> Optional[str]:
-    """Check code for syntax errors. Dispatches to matching CHECKERS.
-
-    If fenced code blocks are present they are extracted and checked
-    individually.  Otherwise the entire input is treated as raw code
-    for the given *language*.
-
-    Returns the first error string found, or None when clean.
-    """
+    
     blocks = extract_code_blocks(code_output)
     if not blocks:
         if language:

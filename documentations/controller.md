@@ -157,19 +157,19 @@ def should_web_search(text):
 
 | Feature | macOS | Windows | Linux |
 |---------|-------|---------|-------|
-| App launching | ✅ `open -a` | ✅ `start` | ✅ native |
-| File operations | ✅ | ✅ | ✅ |
-| Volume control | ✅ osascript | ⚠️ nircmd | ✅ amixer |
-| Brightness | ✅ osascript | ⚠️ | ⚠️ |
-| Window control | ✅ osascript | ❌ | ❌ |
-| Media control | ✅ osascript | ❌ | ❌ |
-| Lock/sleep/restart | ✅ | ✅ | ✅ |
-| Dark mode | ✅ osascript | ❌ | ❌ |
-| Wallpaper | ✅ osascript | ❌ | ❌ |
-| Screenshot | ✅ screencapture | ❌ | ✅ |
-| Type text | ✅ osascript | ❌ | ❌ |
-| Press keys | ✅ osascript | ❌ | ❌ |
-| Focus app | ✅ osascript | ❌ | ❌ |
+| App launching | [SUCCESS] `open -a` | [SUCCESS] `start` | [SUCCESS] native |
+| File operations | [SUCCESS] | [SUCCESS] | [SUCCESS] |
+| Volume control | [SUCCESS] osascript | ⚠️ nircmd | [SUCCESS] amixer |
+| Brightness | [SUCCESS] osascript | ⚠️ | ⚠️ |
+| Window control | [SUCCESS] osascript | [ERROR] | [ERROR] |
+| Media control | [SUCCESS] osascript | [ERROR] | [ERROR] |
+| Lock/sleep/restart | [SUCCESS] | [SUCCESS] | [SUCCESS] |
+| Dark mode | [SUCCESS] osascript | [ERROR] | [ERROR] |
+| Wallpaper | [SUCCESS] osascript | [ERROR] | [ERROR] |
+| Screenshot | [SUCCESS] screencapture | [ERROR] | [SUCCESS] |
+| Type text | [SUCCESS] osascript | [ERROR] | [ERROR] |
+| Press keys | [SUCCESS] osascript | [ERROR] | [ERROR] |
+| Focus app | [SUCCESS] osascript | [ERROR] | [ERROR] |
 
 ## Configuration
 
@@ -189,8 +189,8 @@ def should_web_search(text):
 | Binary size | N/A (interpreter) | 405KB |
 | Startup | ~200ms | ~5ms |
 | Memory | ~30MB | ~3MB |
-| Rich UI | ✅ | ❌ (plain text) |
-| Iris LLM integration | ✅ (full) | ❌ (standalone) |
-| RAG integration | ✅ | ❌ |
+| Rich UI | [SUCCESS] | [ERROR] (plain text) |
+| Iris LLM integration | [SUCCESS] (full) | [ERROR] (standalone) |
+| RAG integration | [SUCCESS] | [ERROR] |
 | All actions | 105 functions | 89 functions |
 | Build required | No | `g++ -O2 -lcurl` |

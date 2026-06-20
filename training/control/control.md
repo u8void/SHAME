@@ -659,7 +659,7 @@ This is a multi-step task: open WhatsApp, find Ahmed's chat, and send a message.
 </think>
 {"action": "open_app", "name": "whatsapp"}
 
-OBSERVATION: ✅ Opened 'whatsapp' (via Chrome PWA).
+OBSERVATION: [SUCCESS] Opened 'whatsapp' (via Chrome PWA).
 
 {"action": "gui_action", "task": "WhatsApp is now open. Click the search bar at the top left, type 'Ahmed', wait for the results, click on 'Ahmed's' chat, click the message input box at the bottom, type 'I will be late', and press Enter to send."}
 
@@ -669,7 +669,7 @@ Multi-step task: open WhatsApp PWA, search for Ahmed Barakat, open his chat, and
 </think>
 {"action": "open_app", "name": "whatsapp"}
 
-OBSERVATION: ✅ Opened 'whatsapp' (via Chrome PWA).
+OBSERVATION: [SUCCESS] Opened 'whatsapp' (via Chrome PWA).
 
 {"action": "gui_action", "task": "WhatsApp Web is open in Chrome. Click the search bar (the search icon or magnifier icon at the top of the left panel), type 'Ahmed Barakat', wait 1 second for results to appear, click on the chat for 'Ahmed Barakat', then click on the message input box at the bottom of the chat, type 'im iris', and press Enter to send the message."}
 
@@ -685,7 +685,7 @@ Multi-step task: open Telegram, find John's chat, type hello and send. First ope
 </think>
 {"action": "open_app", "name": "telegram"}
 
-OBSERVATION: ✅ Opened 'telegram' (via Chrome PWA).
+OBSERVATION: [SUCCESS] Opened 'telegram' (via Chrome PWA).
 
 {"action": "gui_action", "task": "Telegram is open. Click the search bar at the top, type 'John', wait for results, click on John's chat, click the message input box, type 'hello', and press Enter to send."}
 

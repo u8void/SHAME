@@ -1,9 +1,4 @@
-"""
-train.py — Unified Training Suite for Iris AI
-=============================================
-Supports GGUF role-based training and post-training GGUF conversion.
-Automatically detects Apple Silicon (MLX path) vs CUDA/CPU (Torch path).
-"""
+
 
 import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
@@ -61,7 +56,7 @@ ROLE_TO_GGUF = {
     "vision":    "iris_008.gguf",
 }
 
-# Role → output file numbering
+
 ROLE_NUMBERS = {
     "triage":    "001",
     "router":    "002",
@@ -73,7 +68,7 @@ ROLE_NUMBERS = {
     "vision":    "008",
 }
 
-SIZE_CONFIG = None  # loaded by apply_size_config
+SIZE_CONFIG = None  
 
 
 ROLE_TRAINING_DIRS = {
@@ -89,7 +84,7 @@ ROLE_TRAINING_DIRS = {
 
 
 def load_size_config(size: str) -> dict:
-    """Load a size-tier config from config/sizes/{size}.json and return it."""
+    
     import json
     path = os.path.join(os.path.dirname(__file__), "config", "sizes", f"{size}.json")
     if not os.path.exists(path):
@@ -99,12 +94,12 @@ def load_size_config(size: str) -> dict:
         return json.load(f)
 
 def apply_size_config(size: str):
-    """Override ROLE_MODEL_MAP, ROLE_TO_GGUF, and download URLs from a size config."""
+    
     cfg = load_size_config(size)
     desc = cfg.get("_description", size)
     print(f"[SIZE] Iris AI — {size.upper()} tier")
     print(f"[SIZE] {desc}")
-    # Override ROLE_MODEL_MAP
+    
     global ROLE_MODEL_MAP, ROLE_TO_GGUF, SIZE_CONFIG
     ROLE_MODEL_MAP.update(cfg.get("models", {}))
     ROLE_TO_GGUF.update(cfg.get("gguf", {}))
@@ -289,7 +284,7 @@ def load_local_json_files(directory: str) -> List[Tuple[str, str]]:
                     continue
                 
                 data_list = []
-                # Check if it could be a JSONL file
+                
                 if path.endswith(".jsonl") or "\n" in content:
                     try:
                         for line in content.split("\n"):
@@ -319,7 +314,7 @@ def load_local_json_files(directory: str) -> List[Tuple[str, str]]:
                     if not isinstance(item, dict):
                         continue
                     u, b = None, None
-                    # 1. messages format
+                    
                     if "messages" in item:
                         m = item["messages"]
                         if isinstance(m, list) and len(m) >= 2:
@@ -328,7 +323,7 @@ def load_local_json_files(directory: str) -> List[Tuple[str, str]]:
                                     u = m[i].get("content", "").strip()
                                     b = m[i+1].get("content", "").strip()
                                     break
-                    # 2. conversations format
+                    
                     elif "conversations" in item:
                         conv = item["conversations"]
                         if isinstance(conv, list) and len(conv) >= 2:
@@ -341,14 +336,14 @@ def load_local_json_files(directory: str) -> List[Tuple[str, str]]:
                                     u = conv[i].get(val_key, "").strip()
                                     b = conv[i+1].get(val_key, "").strip()
                                     break
-                    # 3. instruction/output format
+                    
                     elif "instruction" in item and "output" in item:
                         u = item["instruction"].strip()
                         b = item["output"].strip()
                         inp = item.get("input", "")
                         if inp:
                             u = f"{u}\n\nInput: {inp}"
-                    # 4. generic fallback
+                    
                     else:
                         q_key = next((k for k in ("prompt", "question", "query", "text", "input") if k in item), None)
                         r_key = next((k for k in ("response", "answer", "completion", "output") if k in item), None)
@@ -412,9 +407,9 @@ def load_all_data(role: str, max_pairs: int) -> List[Tuple[str, str]]:
     if len(pairs) > max_pairs:
         pairs = pairs[:max_pairs]
         
-    # Pre-split massive sequences to prevent OOM and hard truncation
+    
     chunked_pairs = []
-    chunk_size = 3500  # Approx 850 tokens, leaves room for prompt and system message
+    chunk_size = 3500  
     for prompt, response in pairs:
         if len(response) <= chunk_size:
             chunked_pairs.append((prompt, response))
@@ -835,7 +830,7 @@ def ensure_training_subdirs():
 def main():
     args = parse_args()
 
-    # Apply size-tier config (overrides ROLE_MODEL_MAP + ROLE_TO_GGUF)
+    
     apply_size_config(args.size)
 
     roles_to_train = resolve_roles(args.role)
@@ -941,23 +936,19 @@ def main():
 
 
 def download_all_models(roles_to_train: List[str] = None):
-    """Download all required GGUF models from Hugging Face before training.
-
-    Downloads the source-named files, then renames to iris_NNN.gguf.
-    If a size config is active, uses its download_urls and source_filenames.
-    """
+    
     import urllib.request
     import time
 
     os.makedirs("./models", exist_ok=True)
 
-    # Build download map: target_name → (url, source_filename)
+    
     download_map = {}
 
     if SIZE_CONFIG and "download_urls" in SIZE_CONFIG and "source_filenames" in SIZE_CONFIG:
-        source_map = SIZE_CONFIG["source_filenames"]  # role → source filename
-        url_map = SIZE_CONFIG["download_urls"]         # source_filename → url
-        target_map = SIZE_CONFIG["gguf"]               # role → target filename
+        source_map = SIZE_CONFIG["source_filenames"]  
+        url_map = SIZE_CONFIG["download_urls"]         
+        target_map = SIZE_CONFIG["gguf"]               
         import re
         
         target_roles = roles_to_train if roles_to_train else list(target_map.keys())
@@ -986,13 +977,13 @@ def download_all_models(roles_to_train: List[str] = None):
                         download_map[t_name] = (u, s_name)
                 else:
                     download_map[target_name] = (url, src_name)
-        # Also handle clip
+        
         if not roles_to_train or "vision" in roles_to_train:
             clip_src = SIZE_CONFIG.get("clip")
             if clip_src and clip_src in url_map:
                 download_map[clip_src] = (url_map[clip_src], clip_src)
     else:
-        # Fallback — hardcoded medium tier
+        
         fallback = {
             "iris_001.gguf": ("https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf", "Qwen3-4B-Q4_K_M.gguf"),
             "iris_004.gguf": ("https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf", "qwen2.5-coder-7b-instruct-q4_k_m.gguf"),
@@ -1059,7 +1050,7 @@ def download_all_models(roles_to_train: List[str] = None):
             urllib.request.urlretrieve(url, temp_path, progress_hook)
             elapsed = time.time() - start_time
             size_mb = os.path.getsize(temp_path) / (1024 * 1024)
-            # Rename downloaded file to target name
+            
             if os.path.exists(dest_path):
                 os.remove(dest_path)
             os.rename(temp_path, dest_path)

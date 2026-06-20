@@ -1,9 +1,9 @@
-"""
-test_math.py — Hendrycks MATH competition benchmark
-Evaluates the MATH and REASONING models against high-school/college competition math.
-Loads lighteval/MATH-500 or competition_math, extracts the LaTeX answer from \boxed{},
-and compares it with the model's \boxed{} output.
-"""
+\
+\
+\
+\
+\
+   
 
 import re
 import random
@@ -21,7 +21,7 @@ from src.iris import ModelRole
 FIELDNAMES = ["Benchmark", "Role", "Prompt", "Expected", "Model_Answer", "Passed", "Time_Sec"]
 
 def _extract_boxed_content(text: str) -> str | None:
-    """Find the content inside the last \boxed{...} block, handling nested braces correctly."""
+                                                                                               
     idx = text.rfind(r"\boxed{")
     if idx == -1:
         idx = text.rfind(r"boxed{")
@@ -48,23 +48,23 @@ def _extract_boxed_content(text: str) -> str | None:
     return None
 
 def _clean_math_answer(answer: str | None) -> str:
-    """Normalize whitespace, backslashes, and basic LaTeX symbols for comparison."""
+                                                                                    
     if answer is None:
         return ""
-    # Remove whitespace
+                       
     answer = re.sub(r"\s+", "", answer)
-    # Remove dollar signs
+                         
     answer = answer.replace("$", "")
     
     answer = answer.lower()
     
-    # Remove variable= (e.g., x=5 -> 5)
+                                       
     answer = re.sub(r"^[a-z]=", "", answer)
     
-    # Remove variable\in (e.g., x\in[-2,7] -> [-2,7])
+                                                     
     answer = re.sub(r"^[a-z]\\in", "", answer)
     
-    # Remove braces around subscripts (e.g., 52_{8} -> 52_8)
+                                                            
     answer = re.sub(r"_\{([^}]+)\}", r"_\1", answer)
     
     return answer.strip()
@@ -126,7 +126,7 @@ def run_math_benchmark(csv_path: str, num_samples: int = 100):
         
         ground_truth_raw = _extract_boxed_content(solution)
         if ground_truth_raw is None:
-            # Fallback to last number if \boxed is missing in fallback split
+                                                                            
             nums = re.findall(r"\b([\-]?\d[\d,\.]*)\b", solution)
             ground_truth_raw = nums[-1] if nums else "unknown"
 
@@ -146,7 +146,7 @@ def run_math_benchmark(csv_path: str, num_samples: int = 100):
         model_answer_raw = _extract_boxed_content(response)
 
         
-        # Auto-correct formatting issues before grading
+                                                       
         if model_answer_raw is not None:
             corrected, was_fixed, _ = auto_correct_math_answer(
                 problem=problem,
@@ -157,19 +157,19 @@ def run_math_benchmark(csv_path: str, num_samples: int = 100):
             if was_fixed:
                 model_answer_raw = corrected
 
-        # Smart multi-strategy comparison with MathVerifier
+                                                           
         passed = False
         if ground_truth_raw and model_answer_raw:
             gt_norm = _clean_math_answer(ground_truth_raw)
             model_norm = _clean_math_answer(model_answer_raw)
 
-            # Try smart matcher first
+                                     
             passed, reason = match_with_verifier(
                 ground_truth_raw, model_answer_raw,
                 problem=problem,
             )
             if not passed:
-                # Fall back to normalized comparison
+                                                    
                 passed = (gt_norm == model_norm) and (model_norm != "")
         if passed:
             passed_count += 1

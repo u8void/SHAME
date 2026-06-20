@@ -1,9 +1,4 @@
-"""
-run_all.py — Iris AI Benchmark Orchestrator
-Runs the full benchmark suite: GSM8K, HumanEval, MMLU, GPQA Diamond.
-Results are written incrementally to outputs/benchmark_results.csv.
-A summary table is printed and appended at the end.
-"""
+
 
 import os
 import sys
@@ -21,7 +16,7 @@ from benchmark.test_swebench import run_swebench_benchmark
 from benchmark.utils import get_size_name, write_summary_csv
 
 def compute_summary(csv_path: str) -> dict[str, dict]:
-    """Read the CSV and compute per-benchmark pass rates."""
+    
     summary: dict[str, dict] = {}
     try:
         with open(csv_path, newline="", encoding="utf-8") as f:
@@ -89,7 +84,7 @@ def main():
     try:
         for benchmark_func in benchmarks:
             benchmark_func(raw_csv)
-            # Update summary incrementally after each benchmark finishes
+            
             summary = compute_summary(raw_csv)
             write_summary_csv(raw_csv, summary_csv)
     except KeyboardInterrupt:

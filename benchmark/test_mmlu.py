@@ -1,9 +1,4 @@
-"""
-test_mmlu.py — MMLU benchmark
-Evaluates the TRIAGE and GENERAL models against MMLU (cais/mmlu).
-Samples N questions across several subjects, formats them as multiple-choice,
-and checks if the model picks the correct letter (A/B/C/D).
-"""
+
 
 import re
 import random
@@ -32,7 +27,7 @@ SUBJECTS = [
 ]
 
 def _format_question(item: dict) -> tuple[str, str]:
-    """Return (formatted_prompt, correct_letter)."""
+    
     q       = item["question"]
     choices = item["choices"]
     answer  = item["answer"]
@@ -48,34 +43,29 @@ def _format_question(item: dict) -> tuple[str, str]:
     return prompt, correct_letter
 
 def _extract_letter(response: str) -> str | None:
-    """Extract the answer letter from the model response.
     
-    With chain-of-thought prompts the model reasons first, so we scan the
-    response from the END for an explicit 'Answer: X' pattern first, then
-    fall back to isolated capital letters.
-    """
     response = response.strip()
     
-    # Highest priority: explicit 'Answer: X' tag (what we asked for)
+    
     m = re.search(r"[Aa]nswer\s*[:\-]?\s*([ABCD])\b", response)
     if m:
         return m.group(1).upper()
 
-    # Bold answer: **A** or **B**
+    
     m = re.search(r"\*{1,2}([ABCD])\*{1,2}", response)
     if m:
         return m.group(1).upper()
 
-    # Bracketed answer: [A] or (A)
+    
     m = re.search(r"[\[\(]([ABCD])[\]\)]", response)
     if m:
         return m.group(1).upper()
 
-    # Scan backwards for the LAST isolated capital letter to avoid
-    # picking up letters mid-sentence earlier in the response
+    
+    
     for ch in reversed(response):
         if ch in "ABCD":
-            # Verify it appears as an isolated letter in the text
+            
             idx = response.rfind(ch)
             before = response[idx-1] if idx > 0 else ' '
             after  = response[idx+1] if idx < len(response)-1 else ' '
@@ -139,7 +129,7 @@ def run_mmlu_benchmark(csv_path: str):
     pct = (passed_count / len(items_with_subject)) * 100 if items_with_subject else 0
     print(f"\n  [MMLU][Iris Tiny] Score: {passed_count}/{len(items_with_subject)} ({pct:.1f}%)\n")
 
-    # Unload model to prevent Metal GPU destructor crash on macOS
+    
     try:
         from src.iris import unload_model
         unload_model()

@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+
+
 
 from __future__ import annotations
 
@@ -114,9 +114,7 @@ class ModelBase:
                  disable_mistral_community_chat_template: bool = False,
                  sentence_transformers_dense_modules: bool = False,
                  fuse_gate_up_exps: bool = False):
-        if type(self) is ModelBase or \
-                type(self) is TextModel or \
-                type(self) is MmprojModel:
+        if type(self) is ModelBase or                type(self) is TextModel or                type(self) is MmprojModel:
             raise TypeError(f"{type(self).__name__!r} should not be directly instantiated")
 
         if self.is_mistral_format and not _mistral_common_installed:
@@ -549,8 +547,7 @@ class ModelBase:
                 logger.info(f"Fused gate_exps and up_exps for layer {bid}")
                 return [(fused_name, fused_data)]
 
-            if self.match_model_tensor_name(new_name, gguf.MODEL_TENSOR.FFN_GATE_EXP, bid) or \
-               self.match_model_tensor_name(new_name, gguf.MODEL_TENSOR.FFN_UP_EXP, bid):
+            if self.match_model_tensor_name(new_name, gguf.MODEL_TENSOR.FFN_GATE_EXP, bid) or               self.match_model_tensor_name(new_name, gguf.MODEL_TENSOR.FFN_UP_EXP, bid):
                 return []
 
         return [(new_name, data_torch)]
@@ -565,10 +562,7 @@ class ModelBase:
 
     @staticmethod
     def _nvfp4_pack(weight: Tensor, scale: Tensor) -> tuple[np.ndarray, list[int]]:
-        """Repack NVFP4 ModelOpt tensors into ggml super-block layout.
-        Preserves original E4M3 scale bits as UE4M3 (strip sign bit).
-        The per-tensor scale2 factor is stored as a separate tensor and applied at inference time via ggml_mul().
-        Returns (raw_data, logical_shape)."""
+        
 
         out_features = weight.shape[0]
         n_blocks = scale.shape[1]
@@ -818,7 +812,7 @@ class ModelBase:
 
                 shape = gguf.quant_shape_from_byte_shape(data.shape, data_qtype) if data.dtype == np.uint8 else data.shape
 
-                shape_str = f"{{{', '.join(str(n) for n in reversed(shape))}}}"
+                shape_str = f"{ {', '.join(str(n) for n in reversed(shape))}} "
 
                 logger.info(f"{f'%-{max_name_len}s' % f'{new_name},'} {old_dtype} --> {data_qtype.name}, shape = {shape_str}")
 
@@ -1169,7 +1163,7 @@ class TextModel(ModelBase):
 
     def get_vocab_base_pre(self, tokenizer) -> str:
 
-        chktxt = '\n \n\n \n\n\n \t \t\t \t\n  \n   \n    \n     \n🚀 (normal) 😶\u200d🌫️ (multiple emojis concatenated) ✅ 🦙🦙 3 33 333 3333 33333 333333 3333333 33333333 3.3 3..3 3...3 កាន់តែពិសេសអាច😁 ?我想在apple工作1314151天～ ------======= нещо на Български \'\'\'\'\'\'```````""""......!!!!!!?????? I\'ve been \'told he\'s there, \'RE you sure? \'M not sure I\'ll make it, \'D you like some tea? We\'Ve a\'lL'
+        chktxt = '\n \n\n \n\n\n \t \t\t \t\n  \n   \n    \n     \n🚀 (normal) 😶\u200d🌫️ (multiple emojis concatenated) [SUCCESS] 🦙🦙 3 33 333 3333 33333 333333 3333333 33333333 3.3 3..3 3...3 កាន់តែពិសេសអាច😁 ?我想在apple工作1314151天～ ------======= нещо на Български \'\'\'\'\'\'```````""""......!!!!!!?????? I\'ve been \'told he\'s there, \'RE you sure? \'M not sure I\'ll make it, \'D you like some tea? We\'Ve a\'lL'
 
         chktok = tokenizer.encode(chktxt)
         chkhsh = sha256(str(chktok).encode()).hexdigest()
@@ -2643,12 +2637,7 @@ class LlamaModel(TextModel):
             "audio_encoder.",
         ]
 
-        is_multimodal_tensor = "vision_tower" in name \
-            or "vision_model" in name \
-            or "audio_tower" in name \
-            or "model.connector" in name \
-            or "multi_modal_projector" in name \
-            or any(
+        is_multimodal_tensor = "vision_tower" in name            or "vision_model" in name            or "audio_tower" in name            or "model.connector" in name            or "multi_modal_projector" in name            or any(
                 name.startswith(prefix)
                 for prefix in vision_prefixes
             )
@@ -3491,10 +3480,7 @@ class Qwen2Model(TextModel):
             name = f"model.{name}"
         if "language_model." in name:
             name = name.replace("language_model.", "")
-        if name.startswith("mlp") or name.startswith("multi_modal_projector") \
-                or name.startswith("vision_model") or name.startswith("audio_tower") \
-                or name.startswith("model.vision_tower") or name.startswith("model.multi_modal_projector") \
-                or name.startswith("vision_tower."):
+        if name.startswith("mlp") or name.startswith("multi_modal_projector")                or name.startswith("vision_model") or name.startswith("audio_tower")                or name.startswith("model.vision_tower") or name.startswith("model.multi_modal_projector")                or name.startswith("vision_tower."):
             return
         yield from super().modify_tensors(data_torch, name, bid)
 
@@ -3837,8 +3823,7 @@ class Qwen2VLModel(TextModel):
     def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
         if name.startswith("thinker."):
             name = name.replace("thinker.", "")
-        if name.startswith("visual") or name.startswith("audio") or \
-                name.startswith("talker") or name.startswith("token2wav"):
+        if name.startswith("visual") or name.startswith("audio") or                name.startswith("talker") or name.startswith("token2wav"):
             return
         yield from super().modify_tensors(data_torch, name, bid)
 
@@ -4144,10 +4129,7 @@ class WavTokenizerDecModel(TextModel):
     model_arch = gguf.MODEL_ARCH.WAVTOKENIZER_DEC
 
     def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
-        if \
-                name.endswith("codebook.cluster_size") or \
-                name.endswith("codebook.embed_avg") or \
-                name.endswith("codebook.inited"):
+        if                name.endswith("codebook.cluster_size") or                name.endswith("codebook.embed_avg") or                name.endswith("codebook.inited"):
             logger.debug(f"Skipping {name!r}")
             return
 
@@ -4787,8 +4769,7 @@ class Qwen3OmniMoeTextModel(Qwen3VLMoeTextModel):
         self.gguf_writer.add_num_deepstack_layers(0)
 
     def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
-        if "visual." in name or "audio_tower." in name \
-                or "talker." in name or "code2wav." in name:
+        if "visual." in name or "audio_tower." in name                or "talker." in name or "code2wav." in name:
             return
 
         name = name.replace("thinker.", "")
@@ -4818,8 +4799,7 @@ class Qwen3ASRTextModel(Qwen3VLTextModel):
     def modify_tensors(self, data_torch, name, bid):
         name = name.replace("thinker.", "")
 
-        if "visual." in name or "audio_tower." in name \
-                or "talker." in name or "code2wav." in name:
+        if "visual." in name or "audio_tower." in name                or "talker." in name or "code2wav." in name:
             return
 
         yield from super().modify_tensors(data_torch, name, bid)
@@ -4827,20 +4807,11 @@ class Qwen3ASRTextModel(Qwen3VLTextModel):
 
 class _LinearAttentionVReorderBase(Qwen3NextModel):
     model_arch = gguf.MODEL_ARCH.QWEN3NEXT
-    """reorders V heads from grouped to tiled order for ggml broadcast
-
-    see https://github.com/ggml-org/llama.cpp/pull/19468#discussion_r2786394306
-
-    Linear attention may has num_k_heads < num_v_heads. The HF weights store
-    V heads grouped by K head: [G0_v0..v{r-1}, G1_v0..v{r-1}, ...].
-    ggml binary ops use tiled broadcast: [K0, K1, ..., K0, K1, ...].
-    We reorder V heads to tiled order so ggml_repeat can replace the expensive
-    interleaved repeat: [G0_v0, G1_v0, ..., G0_v1, G1_v1, ...].
-    """
+    
 
     @staticmethod
     def _reorder_v_heads(tensor: Tensor, dim: int, num_k_heads: int, num_v_per_k: int, head_dim: int) -> Tensor:
-        """Reorder V heads from grouped (by K head) to tiled order along the given dimension."""
+        
         shape = list(tensor.shape)
         if dim < 0:
             dim += len(shape)
@@ -5623,7 +5594,7 @@ class CodeShellModel(TextModel):
 
 @ModelBase.register("KimiLinearModel", "KimiLinearForCausalLM")
 class KimiLinearModel(TextModel):
-    """Kimi-Linear model with hybrid MLA+KDA architecture"""
+    
     model_arch = gguf.MODEL_ARCH.KIMI_LINEAR
 
     _experts: list[dict[str, Tensor]] | None = None
@@ -6239,7 +6210,7 @@ class RobertaModel(BertModel):
             self._position_offset = None
 
     def set_vocab(self):
-        """Support BPE tokenizers for roberta models"""
+        
         bpe_tok_path = self.dir_model / "tokenizer.json"
         if bpe_tok_path.exists():
             self._set_vocab_gpt2()
@@ -6596,8 +6567,7 @@ class Gemma3Model(TextModel):
         if "language_model." in name:
             name = name.replace("language_model.", "")
 
-        elif name.startswith("multi_modal_projector.") or name.startswith("vision_tower.") \
-                or name.startswith("multimodal_projector.") or name.startswith("vision_model."):
+        elif name.startswith("multi_modal_projector.") or name.startswith("vision_tower.")                or name.startswith("multimodal_projector.") or name.startswith("vision_model."):
             return
 
         if "embed_tokens.weight" in name:
@@ -6661,7 +6631,7 @@ class EmbeddingGemma(Gemma3Model):
 
     @staticmethod
     def _get_dense_prefix(module_path) -> str:
-        """Get the tensor name prefix for the Dense layer from module path."""
+        
         tensor_name = "dense_2" if module_path == "2_Dense" else "dense_3"
         return tensor_name
 
@@ -6712,8 +6682,7 @@ class Gemma3VisionModel(MmprojModel):
         if "vision_model.head." in name:
             return
 
-        if name.startswith("multi_modal_projector.") or name.startswith("vision_tower.") \
-                or name.startswith("multimodal_projector.") or name.startswith("vision_model."):
+        if name.startswith("multi_modal_projector.") or name.startswith("vision_tower.")                or name.startswith("multimodal_projector.") or name.startswith("vision_model."):
             name = name.replace("_weight", ".weight")
 
             if "soft_emb_norm.weight" in name:
@@ -6900,12 +6869,12 @@ class Gemma3nVisionAudioModel(ConformerAudioModel):
         return super().tensor_force_quant(name, new_name, bid, n_dims)
 
     def custom_map(self, name: str) -> str:
-        """Parses names like model.vision_tower.timm_model.blocks.1.2.suffix and applies template mapping."""
+        
         parts = name.split(".")
         if len(parts) >= 7:
             bid, sid = parts[4], parts[5]
             suffix = ".".join(parts[6:])
-            template = f"model.vision_tower.timm_model.blocks.{{bid}}.{{sid}}.{suffix}"
+            template = f"model.vision_tower.timm_model.blocks.{ bid} .{ sid} .{suffix}"
             if template in self.block_tensor_mapping:
                 return self.block_tensor_mapping[template].format(bid=bid, sid=sid)
 
@@ -9767,19 +9736,11 @@ class ExaoneMoEModel(Exaone4Model):
 
 @ModelBase.register("GraniteForCausalLM")
 class GraniteModel(LlamaModel):
-    """Conversion for IBM's GraniteForCausalLM"""
+    
     model_arch = gguf.MODEL_ARCH.GRANITE
 
     def set_gguf_parameters(self):
-        """Granite uses standard llama parameters with the following differences:
-
-        - No head_dim support
-        - New multiplier params:
-            - attention_scale
-            - embedding_scale
-            - residual_scale
-        - logits_scaling
-        """
+        
         if head_dim := self.hparams.pop("head_dim", None):
             logger.warning("Ignoring head_dim (%s) from config for Granite", head_dim)
         super().set_gguf_parameters()
@@ -9799,24 +9760,18 @@ class GraniteModel(LlamaModel):
 
 @ModelBase.register("GraniteMoeForCausalLM", "GraniteMoeSharedForCausalLM")
 class GraniteMoeModel(GraniteModel):
-    """Conversion for IBM's GraniteMoeForCausalLM"""
+    
     model_arch = gguf.MODEL_ARCH.GRANITE_MOE
 
     def set_gguf_parameters(self):
-        """GraniteMoeShared uses GraniteMoe parameters plus the following:
-        - shared_intermediate_size
-        """
+        
         super().set_gguf_parameters()
         if shared_feed_forward_length := self.hparams.get("shared_intermediate_size"):
             self.gguf_writer.add_expert_shared_feed_forward_length(shared_feed_forward_length)
             logger.info("gguf: (granitemoeshared) shared_feed_forward_length = %s", shared_feed_forward_length)
 
     def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
-        """In modeling_granitemoe, the JetMoe implementation of parallel experts
-        is used. This essentially merges w1 and w3 into a single tensor with 2x
-        the hidden size that is then split during forward. To keep compatibility
-        with existing mixtral support, we pull them apart here.
-        """
+        
 
         if name.endswith("block_sparse_moe.input_linear.weight"):
             ffn_dim = self.hparams["intermediate_size"]
@@ -9849,8 +9804,7 @@ class GraniteMoeModel(GraniteModel):
 
 @ModelBase.register("GraniteMoeHybridForCausalLM", "BambaForCausalLM")
 class GraniteHybridModel(Mamba2Model, GraniteMoeModel):
-    """GraniteHybrid is a hybrid SSM + Attention model that uses Mamba2 SSM
-    layers and optionally uses MoE w/ a shared expert"""
+    
     model_arch = gguf.MODEL_ARCH.GRANITE_HYBRID
     undo_permute = True
 
@@ -9929,13 +9883,7 @@ class GraniteHybridModel(Mamba2Model, GraniteMoeModel):
         yield from ModelBase.modify_tensors(self, data_torch, name, bid)
 
     def set_gguf_parameters(self):
-        """This method merges params from both parents and some that are
-        specific to this model. The result is some duplication of how the params
-        get set. The following warnings are expected during conversion:
-
-        WARNING:Duplicated key name 'granitehybrid.attention.head_count_kv'
-        WARNING:Duplicated key name 'granitehybrid.context_length'
-        """
+        
         GraniteMoeModel.set_gguf_parameters(self)
 
         self.gguf_writer.add_ssm_conv_kernel(self.find_hparam(["conv_kernel", "d_conv"]))
@@ -9971,7 +9919,7 @@ class GraniteHybridModel(Mamba2Model, GraniteMoeModel):
 
 @ModelBase.register("NemotronHForCausalLM")
 class NemotronHModel(GraniteHybridModel):
-    """Hybrid mamba2/attention model from NVIDIA"""
+    
     model_arch = gguf.MODEL_ARCH.NEMOTRON_H
     is_moe: bool = False
 
@@ -10838,8 +10786,7 @@ class HunYuanMoEModel(TextModel):
             self.gguf_writer.add_rope_scaling_orig_ctx_len(256 * 1024)
             self.gguf_writer.add_context_length(256 * 1024)
 
-            assert alpha == 1000 and base == 10000.0 and dim == 128 and self.hparams["max_position_embeddings"] in [32 * 1024, 256 * 1024] , \
-                "HunYuan dynamic RoPE scaling assumptions changed, please update the logic or context length manually"
+            assert alpha == 1000 and base == 10000.0 and dim == 128 and self.hparams["max_position_embeddings"] in [32 * 1024, 256 * 1024] ,                "HunYuan dynamic RoPE scaling assumptions changed, please update the logic or context length manually"
 
     _experts: list[dict[str, Tensor]] | None = None
 
@@ -10944,12 +10891,11 @@ class HunYuanModel(TextModel):
     model_arch = gguf.MODEL_ARCH.HUNYUAN_DENSE
 
     def _get_eod_token_id(self) -> int | None:
-        """Get the actual end-of-generation token from config (eod_token_id)."""
+        
         return self.hparams.get("eod_token_id")
 
     def _get_eot_token_id(self) -> int | None:
-        """Get the end-of-turn token from generation_config.json.
-        This is the first entry in eos_token_id when it's a list."""
+        
         gen_cfg_path = self.dir_model / "generation_config.json"
         if gen_cfg_path.is_file():
             with open(gen_cfg_path, encoding="utf-8") as f:
@@ -10960,7 +10906,7 @@ class HunYuanModel(TextModel):
         return None
 
     def _fix_special_tokens(self):
-        """Fix EOS/EOT tokens that are incorrect in upstream configs."""
+        
         eod_id = self._get_eod_token_id()
         if eod_id is not None:
             self.gguf_writer.add_eos_token_id(eod_id)
@@ -11048,8 +10994,7 @@ class HunYuanModel(TextModel):
                 self.gguf_writer.add_rope_scaling_orig_ctx_len(256 * 1024)
                 self.gguf_writer.add_context_length(256 * 1024)
 
-                assert base == 10000.0 and self.hparams["max_position_embeddings"] in [32 * 1024, 256 * 1024] , \
-                    "HunYuan dynamic RoPE scaling assumptions changed, please update the logic or context length manually"
+                assert base == 10000.0 and self.hparams["max_position_embeddings"] in [32 * 1024, 256 * 1024] ,                    "HunYuan dynamic RoPE scaling assumptions changed, please update the logic or context length manually"
 
     def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
         if name == "lm_head.weight":
@@ -11074,14 +11019,7 @@ class HunyuanVLVisionModel(MmprojModel):
 
     @staticmethod
     def is_ocr_variant(hparams: dict) -> bool:
-        """Return True for HunyuanOCR, False for HunyuanVL.
-
-        The projector's output dim must equal the text model's hidden_size by
-        construction (that's what "projector" means). HunyuanOCR pairs a 1B text
-        backbone (hidden=1024); HunyuanVL pairs a 4B one (hidden=3072). So the
-        ViT -> LLM projection dim is a hard architectural signature, not a
-        magic number.
-        """
+        
         vision_out = int((hparams.get("vision_config") or {}).get("out_hidden_size", 0))
         return vision_out == 1024
 
@@ -11862,7 +11800,7 @@ class KimiVLModel(MmprojModel):
 
 @ModelBase.register("KimiK25ForConditionalGeneration")
 class KimiK25Model(MmprojModel):
-    """Kimi-K2.5 with MoonViT3d vision encoder"""
+    
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -12016,7 +11954,7 @@ class JanusProVisionModel(MmprojModel):
             self.gguf_writer.add_vision_use_silu(True)
 
     def _map_aligner_tensor(self, data_torch: Tensor, name: str) -> Iterable[tuple[str, Tensor]]:
-        """Map aligner tensors to projector format"""
+        
         suffix = ".bias" if name.endswith(".bias") else ".weight"
 
         if name.startswith("model.aligner."):

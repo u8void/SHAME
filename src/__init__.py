@@ -1,7 +1,4 @@
-"""
-src/__init__.py
-Public API surface for the Iris AI source package.
-"""
+
 from .iris import (
     download_gguf,
     _MODEL_SOURCES,

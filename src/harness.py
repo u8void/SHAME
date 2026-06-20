@@ -1,5 +1,5 @@
 from __future__ import annotations
-'\nharness.py - Code Output Quality Harness for Iris AI\n=====================================================\nPost-generation passes that clean, normalize, and repair model code output.\n\nEvery pass returns (text, warnings). Warnings are human-readable notes\nyielded as {"type": "harness_warning", "content": "..."}.\n'
+
 import re
 import os
 from typing import Tuple, List, Optional
@@ -244,7 +244,7 @@ def normalize_header(text: str, language: str='python') -> Tuple[str, List[str]]
         warnings.append('Header: added #!/usr/bin/env bash')
     return ('\n'.join(lines), warnings)
 _PASSES = [('normalize_fences', normalize_fences), ('redact_secrets', redact_secrets), ('repair_truncation', repair_truncation), ('inject_imports', inject_imports), ('normalize_header', normalize_header), ('deduplicate_blocks', deduplicate_blocks), ('clean_whitespace', clean_whitespace)]
-_OPTIONAL_PASSES = {'strip_comments': strip_comments}  # opt-in only — never run by default
+_OPTIONAL_PASSES = {'strip_comments': strip_comments}  
 
 def apply_all(text: str, language: str='python', enabled: Optional[List[str]]=None) -> Tuple[str, List[dict]]:
     all_warnings: List[dict] = []
@@ -380,7 +380,7 @@ def apply_math(text: str, language: str='') -> Tuple[str, List[dict]]:
         except Exception:
             pass
     return (text, all_warnings)
-'\nhermes_harness.py — Hermes-Level Agent Harness for Iris AI\n============================================================\nAutonomous IDE agent infrastructure with 15+ tools, parallel execution,\nsmart result analysis, error recovery, memory tracking, and side-effect\nintrospection. Works with both local (llama-cpp) and remote (OpenAI API) backends.\n\nNamed after the Hermes model family (NousResearch Hermes, OpenHermes) which\nare fine-tuned for tool use and agentic reasoning.\n\nArchitecture:\n  HermesToolRegistry  — 15+ typed tools with schema, validation, execution\n  HermesResultAnalyzer — classifies results, detects failures, suggests fixes\n  HermesAgentLoop      — parallel execution, budget tracking, error recovery\n  HermesMemory         — persistent key-value memory across turns\n  build_hermes_prompt  — text-format tool prompt for non-API backends\n'
+
 import asyncio
 import hashlib
 import inspect
@@ -959,7 +959,7 @@ class HermesAgentLoop:
         return '\n'.join(lines)
 
 def build_hermes_text_prompt(user_query: str, history: Optional[List[Dict[str, str]]]=None, workspace_root: str='') -> str:
-    system = f'{HERMES_AGENT_SYSTEM_PROMPT}\n\nWhen you need to use a tool, output EXACTLY:\n\n<tool_call>\n{{"name": "<tool_name>", "args": {{"arg1": "value1", ...}}}}\n</tool_call>\n\nThe tool result will be provided in the next message. Continue until the task is complete.\nWhen finished, do NOT output a tool call — just provide your final answer.\n\nCurrent workspace: {workspace_root}\n'
+    system = f'{HERMES_AGENT_SYSTEM_PROMPT}\n\nWhen you need to use a tool, output EXACTLY:\n\n<tool_call>\n{ "name": "<tool_name>", "args": { "arg1": "value1", ...} } \n</tool_call>\n\nThe tool result will be provided in the next message. Continue until the task is complete.\nWhen finished, do NOT output a tool call — just provide your final answer.\n\nCurrent workspace: {workspace_root}\n'
     prompt = f'<|im_start|>system\n{system}<|im_end|>\n'
     if history:
         for msg in history[-8:]:
@@ -1017,11 +1017,11 @@ class SandboxReport:
     error_message: Optional[str] = None
 
 class CodeSandbox:
-    """Isolated subprocess execution for code verification."""
+    
     
     @staticmethod
     def extract_code(text: str, language: Optional[str] = None) -> str:
-        """Extract code from markdown fences."""
+        
         if language:
             lang_pattern = language
             if language.lower() in ("python", "py"):
@@ -1033,17 +1033,17 @@ class CodeSandbox:
             blocks = re.findall(r'```(?:\w+)?\n(.*?)\n```', text, re.IGNORECASE | re.DOTALL)
             
         if blocks:
-            # Usually the last code block contains the final solution
+            
             return blocks[-1].strip()
             
-        # Fallback: return raw text if no fences but it looks like code
+        
         if "def " in text or "import " in text or "#include" in text:
             return text.strip()
         return ""
 
     @staticmethod
     def run_code_with_io(code: str, language: str, test_cases: List[TestCase], timeout_seconds: float = 10.0) -> SandboxReport:
-        """Run C++ or Python code using standard I/O against test cases."""
+        
         import tempfile
         import subprocess
         import time
@@ -1058,7 +1058,7 @@ class CodeSandbox:
                 with open(src_file, "w", encoding="utf-8") as f:
                     f.write(code)
                 
-                # Compile
+                
                 try:
                     comp = subprocess.run(
                         ["g++", "-O2", "-std=c++17", src_file, "-o", exe_file],
@@ -1082,13 +1082,13 @@ class CodeSandbox:
                     )
                 run_cmd = [exe_file]
             else:
-                # Python
+                
                 src_file = os.path.join(tmpdir, "solution.py")
                 with open(src_file, "w", encoding="utf-8") as f:
                     f.write(code)
                 run_cmd = [sys.executable, src_file]
                 
-            # Run test cases
+            
             for i, tc in enumerate(test_cases):
                 try:
                     proc = subprocess.run(
@@ -1109,7 +1109,7 @@ class CodeSandbox:
                             error_message=f"Runtime error on test {i+1}"
                         )
                         
-                    # Compare output
+                    
                     out_clean = proc.stdout.strip()
                     expected_clean = tc.expected_output.strip()
                     
@@ -1142,7 +1142,7 @@ class CodeSandbox:
 
     @staticmethod
     def run_python(code: str, test_cases: Optional[List[TestCase]] = None, timeout_seconds: float = 10.0) -> SandboxReport:
-        """Run Python code securely using a subprocess."""
+        
         start_time = time.time()
         
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
@@ -1250,11 +1250,11 @@ class MathVerificationReport:
     error_message: Optional[str] = None
 
 class MathVerifier:
-    """Symbolic and Regex-based Math Equivalence Verification."""
+    
     
     @staticmethod
     def _normalize(expr: str) -> str:
-        """Normalize common math formatting for comparison."""
+        
         expr = expr.replace(" ", "")
         expr = expr.replace("\\text", "")
         expr = re.sub(r'\\frac{([^{}]+)}{([^{}]+)}', r'(\1)/(\2)', expr)
@@ -1266,13 +1266,13 @@ class MathVerifier:
 
     @staticmethod
     def verify(generated_text: str, target_answer: str) -> MathVerificationReport:
-        # We rely on extract_math_answer from harness.py
-        # But we must call it cleanly
+        
+        
         extracted_match = re.search(r'\*\*Answer:\*\*\s*(.*)', generated_text)
         extracted = extracted_match.group(1).strip() if extracted_match else None
         
         if not extracted:
-            # Fallback to last line boxed logic or similar
+            
             matches = re.findall(r'\\boxed{([^}]+)}', generated_text)
             if matches:
                 extracted = matches[-1].strip()
@@ -1307,7 +1307,7 @@ class RefinementPass:
     success: bool
 
 class IterativeRefiner:
-    """Multi-pass error-feedback self-correction loop."""
+    
     
     def __init__(self, model_callable: Callable, max_turns: int = 3):
         self.model_callable = model_callable
@@ -1324,7 +1324,7 @@ class IterativeRefiner:
                 passes.append(RefinementPass(turn, "N/A", current_code, report, True))
                 return current_code, passes
                 
-            # If it failed, generate a refinement prompt
+            
             error_details = report.stderr[-1000:] if report.stderr else report.error_message
             if report.status == SandboxResult.TEST_FAILED and report.failed_test_index is not None:
                 tc = test_cases[report.failed_test_index]
@@ -1340,7 +1340,7 @@ Here is the execution report:
 
 Please analyze the error in a <critic> block, then provide the fully corrected Python code.
 """
-            # Call the model
+            
             history = [
                 {"role": "user", "content": task_prompt},
                 {"role": "assistant", "content": current_code},
@@ -1350,7 +1350,7 @@ Please analyze the error in a <critic> block, then provide the fully corrected P
             response = self.model_callable(history)
             current_code = CodeSandbox.extract_code(response)
             if not current_code:
-                current_code = response # fallback
+                current_code = response 
                 
             passes.append(RefinementPass(turn, refinement_prompt, current_code, report, False))
             
@@ -1366,7 +1366,7 @@ class SmartHarnessResult:
     execution_reports: List[Any]
 
 class SmartHarness:
-    """Frontier Orchestrator combining verification, sandbox, and Test-Time Compute."""
+    
     
     def __init__(self, model_callable: Callable, domain: Domain = Domain.GENERAL):
         self.model_callable = model_callable
@@ -1374,18 +1374,18 @@ class SmartHarness:
         self.refiner = IterativeRefiner(model_callable)
         
     def solve(self, prompt: str, candidates: int = 1, test_cases: Optional[List[TestCase]] = None) -> SmartHarnessResult:
-        """Generate and evaluate solutions."""
+        
         if self.domain == Domain.CODE:
             return self._solve_code(prompt, candidates, test_cases)
         elif self.domain == Domain.MATH:
             return self._solve_math(prompt, candidates)
         else:
-            # Fallback to standard generation
+            
             ans = self.model_callable([{"role": "user", "content": prompt}])
             return SmartHarnessResult(ans, self.domain, False, 1, 1, [])
             
     def _solve_code(self, prompt: str, candidates: int, test_cases: Optional[List[TestCase]]) -> SmartHarnessResult:
-        # Test-Time Compute: Generate N candidates
+        
         all_reports = []
         best_code = None
         best_tests_passed = -1
@@ -1417,7 +1417,7 @@ class SmartHarness:
         return SmartHarnessResult(best_code or code, self.domain, False, 1, candidates, all_reports)
         
     def _solve_math(self, prompt: str, candidates: int) -> SmartHarnessResult:
-        # Majority voting logic for math
+        
         answers = []
         for i in range(candidates):
             ans = self.model_callable([{"role": "user", "content": prompt}])
@@ -1426,7 +1426,7 @@ class SmartHarness:
         if candidates == 1:
             return SmartHarnessResult(answers[0], self.domain, False, 1, 1, [])
             
-        # Extract and cluster (self-consistency)
+        
         extracted = []
         for a in answers:
             match = re.search(r'\*\*Answer:\*\*\s*(.*)', a)
@@ -1436,12 +1436,12 @@ class SmartHarness:
         if not extracted:
             return SmartHarnessResult(answers[0], self.domain, False, 1, candidates, [])
             
-        # Find majority
+        
         from collections import Counter
         counts = Counter(extracted)
         majority, _ = counts.most_common(1)[0]
         
-        # Find the full text answer that corresponds to the majority
+        
         best_ans = answers[0]
         for a in answers:
             match = re.search(r'\*\*Answer:\*\*\s*(.*)', a)
@@ -1477,7 +1477,7 @@ class SandboxResultReport:
     runtime_errors: List[str] = field(default_factory=list)
 
 def apply_smart_harness_code(text: str, language: Optional[str] = None, problem_description: Optional[str] = None):
-    # Parse test cases
+    
     tests = extract_codeforces_tests(problem_description)
     
     rep = SandboxResultReport()
@@ -1488,7 +1488,7 @@ def apply_smart_harness_code(text: str, language: Optional[str] = None, problem_
     rep.runtime_errors = []
     
     if not tests:
-        # Just run syntax check or nothing
+        
         rep.tests_passed = 1
         return text, rep
         

@@ -247,10 +247,7 @@ class OpenRouterClient:
         )
 
     async def _handle_api_error(self, exc: Exception, attempt: int) -> None:
-        """Log a retryable API error and sleep for the backoff duration.
-
-        Raises RuntimeError on the final attempt instead of sleeping.
-        """
+        
         wait_s = RETRY_BASE_WAIT_S * (2 ** attempt)
         if attempt < MAX_RETRIES - 1:
             log.warning(
@@ -643,9 +640,9 @@ async def ask_stream(
         
         yield {"type": "status", "content": "Analyzing image with local Vision model..."}
         try:
-            # Note: Because this is async context, we run the blocking analyze_image directly 
-            # since it's an isolated operation, or we could run it in a thread. 
-            # For simplicity, running it directly is fine as the vision model runs fast.
+            
+            
+            
             res = analyze_image(image_path, prompt)
             yield {"type": "token", "content": res}
         except Exception as e:
@@ -683,7 +680,7 @@ async def ask_stream(
                 full_content = ""
                 last_usage = {}
 
-                # Create agent session for memory tracking
+                
                 agent_loop_obj = HermesAgentLoop(
                     workspace_root=(workspace_root or os.getcwd()),
                     max_tool_calls=40,
@@ -743,7 +740,7 @@ async def ask_stream(
                             "tool_calls": tc_list
                         })
 
-                        # Execute via Hermes agent loop (with retry + analysis)
+                        
                         results = agent_loop_obj.execute_tool_calls(tc_list)
                         agent_loop_obj.session.steps.append(
                             type('AgentStep', (), {
@@ -753,11 +750,11 @@ async def ask_stream(
                             })
                         )
 
-                        # Build result messages with enrichment
+                        
                         result_msgs = agent_loop_obj.build_tool_result_messages(results, tc_list)
                         agent_messages.extend(result_msgs)
 
-                        # Yield status for UI
+                        
                         summary = HermesResultAnalyzer.summarize_for_model(results, max_chars=400)
                         first_line = summary.split('\n')[0] if summary else "Tool executed"
                         yield {"type": "status", "content": first_line}
@@ -787,7 +784,7 @@ async def ask_stream(
                 hop = _timed_hop("hermes_agent", selected_model, synthetic_raw, elapsed)
                 hops.append(hop)
 
-                # Log agent session summary
+                
                 session_summary = agent_loop_obj.build_summary()
                 log.info("\n%s", session_summary)
 

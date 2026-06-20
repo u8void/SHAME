@@ -1,22 +1,4 @@
-"""
-auto_correct.py — Hermes-Level Auto-Correction for Benchmark Grading
-=====================================================================
-Runs benchmark answers through a verification pipeline that catches
-and corrects format issues, arithmetic mistakes, and off-by-factor errors
-before final grading. Uses MathVerifier + CodeSandbox + Hermes tools.
 
-Flow per answer:
-  1. Extract model's final answer
-  2. Run MathVerifier for self-consistency
-  3. If inconsistent or wrong, run a Hermes tool: re-evaluate
-  4. If still wrong, try sandbox re-computation
-  5. Return best-corrected answer (or original if unfixable)
-
-This dramatically reduces false negatives from:
-  - Format: $204_{5}$ vs 204_5, x=5 vs 5, [-2,7] vs x∈[-2,7]
-  - Arithmetic: off-by-one, swapped values, rounding errors
-  - Notation: missing braces, extra whitespace, stray $ signs
-"""
 
 from __future__ import annotations
 
@@ -38,29 +20,19 @@ def auto_correct_math_answer(
     ground_truth: str | None = None,
     max_attempts: int = 3,
 ) -> Tuple[str, bool, str]:
-    """Auto-correct a math answer before grading.
-
-    Args:
-        problem: The original math problem text
-        model_raw_output: Full model output (with reasoning)
-        ground_truth: Known correct answer (for verification)
-        max_attempts: Max correction attempts
-
-    Returns:
-        (corrected_answer, was_corrected, correction_log)
-    """
+    
     log_parts = []
 
-    # 1. Extract the final answer from model output
+    
     boxed = _extract_boxed(model_raw_output)
     if boxed is None:
-        # Try other extraction patterns
+        
         boxed = _extract_answer_pattern(model_raw_output)
 
     original = boxed or model_raw_output[-500:]
     log_parts.append(f"Extracted: {original[:80]}")
 
-    # 2. Run MathVerifier for self-consistency
+    
     try:
         from src.harness import MathVerifier
         if ground_truth:
@@ -70,7 +42,7 @@ def auto_correct_math_answer(
             )
 
             if mr.is_equivalent:
-                # Already numerically correct — just fix formatting
+                
                 log_parts.append("MathVerifier: numerically correct")
                 corrected = fix_common_format_issues(str(mr.extracted_answer or original))
                 if corrected != original:
@@ -86,7 +58,7 @@ def auto_correct_math_answer(
     except ImportError:
         log_parts.append("MathVerifier unavailable")
 
-    # 3. Format-only fix (before heavy correction)
+    
     fmt_fixed = fix_common_format_issues(original)
     if fmt_fixed != original and ground_truth:
         ok, reason = match(ground_truth, fmt_fixed)
@@ -94,7 +66,7 @@ def auto_correct_math_answer(
             log_parts.append(f"Format fix resolved: {reason}")
             return fmt_fixed, True, "; ".join(log_parts)
 
-    # 4. Try numeric re-computation in sandbox
+    
     for attempt in range(max_attempts):
         try:
             corrected = _sandbox_recompute(problem, model_raw_output)
@@ -110,7 +82,7 @@ def auto_correct_math_answer(
         except Exception as e:
             log_parts.append(f"Sandbox error (attempt {attempt+1}): {e}")
 
-    # 5. Final: apply format fixes only
+    
     if fmt_fixed != original:
         return fmt_fixed, True, "; ".join(log_parts + ["Format fix only"])
 
@@ -122,20 +94,17 @@ def auto_correct_code_answer(
     code_output: str,
     test_cases: list | None = None,
 ) -> Tuple[str, bool, str]:
-    """Auto-correct generated code by sandbox testing.
-
-    Returns (corrected_code, was_corrected, correction_log).
-    """
+    
     log_parts = []
 
-    # 1. Syntax check
+    
     try:
         import ast
         ast.parse(code_output)
         log_parts.append("Syntax: OK")
     except SyntaxError as e:
         log_parts.append(f"Syntax error: {e}")
-        # Try basic fixes: add closing braces, fix indentation
+        
         try:
             code_output = _basic_syntax_fix(code_output, e)
             ast.parse(code_output)
@@ -143,7 +112,7 @@ def auto_correct_code_answer(
         except Exception:
             pass
 
-    # 2. Sandbox execution
+    
     try:
         from src.harness import CodeSandbox
 
@@ -162,7 +131,7 @@ def auto_correct_code_answer(
 
 
 def _extract_boxed(text: str) -> str | None:
-    """Extract \boxed{...} content with nested brace handling."""
+    
     idx = text.rfind(r"\boxed{")
     if idx == -1:
         idx = text.rfind(r"boxed{")
@@ -189,13 +158,13 @@ def _extract_boxed(text: str) -> str | None:
 
 
 def _extract_answer_pattern(text: str) -> str | None:
-    """Extract answer from common patterns when \boxed is missing."""
-    # **Answer:** 42
+    
+    
     m = re.search(r'\*\*Answer:?\*\*\s*(.+?)(?:\n|$)', text, re.IGNORECASE)
     if m:
         return m.group(1).strip()
 
-    # "Therefore, x = 42" or "Hence, the answer is 42"
+    
     m = re.search(
         r'(?:Therefore|Thus|Hence|So|Final answer|The answer is)\s*,?\s*(.+?)(?:\.|$)\s*$',
         text, re.IGNORECASE | re.MULTILINE
@@ -203,7 +172,7 @@ def _extract_answer_pattern(text: str) -> str | None:
     if m:
         return m.group(1).strip()
 
-    # Last number in last 3 lines
+    
     lines = [l.strip() for l in text.strip().split('\n') if l.strip()]
     for line in reversed(lines[-3:]):
         nums = re.findall(r'[\d.\-+eE]+', line.replace(',', ''))
@@ -214,9 +183,9 @@ def _extract_answer_pattern(text: str) -> str | None:
 
 
 def _basic_syntax_fix(code: str, error: SyntaxError) -> str:
-    """Apply basic syntax fixes based on error type."""
+    
     if "'(' was never closed" in str(error) or "unexpected EOF" in str(error):
-        # Add missing closing parens/braces
+        
         open_parens = code.count('(') - code.count(')')
         open_braces = code.count('{') - code.count('}')
         open_brackets = code.count('[') - code.count(']')
@@ -228,12 +197,11 @@ def _basic_syntax_fix(code: str, error: SyntaxError) -> str:
 
 
 def _sandbox_recompute(problem: str, solution: str) -> str | None:
-    """Try to numerically re-compute the answer from the problem text
-    by extracting a Python expression and running it."""
-    # Extract the core arithmetic from the problem
-    # e.g., "What is 15 + 27?" → evaluate "15 + 27"
+    
+    
+    
 
-    # Try to match: "What is X op Y?" or "Calculate X op Y"
+    
     m = re.search(
         r'(?:what is|calculate|compute|find|evaluate|solve)\s+'
         r'(.+?)\s*\??$',
@@ -244,15 +212,15 @@ def _sandbox_recompute(problem: str, solution: str) -> str | None:
 
     expr = m.group(1).strip().rstrip('?').strip()
 
-    # Clean up: remove text, units, keep digits/ops
-    # Try to extract a numeric expression
+    
+    
     numeric_expr = re.sub(r'[^0-9.\+\-\*\/\(\)\^\s]', '', expr)
     numeric_expr = re.sub(r'\s+', '', numeric_expr)
 
     if not numeric_expr or len(numeric_expr) < 1:
         return None
 
-    # Safety: only allow simple arithmetic (^ is allowed; it's replaced with ** below)
+    
     if re.search(r'[^0-9.\+\-\*\/\(\)\^]', numeric_expr):
         return None
 

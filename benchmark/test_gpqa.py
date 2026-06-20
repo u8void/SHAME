@@ -1,9 +1,4 @@
-"""
-test_gpqa.py — GPQA Diamond benchmark
-Evaluates the REASONING model on PhD-level science questions.
-Uses the Idavidrein/gpqa dataset (diamond subset).
-Questions are formatted as multiple-choice and graded on letter selection.
-"""
+
 
 import re
 import random
@@ -20,7 +15,7 @@ NUM_SAMPLES = 100
 FIELDNAMES  = ["Benchmark", "Role", "Prompt", "Expected", "Model_Answer", "Passed", "Time_Sec"]
 
 def _format_gpqa_question(item: dict) -> tuple[str, str]:
-    """Format a GPQA item into a multiple-choice prompt and return (prompt, correct_letter)."""
+    
     question         = item.get("Question", "")
     correct_answer   = item.get("Correct Answer", "")
     incorrect_1      = item.get("Incorrect Answer 1", "")
@@ -33,28 +28,42 @@ def _format_gpqa_question(item: dict) -> tuple[str, str]:
 
     choices_text = "\n".join(f"  {chr(65+i)}. {c}" for i, c in enumerate(choices))
     prompt = (
-        f"This is a PhD-level science question. Think carefully and answer with "
-        f"ONLY the letter (A, B, C, or D) of the correct choice.\n\n"
-        f"Question: {question}\n\n{choices_text}\n\nAnswer:"
+        f"This is a PhD-level science question.\n\n"
+        f"Question: {question}\n\n{choices_text}\n\n"
+        f"First, think step-by-step and reason through the options carefully. "
+        f"Then, at the very end, write EXACTLY: 'Answer: X' "
+        f"where X is the correct letter (A, B, C, or D).\n\nReasoning:"
     )
     return prompt, correct_letter
 
 def _extract_letter(response: str) -> str | None:
-    """Extract the first A/B/C/D letter from the model response."""
+    
     response = response.strip()
-    m = re.match(r"^\s*([ABCD])\b", response, re.IGNORECASE)
+    
+    
+    m = re.search(r"[Aa]nswer\s*[:\-]?\s*\**([ABCD])\**\b", response)
     if m:
         return m.group(1).upper()
-    m = re.search(r"(?:answer(?:\s+is)?|correct(?:\s+is)?)\s*[:\-]?\s*([ABCD])\b",
-                  response, re.IGNORECASE)
+
+    
+    m = re.findall(r"\*{1,2}([ABCD])\*{1,2}", response)
     if m:
-        return m.group(1).upper()
-    m = re.search(r"\*{1,2}([ABCD])\*{1,2}", response, re.IGNORECASE)
+        return m[-1].upper()
+
+    
+    m = re.findall(r"[\[\(]([ABCD])[\]\)]", response)
     if m:
-        return m.group(1).upper()
-    m = re.search(r"\b([ABCD])\b", response, re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
+        return m[-1].upper()
+
+    
+    for ch in reversed(response):
+        if ch in "ABCD":
+            idx = response.rfind(ch)
+            before = response[idx-1] if idx > 0 else ' '
+            after  = response[idx+1] if idx < len(response)-1 else ' '
+            if not before.isalpha() and not after.isalpha():
+                return ch
+    
     return None
 
 def run_gpqa_benchmark(csv_path: str):
@@ -126,7 +135,7 @@ def run_gpqa_benchmark(csv_path: str):
         prompt, correct_letter = _format_gpqa_question(item)
         response, t = run_inference(prompt, role=ModelRole.REASONING, use_routing=False, keep_loaded=True)
         model_letter = _extract_letter(response)
-        # Smart comparison: normalize formatting
+        
         if model_letter:
             model_letter = fix_common_format_issues(model_letter)
         passed = (model_letter == correct_letter)
@@ -150,7 +159,7 @@ def run_gpqa_benchmark(csv_path: str):
     print(f"\n  [GPQA Diamond][Iris Tiny] Score: {passed_count}/{len(items)} ({pct:.1f}%)\n")
     print(f"  (Random baseline for 4-choice MCQ: 25.0% — human expert ~65%)")
 
-    # Unload model to prevent Metal GPU destructor crash on macOS
+    
     try:
         from src.iris import unload_model
         unload_model()

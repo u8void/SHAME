@@ -1,16 +1,4 @@
-"""
-context_compactor.py — Context Compacting System for Iris AI
-=============================================================
-Compresses conversation history to fit within model context windows.
-Uses the triage model for summarization when needed.
 
-Compaction levels:
-  - none:       Keep everything as-is
-  - light:      Strip code blocks, truncate long messages to 500 chars
-  - medium:     Summarize old messages via triage model, keep recent 4
-  - aggressive: Ultra-compact: system digest + last 2 messages only
-  - automatic:  Choose level based on estimated token count vs n_ctx
-"""
 
 import re
 from typing import List, Dict, Optional, Tuple
@@ -28,7 +16,7 @@ class CompactionLevel(str, Enum):
 
 
 def estimate_tokens(messages: List[Dict[str, str]]) -> int:
-    """Estimate token count from messages (heuristic: ~4 chars per token for English)."""
+    
     total = 0
     for msg in messages:
         content = msg.get("content", "")
@@ -43,7 +31,7 @@ def estimate_tokens(messages: List[Dict[str, str]]) -> int:
     return total
 
 def compact_light(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    """Strip code blocks, truncate long messages, keep roles intact."""
+    
     result = []
     for msg in messages:
         content = msg.get("content", "")
@@ -82,7 +70,7 @@ Dense digest:"""
 
 
 def _summarize_with_model(messages: List[Dict[str, str]], max_output_tokens: int = 300) -> str:
-    """Use the triage (4B) model to summarize a batch of old messages."""
+    
     conversation_text = _format_messages_for_summary(messages)
     prompt = _SUMMARIZE_PROMPT.format(conversation=conversation_text)
 
@@ -100,7 +88,7 @@ def _summarize_with_model(messages: List[Dict[str, str]], max_output_tokens: int
 
 
 def _extractive_fallback(messages: List[Dict[str, str]]) -> str:
-    """Extract key lines without a model."""
+    
     key_lines = []
     for msg in messages:
         content = msg.get("content", "")
@@ -116,7 +104,7 @@ def _extractive_fallback(messages: List[Dict[str, str]]) -> str:
 
 
 def _format_messages_for_summary(messages: List[Dict[str, str]]) -> str:
-    """Compact representation for the summarizer."""
+    
     parts = []
     for msg in messages:
         role = msg.get("role", "user")
@@ -135,10 +123,7 @@ def compact_context(
     n_ctx: Optional[int] = None,
     force_model_summary: bool = False,
 ) -> Tuple[List[Dict[str, str]], str]:
-    """Compact a conversation to fit within the model's context window.
-
-    Returns (compacted_messages, compaction_info_string).
-    """
+    
     if not messages:
         return [], "no_history"
 
@@ -210,11 +195,7 @@ def auto_compact_for_role(
     max_output_tokens: int = 4096,
     force: bool = False,
 ) -> Tuple[List[Dict[str, str]], str]:
-    """Auto-compact messages for a given role before streaming.
-
-    Called before _stream_tokens to ensure messages fit in context.
-    Returns (compacted_messages, info_string).
-    """
+    
     if not messages:
         return [], "empty"
 

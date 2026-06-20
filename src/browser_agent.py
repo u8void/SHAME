@@ -1,14 +1,4 @@
-"""
-browser_agent.py — Multi-Turn Selenium Browser Automation for Iris AI
-======================================================================
-Powers job applications, form filling, and complex web workflows.
-Features:
-  - Multi-turn browser loop (snapshot → act → repeat until done)
-  - File upload support
-  - Resume PDF parsing
-  - Retry/timeout wrapper
-  - Job-board field auto-mapping
-"""
+
 
 import json
 import time
@@ -21,13 +11,13 @@ from typing import Dict, List, Optional, Tuple
 
 
 def _extract_python_code(raw: str) -> str:
-    """Robustly extract only the Python code from LLM's response, handling backticks/markdown."""
-    # Try to extract content inside ```python ... ``` or ``` ... ```
+    
+    
     m = re.search(r"```(?:python)?\n(.*?)```", raw, re.DOTALL | re.IGNORECASE)
     if m:
         code = m.group(1)
     else:
-        # Fallback: if there are no closing backticks but it starts with backticks, strip the first line
+        
         raw_stripped = raw.strip()
         if raw_stripped.startswith("```"):
             lines = raw_stripped.split("\n")
@@ -38,7 +28,7 @@ def _extract_python_code(raw: str) -> str:
         else:
             code = raw_stripped
 
-    # Clean up minor indentation artifacts (like accidental leading spaces on flat lines)
+    
     cleaned_lines = []
     in_block = False
     for line in code.splitlines():
@@ -47,23 +37,23 @@ def _extract_python_code(raw: str) -> str:
             cleaned_lines.append("")
             continue
         
-        # If we are not currently in a block and the line has leading spaces, strip them
+        
         if not in_block and line.startswith(" "):
             line = line.lstrip()
             
         cleaned_lines.append(line)
         
-        # Check if this line introduces a block (ends with :)
+        
         if stripped.endswith(":"):
             in_block = True
         elif in_block and not line.startswith(" "):
-            # Exit block when we hit a non-indented line
+            
             in_block = False
 
     return "\n".join(cleaned_lines).strip()
 
 def _make_driver(headless: bool = False):
-    """Return a configured Chrome WebDriver."""
+    
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
 
@@ -111,7 +101,7 @@ def _make_driver(headless: bool = False):
 
 
 def _page_snapshot(driver) -> dict:
-    """JSON snapshot of all interactable elements on the page (handles Shadow DOMs)."""
+    
     js_code = """
     window.findIrisElement = function(id) {
         function search(root) {
@@ -166,7 +156,7 @@ _ACTION_TIMEOUT = 10
 
 
 def _retry(fn, name: str = "action"):
-    """Retry wrapper with timeout."""
+    
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
             return fn()
@@ -178,7 +168,7 @@ def _retry(fn, name: str = "action"):
 
 
 def _make_helpers(driver):
-    """Create click_element / fill_element / upload_file bound to this driver."""
+    
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
@@ -208,7 +198,7 @@ def _make_helpers(driver):
         _retry(_do, f"fill #{iris_id}")
 
     def upload_file(iris_id, file_path: str):
-        """Upload a file to a file input element."""
+        
         def _do():
             el = driver.execute_script(f"return window.findIrisElement('{iris_id}')")
             if not el:
@@ -223,7 +213,7 @@ def _make_helpers(driver):
         _retry(_do, f"upload #{iris_id}")
 
     def select_option(iris_id, option_text: str):
-        """Select a dropdown option by visible text."""
+        
         def _do():
             el = driver.execute_script(f"return window.findIrisElement('{iris_id}')")
             if not el:
@@ -252,11 +242,7 @@ def _make_helpers(driver):
 
 
 def parse_resume(file_path: str) -> Dict[str, str]:
-    """Extract structured data from a resume PDF.
-
-    Returns dict with keys: name, email, phone, location, skills, experience_years, education.
-    Falls back gracefully if pypdf is unavailable.
-    """
+    
     result = {
         "name": "", "email": "", "phone": "", "location": "",
         "skills": "", "experience_years": "", "education": "", "raw_text": ""
@@ -413,12 +399,7 @@ _FIELD_MAP = {
 
 
 def _infer_field_type(element: dict) -> Tuple[str, str]:
-    """Given a DOM element, return (field_type, is_upload).
-
-    field_type is one of: first_name, last_name, full_name, email, phone,
-    location, resume, cover_letter, linkedin, website, demographic, work_auth,
-    education, experience_years, skip, source, unknown
-    """
+    
     text = (element.get("text") or "").lower()
     name = (element.get("name") or "").lower()
     tag = element.get("tag", "").lower()
@@ -457,18 +438,7 @@ def browser_autopilot(
     max_turns: int = 15,
     existing_driver=None,
 ) -> str:
-    """Multi-turn browser loop: snapshot → plan → execute → repeat until done.
-
-    Args:
-        url: Starting URL
-        task: Natural language description (e.g. "Apply for the Senior Engineer role")
-        resume_path: Optional path to resume PDF for auto-filling
-        max_turns: Maximum snapshot→act cycles
-        existing_driver: Reuse an existing Chrome session
-
-    Returns:
-        Result summary string
-    """
+    
     from .iris import generate_internal_code, ModelRole
 
     resume = {}
@@ -633,14 +603,14 @@ def browser_autopilot(
                 "submitted", "successfully applied"
             ]
             if any(sig in page_text for sig in done_signals) or "DONE" in output:
-                print("[Browser] ✅ Application appears complete!")
+                print("[Browser] [SUCCESS] Application appears complete!")
                 completed = True
                 break
 
             time.sleep(1.5)
 
         if completed:
-            summary = f"✅ Application submitted successfully on **{driver.title}**.\n"
+            summary = f"[SUCCESS] Application submitted successfully on **{driver.title}**.\n"
         else:
             summary = (
                 f"⚠️ Reached turn limit ({max_turns}). The browser is open — "
@@ -668,7 +638,7 @@ def browser_autopilot(
 
 
 def browser_task(url: str, task: str, existing_driver=None) -> str:
-    """Single-turn browser task (original API)."""
+    
     driver = existing_driver if existing_driver else _make_driver(headless=False)
     from .iris import generate_internal_code, ModelRole
 
@@ -710,13 +680,13 @@ Task: {task}"""
             exec(raw_code, helpers)
         output = captured.getvalue().strip()
 
-        return f"✅ Browser task complete. Final page: **{driver.title}**\n\n{output}"
+        return f"[SUCCESS] Browser task complete. Final page: **{driver.title}**\n\n{output}"
     except Exception as e:
-        return f"❌ Browser task failed: {e}\n\nGenerated Python code:\n```python\n{raw_code}\n```"
+        return f"[ERROR] Browser task failed: {e}\n\nGenerated Python code:\n```python\n{raw_code}\n```"
 
 
 def browser_login(url: str, username: str, password: str) -> str:
-    """Quick login helper."""
+    
     driver = _make_driver(headless=False)
     code = ""
     try:
@@ -738,6 +708,6 @@ def browser_login(url: str, username: str, password: str) -> str:
         code = _extract_python_code(code)
         exec(code, helpers)
         time.sleep(2)
-        return f"✅ Logged in. Currently at: **{driver.title}** — {driver.current_url}"
+        return f"[SUCCESS] Logged in. Currently at: **{driver.title}** — {driver.current_url}"
     except Exception as e:
-        return f"❌ Login failed: {e}\n\nGenerated Python code:\n```python\n{code}\n```"
+        return f"[ERROR] Login failed: {e}\n\nGenerated Python code:\n```python\n{code}\n```"

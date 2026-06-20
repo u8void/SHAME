@@ -1,23 +1,4 @@
-"""
-web_search.py — Unified Reliable Web Search for Iris AI
-========================================================
-Drop-in replacement for the fragmented DuckDuckGo/Wikipedia search in 
-app.py (voice) and iris.py (text chat). Guarantees results from at 
-least one backend under all conditions.
 
-Backend fallback chain (auto, configurable):
-  1. DuckDuckGo Instant Answers + Text + News  (via `ddgs` lib)
-  2. Wikipedia API                               (via `requests`)
-  3. Direct web scrape fallback                  (via `requests` + `bs4`)
-
-Features:
-  - Exponential backoff retry on 202/RateLimit responses
-  - Thread-safe singleton: no duplicate requests
-  - Smart keyword extraction via lightweight LLM
-  - Full-text page fetching for the top result
-  - Timeout protection at every layer
-  - Comprehensive error logging
-"""
 
 import os
 import re
@@ -72,13 +53,7 @@ class SearchResult:
 
 
 class WebSearch:
-    """Unified, retry-hardened web search with automatic backend fallback.
-
-    Usage:
-        ws = WebSearch()
-        results = ws.search("Python programming", max_results=3)
-        context = ws.search_to_context("Python programming", max_results=3)
-    """
+    
 
     _singleton = None
     _lock = threading.Lock()
@@ -106,10 +81,10 @@ class WebSearch:
             self._session.mount("http://", adapter)
         self._user_agent = "Iris-AI/1.0 (https://github.com/ahmed-barakat/Iris-AI)"
 
-    # ── Primary: DuckDuckGo (via ddgs library) ──
+    
 
     def _search_ddg(self, query: str, max_results: int, timeout: float = 8.0) -> List[SearchResult]:
-        """Search DuckDuckGo text + news via the ddgs library."""
+        
         if not self._ddg_available:
             return []
         now = time.time()
@@ -153,10 +128,10 @@ class WebSearch:
                 logger.debug(f"[WebSearch] DDG news failed: {e}")
         return results[:max_results]
 
-    # ── Fallback 1: Wikipedia API ──
+    
 
     def _search_wikipedia(self, query: str, max_results: int, timeout: float = 6.0) -> List[SearchResult]:
-        """Search Wikipedia via the mediawiki API and get full intro paragraphs."""
+        
         if not REQUESTS_AVAILABLE:
             return []
         results: List[SearchResult] = []
@@ -173,7 +148,7 @@ class WebSearch:
             data = resp.json()
             
             pages = data.get("query", {}).get("pages", {})
-            # Sort pages by index (search rank)
+            
             sorted_pages = sorted(pages.values(), key=lambda p: p.get("index", 999))
             
             for item in sorted_pages[:max_results]:
@@ -190,10 +165,10 @@ class WebSearch:
             logger.warning(f"[WebSearch] Wikipedia API failed: {e}")
         return results[:max_results]
 
-    # ── Fallback 2: Google scrape (via requests + bs4) ──
+    
 
     def _search_google_scrape(self, query: str, timeout: float = 8.0) -> List[SearchResult]:
-        """Lightweight Google search scraping as final fallback."""
+        
         if not REQUESTS_AVAILABLE or not BS4_AVAILABLE:
             return []
         results: List[SearchResult] = []
@@ -206,7 +181,7 @@ class WebSearch:
                                      headers={"User-Agent": self._user_agent})
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "html.parser")
-            # Look for result divs — tolerant against DOM changes
+            
             for g in soup.select("div.g, div[data-sokoban-container], div.tF2Cxc")[:3]:
                 title_el = g.select_one("h3")
                 snippet_el = g.select_one("div.VwiC3b, span.st, div[data-sncf]")
@@ -222,24 +197,13 @@ class WebSearch:
             logger.warning(f"[WebSearch] Google scrape failed: {e}")
         return results[:3]
 
-    # ── Public API ──
+    
 
     def search(self, query: str, max_results: int = 3,
                include_full_text: bool = True,
                timeout: float = 12.0,
                bypass_cache: bool = False) -> List[SearchResult]:
-        """Main search entry point. Falls back through every backend automatically.
-
-        Args:
-            query:          Natural language search query.
-            max_results:    Maximum results to return (1-10).
-            include_full_text: Fetch the full text of the top result's page.
-            timeout:        Total time budget for the search.
-            bypass_cache:   Ignore internal deduplication cache.
-
-        Returns:
-            List of SearchResult objects (always returns at least an empty list).
-        """
+        
         query = query.strip()
         if not query:
             return []
@@ -247,28 +211,28 @@ class WebSearch:
         deadline = time.time() + timeout
         all_results: List[SearchResult] = []
 
-        # Tier 1: Wikipedia API (High factual accuracy)
+        
         if time.time() < deadline:
             wiki_results = self._search_wikipedia(query, max_results=max_results)
             if wiki_results:
                 logger.info(f"[WebSearch] Wikipedia returned {len(wiki_results)} results")
                 all_results.extend(wiki_results)
 
-        # Tier 2: DuckDuckGo (Broader scope, news, forums)
+        
         if len(all_results) < max_results and self._ddg_available:
             ddg_results = self._search_ddg(query, max_results - len(all_results), timeout=min(6.0, timeout))
             if ddg_results:
                 logger.info(f"[WebSearch] DDG returned {len(ddg_results)} results for '{query[:60]}'")
                 all_results.extend(ddg_results)
 
-        # Tier 3: Google scrape
+        
         if len(all_results) == 0 and time.time() < deadline:
             google_results = self._search_google_scrape(query)
             if google_results:
                 logger.info(f"[WebSearch] Google returned {len(google_results)} results")
                 all_results.extend(google_results)
 
-        # Fetch full text for top result
+        
         if include_full_text and all_results and all_results[0].href and time.time() < deadline:
             full = self._fetch_full_text(all_results[0].href, timeout=4.0)
             if full:
@@ -277,10 +241,7 @@ class WebSearch:
         return all_results[:max_results]
 
     def search_to_context(self, query: str, max_results: int = 3) -> str:
-        """Search and format results as a context string for LLM injection.
-
-        Returns empty string if no results found.
-        """
+        
         results = self.search(query, max_results)
         if not results:
             return ""
@@ -291,7 +252,7 @@ class WebSearch:
         return "\n".join(lines)
 
     def _fetch_full_text(self, url: str, timeout: float = 4.0) -> str:
-        """Fetch and extract readable text from a URL."""
+        
         if not REQUESTS_AVAILABLE or not BS4_AVAILABLE:
             return ""
         try:
@@ -304,7 +265,7 @@ class WebSearch:
                              "noscript", "iframe", "form"]):
                 tag.extract()
             text = soup.get_text(separator=" ", strip=True)
-            # Clean whitespace
+            
             text = re.sub(r"\s+", " ", text)
             if len(text) > 200:
                 return text[:4000]
@@ -314,7 +275,7 @@ class WebSearch:
             return ""
 
 
-# ── Smart Keyword Extraction ──
+
 
 _KEYWORD_EXTRACT_PROMPT = (
     "Extract exactly 2-4 search keywords from the text. Use the context to resolve "
@@ -329,15 +290,12 @@ _KEYWORD_EXTRACT_PROMPT = (
 
 def extract_search_keywords(text: str, context: str = "",
                             llm=None) -> Optional[str]:
-    """Extract search keywords from user text using a lightweight LLM.
-
-    Returns None if no search is needed.
-    """
+    
     text = text.strip()
     if not text or len(text.split()) <= 2:
         return None
 
-    # Fast path: questions usually need search
+    
     question_starters = ("what", "who", "when", "where", "why", "how",
                          "tell me about", "explain", "define", "search for",
                          "look up", "find", "latest", "news about", "update on")
@@ -362,12 +320,12 @@ def extract_search_keywords(text: str, context: str = "",
     if not fast_trigger:
         return None
 
-    # Deterministic fallback: extract key nouns from the question
+    
     return _extract_keywords_deterministic(text)
 
 def _extract_keywords_deterministic(text: str) -> Optional[str]:
-    """Rule-based keyword extraction — no LLM required."""
-    # Remove common stopwords and question words
+    
+    
     stop = {"what", "who", "when", "where", "why", "how", "is", "are", "the",
             "a", "an", "can", "you", "i", "me", "tell", "about", "do", "does",
             "did", "will", "would", "could", "should", "please", "explain",
@@ -375,7 +333,7 @@ def _extract_keywords_deterministic(text: str) -> Optional[str]:
             "hi", "hey", "ok", "okay", "thanks", "thank"}
     words = [w.strip(".,;:!?\"'") for w in text.lower().split()
              if w.strip(".,;:!?\"'") not in stop]
-    # Keep words 3+ chars, prefer capitalized or technical terms
+    
     meaningful = [w for w in words if len(w) >= 3]
     if not meaningful:
         return None

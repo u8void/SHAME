@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 import os
 import sys
 import argparse
@@ -8,14 +8,14 @@ import json
 import re
 
 def get_github_url_from_officialskills(url: str) -> str:
-    """Scrapes officialskills.sh to find the true GitHub source URL."""
+    
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         html = urllib.request.urlopen(req).read().decode('utf-8')
-        # Look for https://github.com/owner/repo/tree/branch/path or /blob/
+        
         match = re.search(r'(https://github\.com/[^"]+/(?:tree|blob)/[^"]+)', html)
         if match:
-            # Clean up trailing tags if any
+            
             clean_url = match.group(1).split('<')[0].split('"')[0]
             return clean_url
         return url
@@ -24,8 +24,8 @@ def get_github_url_from_officialskills(url: str) -> str:
         return url
 
 def parse_github_url(url: str):
-    """Extracts owner, repo, branch, and path from a GitHub URL."""
-    # Format: https://github.com/owner/repo/tree/branch/path/to/folder
+    
+    
     pattern = r'https://github\.com/([^/]+)/([^/]+)/(?:tree|blob)/([^/]+)/(.*)'
     match = re.search(pattern, url)
     if not match:
@@ -39,7 +39,7 @@ def parse_github_url(url: str):
     }
 
 def fetch_github_contents(owner, repo, branch, path):
-    """Fetches directory or file contents using GitHub API."""
+    
     api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={branch}"
     req = urllib.request.Request(api_url, headers={
         'User-Agent': 'Iris-AI-Downloader',
@@ -53,13 +53,13 @@ def fetch_github_contents(owner, repo, branch, path):
         raise Exception(f"GitHub API Error: {e.code} for URL: {api_url}")
 
 def download_file(download_url, dest_path):
-    """Downloads a raw file from GitHub to a destination path."""
+    
     req = urllib.request.Request(download_url, headers={'User-Agent': 'Mozilla/5.0'})
     with urllib.request.urlopen(req) as response:
         content = response.read()
         with open(dest_path, "wb") as f:
             f.write(content)
-    print(f"✅ Downloaded: {os.path.basename(dest_path)}")
+    print(f"[SUCCESS] Downloaded: {os.path.basename(dest_path)}")
 
 def main():
     parser = argparse.ArgumentParser(description="Download AI Agent Skills from officialskills.sh or GitHub")
@@ -82,7 +82,7 @@ def main():
         print(e)
         sys.exit(1)
         
-    # Setup skills directory
+    
     here = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(here)
     target_dir = os.path.join(project_root, "skills", args.role)
@@ -94,7 +94,7 @@ def main():
     try:
         contents = fetch_github_contents(gh_data["owner"], gh_data["repo"], gh_data["branch"], gh_data["path"])
         
-        # If it's a single file (e.g. /blob/)
+        
         if isinstance(contents, dict) and contents.get("type") == "file":
             contents = [contents]
             

@@ -1,9 +1,6 @@
-"""
-iris.py — Iris AI Base Model with MRA (Multi-Role Architecture)
-===============================================================
-"""
 
-total_time_spent = 294 #hours (update after working)
+
+total_time_spent = 294 
 
 import os
 from .logger import get_logger
@@ -35,10 +32,7 @@ except ImportError:
         pass
 
 class DualLlamaDraftModel(LlamaDraftModel):
-    """
-    Implements True Speculative Decoding using a smaller secondary draft model.
-    Synchronizes the KV cache of the draft model natively in Python.
-    """
+    
     def __init__(self, draft_llm, num_pred_tokens: int = 4):
         import numpy as np
         self.draft_llm = draft_llm
@@ -47,7 +41,7 @@ class DualLlamaDraftModel(LlamaDraftModel):
 
     def __call__(self, input_ids, /, **kwargs):
         input_list = input_ids.tolist()
-        # Rollback KV cache if the target model rejected tokens
+        
         if self.draft_llm.n_tokens > len(input_list):
             self.draft_llm.n_tokens = len(input_list)
             
@@ -197,7 +191,7 @@ _MODEL_SOURCES: Dict[str, list] = {
 
 
 ROLE_CTX: Dict[ModelRole, int] = {
-    ModelRole.TRIAGE:    1024,   # triage only needs to output a routing tag
+    ModelRole.TRIAGE:    1024,   
     ModelRole.ROUTER:    1024,
     ModelRole.CONTROL:   8192,
     ModelRole.MATH:      4096,
@@ -210,10 +204,10 @@ ROLE_CTX: Dict[ModelRole, int] = {
 
 DEFAULT_CTX = 4096
 DEFAULT_GPU_LAYERS = -1
-DEFAULT_THREADS = 4         # M-series: perf cores only (avoid E-core stalls)
-DEFAULT_BATCH = 2048        # Larger batch for fewer kernel launches
-DEFAULT_UBATCH = 512        # Micro-batch for Apple Silicon memory hierarchy
-DEFAULT_THREADS_BATCH = 4   # Separate thread count for prompt processing
+DEFAULT_THREADS = 4         
+DEFAULT_BATCH = 2048        
+DEFAULT_UBATCH = 512        
+DEFAULT_THREADS_BATCH = 4   
 
 
 IRIS_IDENTITY = (
@@ -318,19 +312,19 @@ REVIEWER_SYSTEM_PROMPT = (
 
 from collections import OrderedDict
 
-# LRU Cache: role.value -> Llama
+
 _model_pool: OrderedDict[str, 'Llama'] = OrderedDict()
 _model_paths: dict[str, str] = {}
 _MAX_MODELS_IN_POOL = 2
-_keep_loaded: bool = False  # Set True during benchmarks to skip unload
+_keep_loaded: bool = False  
 _model_lock = threading.RLock()
 
-# ── MLX Text Backend: swap llama.cpp for Metal-accelerated mlx_lm when available ──
+
 _mlx_backend_cache: dict = {}
 _mlx_cache_lock = threading.Lock()
 
 class MLXTextModel:
-    """Thin wrapper around mlx_lm that presents the same streaming interface as llama_cpp.Llama."""
+    
     def __init__(self, model_path: str, temp: float = 0.7):
         from mlx_lm import load as mlx_load
         import mlx.core as mx
@@ -338,7 +332,7 @@ class MLXTextModel:
         self.temp = temp
         self._path = model_path
     def n_ctx(self) -> int:
-        return 32768  # mlx_lm default
+        return 32768  
     def n_embd(self) -> int:
         return getattr(self, '_n_embd', 0) or 2560
     def create_chat_completion(self, messages, stream=True, max_tokens=512,
@@ -351,7 +345,7 @@ class MLXTextModel:
         
         temp = temperature if temperature is not None else self.temp
         
-        # Apply chat template
+        
         if hasattr(self.tokenizer, 'apply_chat_template'):
             prompt = self.tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
@@ -359,12 +353,12 @@ class MLXTextModel:
         else:
             prompt = json.dumps(messages)
         
-        # Build generation prompt and tokenize
+        
         try:
             tokens = mx.array(self.tokenizer.encode(prompt))
         except Exception:
             from mlx_lm.utils import generate_step
-            # Fallback: just concat
+            
             prompt = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
             tokens = mx.array(self.tokenizer.encode(prompt))
         
@@ -386,7 +380,7 @@ class MLXTextModel:
                 }]
             }
         
-        # Streaming version — yields dicts with same shape as llama_cpp
+        
         class _MLXStream:
             def __init__(slf):
                 slf._gen = mlx_gen(
@@ -445,11 +439,7 @@ def _model_path(filename: str) -> str:
 
 
 def download_gguf(filename: str, quiet: bool = False) -> bool:
-    """Download a single GGUF model file from HuggingFace using hf_hub_download.
-
-    Tries multiple repos in priority order. Handles auth-gated repos gracefully.
-    Returns True on success.
-    """
+    
     if filename not in _MODEL_SOURCES:
         if not quiet:
             logger.info(f"[Iris] No download sources known for {filename}")
@@ -533,7 +523,7 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
     return False
 
 def _unload_locked(role_to_evict: str = None) -> None:
-    """Internal: unload a specific model, or clear the pool if None."""
+    
     global _model_pool, _model_paths
     
     if role_to_evict:
@@ -567,19 +557,19 @@ def _unload_locked(role_to_evict: str = None) -> None:
 
 
 def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama':
-    """Load a model by role. Uses LRU Cache pool to keep models alive."""
+    
     global _model_pool, _model_paths
 
     with _model_lock:
         filename = _get_model_filename(role)
         path = _model_path(filename)
         
-        # Fast path: If the requested role is ALREADY loaded, just reuse it!
+        
         if role.value in _model_pool and _model_paths.get(role.value) == path:
             cached_llm = _model_pool[role.value]
             cached_n_ctx = cached_llm.n_ctx() if callable(getattr(cached_llm, "n_ctx", None)) else getattr(cached_llm, "n_ctx", 1024)
             if override_n_ctx is None or cached_n_ctx >= override_n_ctx:
-                # Move to end to mark as recently used
+                
                 _model_pool.move_to_end(role.value)
                 return cached_llm
             else:
@@ -599,7 +589,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
         if override_n_ctx is not None:
             n_ctx = override_n_ctx
         else:
-            # n_ctx: role-specific ceiling, capped by what hardware can afford
+            
             _ctx_raw = cfg.get("n_ctx_allocation", "auto")
             if str(_ctx_raw).lower() == "auto":
                 n_ctx = ctx_for_role(role.value, hw)
@@ -609,7 +599,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
                 except (ValueError, TypeError):
                     n_ctx = ctx_for_role(role.value, hw)
 
-            # Honour per-role maximums from ROLE_CTX if they're tighter
+            
             n_ctx = min(n_ctx, ROLE_CTX.get(role, n_ctx))
             if not n_ctx:
                 n_ctx = hw.ctx_default
@@ -619,9 +609,9 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
         if str(n_threads).lower() == "auto":
             n_threads = hw.n_threads
 
-        #print(f"[Iris] Loading {role.value} ({filename}) [ctx={n_ctx}]...")
+        
 
-        # ── DeepSeek-V4 style KV cache quantization ──
+        
         _ca_cfg = cfg.get("compressed_attention", {})
         _kv_pref = _ca_cfg.get("kv_quant", "auto")
         _profile = cfg.get("size", "tiny")
@@ -648,7 +638,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
         logger.debug(f"[Iris] KV cache: {_kv_quant.value.upper()} → ~{_kv_ram_mb:.0f} MB @ n_ctx={n_ctx}")
 
         draft_model = None
-        # ── Speculative Decoding (Draft Model & N-Gram) ──
+        
         _sd_cfg = cfg.get("speculative_decoding", {})
         if _sd_cfg.get("enabled", False):
             try:
@@ -657,11 +647,11 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
                     _draft_role_str = _sd_cfg.get("draft_model_role", "triage")
                     try:
                         _draft_role = ModelRole(_draft_role_str)
-                        if _draft_role != role: # Avoid recursive loop
+                        if _draft_role != role: 
                             logger.info(f"[Iris] Speculative decoding: Loading draft model '{_draft_role.value}'...")
                             _draft_llm = load_model(_draft_role, override_n_ctx=n_ctx)
                             
-                            # Check Vocab Match
+                            
                             if _draft_llm.n_vocab() != _new_llm_vocab if '_new_llm_vocab' in locals() else 0:
                                 pass
                                 
@@ -678,9 +668,9 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
             except Exception as _e:
                 logger.warning(f"[Iris] Speculative decoding failed to initialize: {_e}")
 
-        # ── MLX Metal GPU backend: only when explicitly requested via IRIS_BACKEND=mlx ──
-        # Requires models/ dir to contain MLX-format model directories (not GGUF files).
-        # To use: convert GGUF → MLX with `python -m mlx_lm.convert --hf-path /path --mlx-path mlx_data/`
+        
+        
+        
         _backend_pref = (os.environ.get("IRIS_BACKEND") or cfg.get("backend", "auto")).lower()
         _use_mlx = _backend_pref in ("mlx", "metal", "gpu")
         if _use_mlx and MLX_AVAILABLE:
@@ -690,7 +680,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
                     _mlx_temp = cfg.get("temperature", 0.7)
                     _mlx_llm = _get_mlx_model(_mlx_dir, _mlx_temp)
                     if _mlx_llm is not None:
-                        # Evict LRU if full
+                        
                         if len(_model_pool) >= _MAX_MODELS_IN_POOL:
                             oldest = next(iter(_model_pool))
                             _unload_locked(oldest)
@@ -716,7 +706,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
         if str(_n_ubatch).lower() == "auto":
             _n_ubatch = hw.n_ubatch
 
-        _flash_attn = hw.flash_attn  # hardware_profile sets this correctly per backend
+        _flash_attn = hw.flash_attn  
 
         _new_llm = Llama(
             model_path=path,
@@ -738,7 +728,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
         if draft_model is not None:
             _new_llm.draft_model = draft_model
         
-        # Evict LRU if full
+        
         if len(_model_pool) >= _MAX_MODELS_IN_POOL:
             oldest = next(iter(_model_pool))
             _unload_locked(oldest)
@@ -746,7 +736,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
         _model_pool[role.value] = _new_llm
         _model_paths[role.value] = path
         
-        # Vocab Check for draft model
+        
         if isinstance(draft_model, DualLlamaDraftModel):
             if draft_model.draft_llm.n_vocab() != _new_llm.n_vocab():
                 logger.warning(f"[Iris] Disabling draft model! Vocab mismatch: Draft({draft_model.draft_llm.n_vocab()}) != Target({_new_llm.n_vocab()})")
@@ -756,7 +746,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
 
 
 def unload_model() -> None:
-    """Fully unload all models and free RAM."""
+    
     with _model_lock:
         _unload_locked(None)
 
@@ -816,8 +806,8 @@ def _is_continuation(query: str, history: List[Dict[str, str]]) -> bool:
 def _fallback_classify(query: str) -> Optional[TaskType]:
     q = query.lower()
 
-    # Explicit "how to <do X>" implies the user wants instructions/reasoning,
-    # not for Iris to actually perform the action.
+    
+    
     is_how_to = bool(re.search(r"\bhow to\b", q))
 
     control_keywords = {
@@ -846,15 +836,15 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
             if not is_how_to:
                 return TaskType.CONTROL
 
-    # ── Order-independent system/device status & control nouns ──────────────
-    # These cover real phrasing like "check how much storage left do I have",
-    # "what's my battery percentage", "how much free space is left on disk",
-    # where the action verb/question word and the target noun are not
-    # adjacent, so the rigid phrase-matching above misses them. Any one of
-    # these nouns, paired with system-status intent words, is a strong signal
-    # the user wants Iris to actually inspect/act on the machine — not a
-    # general knowledge question — so this must be checked before the
-    # generic search_keywords ("how much", "how many") below.
+    
+    
+    
+    
+    
+    
+    
+    
+    
     system_status_nouns = {
         "storage", "disk space", "disk usage", "free space", "hard drive",
         "battery", "battery percentage", "battery life", "ram", "memory usage",
@@ -937,13 +927,13 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
 def classify_task(
     user_query: str, history: List[Dict[str, str]]
 ) -> Tuple[Optional[TaskType], Optional[str]]:
-    """Triage: classify the query or answer it directly."""
     
-    # Strip out document contents and image tags so they don't trigger keyword fallbacks
+    
+    
     query_for_classification = re.sub(r'<document>[\s\S]*?</document>', '', user_query, flags=re.IGNORECASE)
     query_for_classification = re.sub(r'\[IMAGE_UPLOADED:[^\]]+\]', '', query_for_classification, flags=re.IGNORECASE)
     
-    # --- Hardcoded Intercept for Web Dev / Prompts ---
+    
     lower_query = query_for_classification.lower()
     if ("tailwind" in lower_query or "html" in lower_query or "css" in lower_query) and ("build" in lower_query or "landing page" in lower_query or "website" in lower_query or "full-stack developer" in lower_query):
         logger.info("[Triage] Hardcoded intercept: Web development query detected. Routing to CODING_COMPLEX.")
@@ -951,29 +941,29 @@ def classify_task(
 
     result = _fallback_classify(query_for_classification)
     if result is not None:
-        # Prevent false-positive CONTROL routes for web UI tasks mentioning terminals
+        
         if result == TaskType.CONTROL and ("mockup" in lower_query or "terminal element" in lower_query or "terminal window" in lower_query):
             pass
         else:
             return result, None
 
-    # CONTROL LOOP STICKY ROUTING
-    # Ensure that if we are in an active control loop, we stick to TaskType.CONTROL
+    
+    
     if history:
         for msg in history:
             c = msg.get("content", "")
             if "OBSERVATION:" in c or '{"action":' in c:
                 return TaskType.CONTROL, None
 
-    # STICKY ROUTING OPTIMIZATION
-    # If the user is in a continuous chat, and we already have a massive model loaded in RAM,
-    # avoid unloading it to load the Triage router just because they didn't use a strong keyword.
-    # Keep the conversation flowing on the active model to prevent model thrashing.
+    
+    
+    
+    
     from src.iris import _model_pool, ModelRole
     
     _active_role = None
     if _model_pool:
-        # The most recently used model is the last key in the OrderedDict
+        
         _active_role_str = next(reversed(_model_pool))
         try:
             _active_role = ModelRole(_active_role_str)
@@ -1029,14 +1019,9 @@ def classify_task(
         if re.search(rf'\[\s*route:\s*{re.escape(tag)}\s*\]', answer, re.IGNORECASE):
             return ttype, None
 
-    # ── Hallucination Guard ──────────────────────────────────────────────────
-    # If the triage model produced a direct answer instead of a routing tag,
-    # DO NOT serve it — small models (1.7B) hallucinate on factual/reasoning queries.
-    # Only allow direct answers for trivially short greetings / identity replies.
-    # For anything substantive, force-route to the reasoning specialist.
     if answer:
         answer_words = len(answer.split())
-        # Looks like a pure greeting/identity reply (very short, no factual verb) → serve directly
+        
         is_greeting_reply = (
             answer_words <= 25
             and not re.search(
@@ -1046,7 +1031,7 @@ def classify_task(
         )
         if is_greeting_reply:
             return None, answer
-        # Anything else: route to reasoning to prevent hallucination
+        
         logger.info(
             f"[Triage] No routing tag — redirecting to REASONING to prevent hallucination. "
             f"Triage said: {answer[:80]}..."
@@ -1101,17 +1086,17 @@ def _stream_tokens(
     global _keep_loaded
 
     if not isinstance(messages, list) or not all(isinstance(msg, dict) and "role" in msg and "content" in msg for msg in messages):
-        yield {"type": "token", "content": "\n\n> ❌ **Iris Error:** Invalid messages format passed to generator."}
+        yield {"type": "token", "content": "\n\n> [ERROR] **Iris Error:** Invalid messages format passed to generator."}
         return
 
-    # Check for empty query
+    
     if not messages or not messages[-1]["content"].strip():
         yield {"type": "token", "content": "Please enter a valid query."}
         return
 
     llm = load_model(role)
     if not llm:
-        yield {"type": "token", "content": f"\n\n> ❌ **Iris Error:** Failed to load model for role `{role.value}`. Check memory or installation."}
+        yield {"type": "token", "content": f"\n\n> [ERROR] **Iris Error:** Failed to load model for role `{role.value}`. Check memory or installation."}
         return
 
     sys_prompt = system_prompt_override if system_prompt_override is not None else _system_prompt_for(role)
@@ -1120,7 +1105,7 @@ def _stream_tokens(
     cfg = load_generation_config()
     model_cfg = cfg.get("model_settings", {}).get(role.value, {})
 
-    # Defaults from args or hardcoded
+    
     actual_temp = temperature
     rep_penalty = 1.0
     freq_penalty = 0.05 if role in (ModelRole.CODE, ModelRole.REASONING) else 0.0
@@ -1128,7 +1113,7 @@ def _stream_tokens(
     top_p = 0.9
     top_k = 40
 
-    # Override with global config
+    
     actual_temp = cfg.get("temperature", actual_temp)
     rep_penalty = cfg.get("repetition_penalty", rep_penalty)
     freq_penalty = cfg.get("frequency_penalty", freq_penalty)
@@ -1137,7 +1122,7 @@ def _stream_tokens(
     top_k = cfg.get("top_k", top_k)
     max_tokens = max_tokens or cfg.get("max_new_tokens", 4096)
 
-    # Override with model-specific config
+    
     actual_temp = model_cfg.get("temperature", actual_temp)
     rep_penalty = model_cfg.get("repetition_penalty", rep_penalty)
     freq_penalty = model_cfg.get("frequency_penalty", freq_penalty)
@@ -1145,7 +1130,7 @@ def _stream_tokens(
     top_p = model_cfg.get("top_p", top_p)
     top_k = model_cfg.get("top_k", top_k)
 
-    # Override with UI settings (highest priority)
+    
     if settings:
         actual_temp = settings.get("temperature", actual_temp)
         rep_penalty = settings.get("repetition_penalty", rep_penalty)
@@ -1160,8 +1145,8 @@ def _stream_tokens(
     model_name = _get_model_filename(role)
 
     for loop_idx in range(5):
-        # Ensure we never crash during auto-continuation by compacting context
-        # ── DeepSeek-V4 style hybrid compression ──
+        
+        
         _ca_cfg = load_generation_config().get("compressed_attention", {})
         if _ca_cfg.get("enabled", False) and len(full_messages) > 4:
             _query = messages[-1].get("content", "") if messages else ""
@@ -1429,7 +1414,7 @@ def _stream_tokens(
                 yield {"type": "token", "content": buffer}
                 loop_content += buffer
 
-        # Detect premature stops that llama-cpp-python falsely reports as "stop"
+        
         if finish_reason == "stop":
             looks_incomplete = False
             prompt_est = sum(len(m.get("content", "")) for m in full_messages) // 4
@@ -1471,12 +1456,7 @@ def ask_stream(
     keep_loaded: bool = False,
     settings: Optional[dict] = None,
 ) -> Generator[Dict[str, str], None, None]:
-    """Generate a response using the multi-model routing pipeline.
-
-    Args:
-        show_thinking: When True, DeepSeek R1 thinking tokens stream as
-            {"type": "thinking", "content": "..."} events. Set False to strip.
-    """
+    
     global _keep_loaded
     _keep_loaded = keep_loaded
 
@@ -1539,7 +1519,7 @@ def ask_stream(
             full, mw = _apply_math_harness(full)
             for w in mw:
                 yield w
-            # SmartHarness: verify math solution
+            
             _, math_report = apply_smart_harness_math(full)
             if math_report.final_answer_extracted:
                 yield {"type": "status", "content": f"Answer: {math_report.final_answer_extracted}"}
@@ -1553,14 +1533,14 @@ def ask_stream(
             full, hw = _apply_and_yield_harness(full, lang)
             for w in hw:
                 yield w
-            # SmartHarness: sandbox-verify force-routed code
+            
             _, sandbox = apply_smart_harness_code(full, language=lang)
             if sandbox.result == SandboxResult.PASS:
                 yield {"type": "status", "content": f"Sandbox verified: {sandbox.tests_passed} tests passed"}
             elif sandbox.result == SandboxResult.FAIL:
                 yield {"type": "harness_warning", "content": f"Sandbox: {sandbox.tests_failed} test(s) failed"}
 
-            # ── Code Review toggle ──
+            
             if isinstance(settings, dict) and settings.get("code_review"):
                 yield {"type": "clear"}
                 yield {"type": "status", "content": "Reviewing code..."}
@@ -1596,7 +1576,7 @@ def ask_stream(
     web_context = ""
     original_query = user_query.strip()
     
-    # Manual @web override
+    
     if original_query.lower().startswith("@web "):
         search_term = original_query[5:].strip()
         user_query = search_term
@@ -1619,7 +1599,7 @@ def ask_stream(
             logger.warning(f"Web search failed: {e}")
             yield {"type": "status", "content": "Web search unavailable."}
         
-        # After searching, fallback to reasoning model to synthesize answer
+        
         task_type = TaskType.REASONING
 
     if task_type == TaskType.CONTROL:
@@ -1647,7 +1627,7 @@ def ask_stream(
         yield {"type": "status", "content": "Generating computer command..."}
         control_messages = [{"role": "system", "content": _get_agent_system_prompt()}, {"role": "user", "content": user_query}]
         
-        # Decide if we route to the fast 0.5B model or the smart 3B model
+        
         from src.system_actions import is_complex_control
         if is_complex_control(user_query, history):
             logger.info("[Routing] Complex control detected. Loading 3B model (ModelRole.CODE) for control action.")
@@ -1672,10 +1652,10 @@ def ask_stream(
             result = execute_action_by_dict(action_dict)
             reply_text = f"Action '{action_name}' executed.\n\nResult:\n{result}"
             yield {"type": "action_result", "content": f"Action '{action_name}' Executed.\nResult:\n{result}"}
-            # IMPORTANT: also yield token + raw_response so the reply is actually
-            # captured into final_reply / persisted history. Without this, the
-            # action_result event renders only during live streaming and the
-            # saved conversation turn ends up empty (final_reply stays "").
+            
+            
+            
+            
             yield {"type": "token", "content": reply_text}
             yield {"type": "raw_response", "content": reply_text}
         else:
@@ -1722,9 +1702,9 @@ def ask_stream(
             f"Respond in the SAME LANGUAGE as the user's query."
         )
 
-    # Pin the reply language for this turn with a concrete, named directive.
-    # The generic standing rule in the system prompt is too weak for the local
-    # models, which drift to Arabic/other languages on short English inputs.
+    
+    
+    
     final_query += _language_directive(user_query)
 
     optimized = [{"role": "user", "content": final_query}]
@@ -1755,7 +1735,7 @@ def ask_stream(
     elif task_type == TaskType.REASONING:
         yield {"type": "status", "content": "Analyzing..."}
         full = ""
-        _r_temp = 0.4 if web_context else 0.3  # lower temp = fewer hallucinations
+        _r_temp = 0.4 if web_context else 0.3  
         _r_tokens = 4096 if web_context else 3072
         for ev in _stream_tokens(ModelRole.REASONING, optimized, max_tokens=_r_tokens, temperature=_r_temp, think_mode="show"):
             yield ev
@@ -1779,7 +1759,7 @@ def ask_stream(
         for w in mw:
             yield w
 
-        # SmartHarness: verify math numerically & symbolically
+        
         _, math_report = apply_smart_harness_math(full)
         if math_report.final_answer_extracted:
             yield {"type": "status", "content": f"Answer: {math_report.final_answer_extracted}"}
@@ -1834,7 +1814,7 @@ def ask_stream(
         for w in hw:
             yield w
 
-        # SmartHarness: sandbox-verify generated code
+        
         if "```" in full:
             yield {"type": "status", "content": "Verifying code in sandbox..."}
             _, sandbox = apply_smart_harness_code(full, problem_description=user_query, language=lang)
@@ -1848,7 +1828,7 @@ def ask_stream(
                 for rerr in sandbox.runtime_errors[:3]:
                     yield {"type": "harness_warning", "content": f"Runtime: {rerr[:200]}"}
 
-            # ── Code Review toggle ──
+            
             if isinstance(settings, dict) and settings.get("code_review"):
                 yield {"type": "clear"}
                 yield {"type": "status", "content": "Reviewing code quality..."}
@@ -1876,21 +1856,15 @@ def ask_stream(
 
 
 def _apply_and_yield_harness(text: str, language: str) -> Tuple[str, List[dict]]:
-    """Run harness passes and collect warnings. Caller should yield them."""
+    
     return _apply_harness(text, language)
 
 
 def detect_user_language(text: str) -> Optional[str]:
-    """Best-effort natural-language detection by Unicode script.
-
-    Returns a human-readable language name (e.g. "Arabic", "English") to inject
-    into the prompt, or None if it can't tell (e.g. only digits/punctuation).
-    Script-based detection is fast, dependency-free, and reliable enough to pin
-    the reply language, which is what the model actually needs.
-    """
+    
     if not text:
         return None
-    # Strip code blocks / URLs so their ASCII doesn't skew the count.
+    
     sample = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
     sample = re.sub(r"https?://\S+", " ", sample)
 
@@ -1918,8 +1892,8 @@ def detect_user_language(text: str) -> Optional[str]:
 
     if not counts:
         return None
-    # Any non-Latin script wins even at low proportion — Latin letters routinely
-    # bleed into otherwise non-English text (brand names, loanwords).
+    
+    
     non_latin = {k: v for k, v in counts.items() if k != "English"}
     if non_latin:
         return max(non_latin, key=non_latin.__getitem__)
@@ -1927,7 +1901,7 @@ def detect_user_language(text: str) -> Optional[str]:
 
 
 def _language_directive(user_query: str) -> str:
-    """A concrete, named language instruction for the current turn, or ''."""
+    
     lang = detect_user_language(user_query)
     if not lang:
         return ""
@@ -1954,7 +1928,7 @@ def _run_continuation(
     retriever,
     settings=None
 ) -> Generator[Dict[str, str], None, None]:
-    """2-stage continuation: CODE → REVIEWER."""
+    
     optimized = [{"role": "user", "content": user_query}]
     if history:
         recent = history[-4:]
@@ -2005,11 +1979,7 @@ def _run_hermes_agent(
     history: List[Dict[str, str]],
     optimized: List[Dict[str, str]],
 ) -> Generator[Dict[str, str], None, None]:
-    """Hermes agent mode: text-based tool-calling loop for local models.
-
-    Uses build_hermes_text_prompt + parse_hermes_tool_call for models
-    that don't support native OpenAI function calling.
-    """
+    
     yield {"type": "status", "content": "Initializing Hermes Agent..."}
 
     agent = HermesAgentLoop(
@@ -2048,7 +2018,7 @@ def _run_hermes_agent(
             if not _keep_loaded:
                 unload_model()
 
-            # Parse tool call
+            
             tc = parse_hermes_tool_call(full)
             if tc:
                 func_name = tc.get("name", "")
@@ -2062,7 +2032,7 @@ def _run_hermes_agent(
                 result = HermesResultAnalyzer.analyze(result)
                 agent.session.total_tool_calls += 1
 
-                # Feed result back
+                
                 feedback = (
                     f"Tool '{func_name}' returned:\n"
                     f"Status: {result.status.value}\n"
@@ -2087,7 +2057,7 @@ def _run_hermes_agent(
                     break
                 continue
 
-            # No tool call found — assume this is the final answer
+            
             yield {"type": "raw_response", "content": full}
             return
 
@@ -2107,7 +2077,7 @@ def _run_complex_coding(
     retriever,
     settings=None
 ) -> Generator[Dict[str, str], None, None]:
-    """3-stage pipeline: Reasoning (silent) → Codegen (streamed) → Reviewer (streamed)."""
+    
     yield {"type": "status", "content": "Stage 1 \u2014 Deep reasoning..."}
 
     reasoning_prompt = (
@@ -2186,7 +2156,7 @@ def _run_complex_coding(
             yield {"type": "token", "content": "\n\n> \u26a0\ufe0f Auto-correction attempted but some errors may remain."}
         final_output = corrected
 
-    # SmartHarness: sandbox-verify complex code
+    
     yield {"type": "status", "content": "Verifying complex code in sandbox..."}
     _, sandbox = apply_smart_harness_code(final_output, language=lang or "python")
     if sandbox.result == SandboxResult.PASS:
@@ -2199,7 +2169,7 @@ def _run_complex_coding(
         for rerr in sandbox.runtime_errors[:3]:
             yield {"type": "harness_warning", "content": f"Runtime: {rerr[:200]}"}
 
-    # ── Code Review toggle ──
+    
     if isinstance(settings, dict) and settings.get("code_review"):
         yield {"type": "clear"}
         yield {"type": "status", "content": "Reviewing final code quality..."}
@@ -2227,7 +2197,7 @@ def _run_complex_coding(
 def generate_internal_code(
     system_prompt: str, user_prompt: str, max_tokens: int = 512, role: ModelRole = ModelRole.CODE
 ) -> str:
-    """Helper for internal subsystems (e.g., browser_agent) to generate code."""
+    
     llm = load_model(role)
     try:
         res = llm.create_chat_completion(
@@ -2825,7 +2795,7 @@ def _load_vision_model():
                     from llama_cpp.llama_chat_format import Llava15ChatHandler
                     chat_handler = Llava15ChatHandler(clip_model_path=clip_path, verbose=False)
                 
-                # If no chat_handler is provided, llama.cpp handles native architectures like qwen2vl automatically
+                
                 model_kwargs = {
                     "model_path": vision_path,
                     "n_ctx": ROLE_CTX.get(ModelRole.VISION, 4096),

@@ -447,11 +447,11 @@ const doc = new Document({
 ### Lists (NEVER use unicode bullets)
 
 ```javascript
-// ❌ WRONG - never manually insert bullet characters
+// [ERROR] WRONG - never manually insert bullet characters
 new Paragraph({ children: [new TextRun("• Item")] })  // BAD
 new Paragraph({ children: [new TextRun("\u2022 Item")] })  // BAD
 
-// ✅ CORRECT - use numbering config with LevelFormat.BULLET
+// [SUCCESS] CORRECT - use numbering config with LevelFormat.BULLET
 const doc = new Document({
   numbering: {
     config: [
@@ -1085,13 +1085,13 @@ cd <project-name>
 ```
 
 This creates a fully configured project with:
-- ✅ React + TypeScript (via Vite)
-- ✅ Tailwind CSS 3.4.1 with shadcn/ui theming system
-- ✅ Path aliases (`@/`) configured
-- ✅ 40+ shadcn/ui components pre-installed
-- ✅ All Radix UI dependencies included
-- ✅ Parcel configured for bundling (via .parcelrc)
-- ✅ Node 18+ compatibility (auto-detects and pins Vite version)
+- [SUCCESS] React + TypeScript (via Vite)
+- [SUCCESS] Tailwind CSS 3.4.1 with shadcn/ui theming system
+- [SUCCESS] Path aliases (`@/`) configured
+- [SUCCESS] 40+ shadcn/ui components pre-installed
+- [SUCCESS] All Radix UI dependencies included
+- [SUCCESS] Parcel configured for bundling (via .parcelrc)
+- [SUCCESS] Node 18+ compatibility (auto-detects and pins Vite version)
 
 ### Step 2: Develop Your Artifact
 
@@ -1277,7 +1277,7 @@ See language-specific guides for detailed testing approaches and quality checkli
 
 After implementing your MCP server, create comprehensive evaluations to test its effectiveness.
 
-**Load [✅ Evaluation Guide](./reference/evaluation.md) for complete evaluation guidelines.**
+**Load [[SUCCESS] Evaluation Guide](./reference/evaluation.md) for complete evaluation guidelines.**
 
 #### 4.1 Understand Evaluation Purpose
 
@@ -1353,7 +1353,7 @@ Load these resources as needed during development:
   - Quality checklist
 
 ### Evaluation Guide (Load During Phase 4)
-- [✅ Evaluation Guide](./reference/evaluation.md) - Complete evaluation creation guide with:
+- [[SUCCESS] Evaluation Guide](./reference/evaluation.md) - Complete evaluation creation guide with:
   - Question creation guidelines
   - Answer verification strategies
   - XML format specifications

@@ -28,7 +28,7 @@ def run_inference(prompt: str, role: ModelRole = None, use_routing: bool = True,
     end_t = time.time()
     elapsed = round(end_t - start_t, 2)
     
-    # Optional: self-verify math answers
+    
     if verify_math and full_response and "ERROR" not in full_response:
         from benchmark.verify_math import verify_and_refine
         full_response, was_fixed = verify_and_refine(full_response, prompt, keep_loaded=keep_loaded)
@@ -44,11 +44,7 @@ def run_inference_sc(
     n: int = 3,
     keep_loaded: bool = True,
 ) -> tuple[str, str | None, float]:
-    """Run inference N times and return the response whose extracted answer appears most often.
     
-    Returns (best_response, majority_answer, total_time).
-    Falls back to the last response if no majority exists.
-    """
     from collections import Counter
     start_t = time.time()
     responses = []
@@ -60,16 +56,16 @@ def run_inference_sc(
         responses.append(resp)
         answers.append(ans)
     
-    # Find most common non-None answer
+    
     valid = [a for a in answers if a is not None]
     if valid:
         majority, _ = Counter(valid).most_common(1)[0]
-        # Return the response that produced the majority answer
+        
         for resp, ans in zip(responses, answers):
             if ans == majority:
                 return resp, majority, round(time.time() - start_t, 2)
     
-    # Fallback: return last response
+    
     return responses[-1], answers[-1], round(time.time() - start_t, 2)
 
 

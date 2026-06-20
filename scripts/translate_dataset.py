@@ -8,7 +8,7 @@ from llama_cpp import Llama
 def rule_based_translate(cmd: str) -> str:
     cmd = cmd.strip()
     
-    # Strip sudo prefix first and process what's left
+                                                     
     if cmd.startswith("sudo "):
         cmd = cmd[5:].strip()
         
@@ -469,7 +469,7 @@ def main():
         inp = item.get("input", "")
         out = item.get("output", "")
         
-        # Try rule-based translation first
+                                          
         res = rule_based_translate(out)
         
         if res:
@@ -479,7 +479,7 @@ def main():
             })
             rule_calls += 1
         else:
-            # Lazy load the GGUF model
+                                      
             if llm is None:
                 print(f"Loading local model {model_path} for remaining translations...")
                 llm = Llama(model_path=model_path, n_ctx=2048, verbose=False)
@@ -501,7 +501,7 @@ Description: {inp}
             try:
                 res_obj = llm(prompt, max_tokens=150, stop=["}"])
                 text = res_obj["choices"][0]["text"].strip()
-                # Extract translated command from output string
+                                                               
                 match = re.search(r'"([^"]+)"', text)
                 if match:
                     val = match.group(1)
@@ -514,7 +514,7 @@ Description: {inp}
                 })
                 llm_calls += 1
             except Exception as e:
-                # Fallback to outputting the original bash command if LLM fails
+                                                                               
                 results.append({
                     "input": inp,
                     "output": out

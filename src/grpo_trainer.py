@@ -1,13 +1,4 @@
-"""
-grpo_trainer.py — Pure RL Training via GRPO (Group Relative Policy Optimization)
-================================================================================
-GRPO Algorithm :
-  1. Sample a batch of prompts
-  2. For each prompt, generate G responses from the current policy
-  3. Score each response with domain-specific reward function(s)
-  4. Compute group-relative advantage: A_i = (r_i - mean(group)) / std(group)
-  5. Update policy via clipped objective + KL penalty to reference model
-"""
+
 
 import os
 import re
@@ -37,7 +28,7 @@ class RewardDomain(str, Enum):
 
 @dataclass
 class GRPOSample:
-    """One prompt + its G generated responses + rewards."""
+    
     prompt: str
     responses: List[str] = field(default_factory=list)
     raw_rewards: List[float] = field(default_factory=list)
@@ -46,7 +37,7 @@ class GRPOSample:
 
 @dataclass  
 class GRPOMetrics:
-    """Per-step training metrics."""
+    
     step: int
     mean_reward: float
     std_reward: float
@@ -60,7 +51,7 @@ class GRPOMetrics:
 
 
 class RewardScorer:
-    """Composite reward scorer with domain-specific sub-scorers."""
+    
 
     def __init__(self, domain: RewardDomain = RewardDomain.MIXED):
         self.domain = domain
@@ -74,7 +65,7 @@ class RewardScorer:
         }
     
     def score(self, prompt: str, response: str) -> float:
-        """Compute a 0–1 reward for a (prompt, response) pair."""
+        
         scores = {}
         
         domain = self._detect_domain(prompt)
@@ -130,7 +121,7 @@ class RewardScorer:
         return min(1.0, score)
 
     def _score_coherence(self, response: str) -> float:
-        """Check logical flow, no contradiction."""
+        
         score = 0.4
         words = response.split()
         if len(words) < 20:
@@ -146,7 +137,7 @@ class RewardScorer:
             score += 0.1
         return min(1.0, score)
     def _score_completeness(self, response: str) -> float:
-        """Response isn't truncated or clearly incomplete."""
+        
         score = 0.5
         r = response.strip()
         if not re.search(r'[a-zA-Z]$', r) or r.endswith(('.', '!', '?', '```', ')')):
@@ -157,7 +148,7 @@ class RewardScorer:
             score += 0.1
         return min(1.0, score)
     def _score_safety(self, response: str) -> float:
-        """Penalize harmful content."""
+        
         score = 1.0
         dangerous = [
             "rm -rf /", "DROP TABLE", "eval(base64", "import os; os.system",
@@ -168,34 +159,34 @@ class RewardScorer:
                 score -= 0.3
         return max(0.0, score)
 
-    # --- Code ---
+    
     def _score_code_correctness(self, prompt: str, response: str) -> float:
         score = 0.3
         code_blocks = re.findall(r'```(?:\w+)?\n([\s\S]*?)```', response)
         if not code_blocks:
-            # Check for inline code or non-markdown code
+            
             if any(kw in response for kw in ("def ", "class ", "import ", "from ")):
                 code_blocks = [response]
             else:
                 return 0.2
         
         for code in code_blocks:
-            # Syntax check via Python compile
+            
             try:
                 compile(code.strip(), '<reward_check>', 'exec')
                 score += 0.35
             except SyntaxError:
-                pass  # no point for syntax errors
+                pass  
             
-            # Has imports if needed
+            
             if 'import' in prompt.lower() and 'import ' in code:
                 score += 0.1
             
-            # Has main guard for scripts
+            
             if 'if __name__' in code:
                 score += 0.1
             
-            # Not just a fragment
+            
             if len(code.strip()) > 100:
                 score += 0.1
             
@@ -205,26 +196,26 @@ class RewardScorer:
         return min(1.0, score)
 
     def _score_code_reasoning(self, response: str) -> float:
-        """Check if code response includes explanation."""
+        
         score = 0.3
-        # Check for explanation before/after code
+        
         parts = re.split(r'```', response)
         text_parts = [p for i, p in enumerate(parts) if i % 2 == 0]
         total_text = ' '.join(text_parts)
         if len(total_text.split()) > 30:
             score += 0.4
-        # Mentions edge cases
+        
         if re.search(r'edge\s*case|corner\s*case|error\s*handling|exception', response.lower()):
             score += 0.2
-        # Complexity analysis
+        
         if re.search(r'O\(|complexity|performance|optimize', response.lower()):
             score += 0.1
         return min(1.0, score)
 
-    # --- Math ---
+    
     def _score_math_correctness(self, prompt: str, response: str) -> float:
         score = 0.3
-        # Has final answer boxed or extracted
+        
         answer_match = re.search(
             r'(?:answer|final|result|therefore|\\boxed\{)\s*(?:is|:|=)?\s*([^\n.]+)',
             response, re.IGNORECASE
@@ -232,23 +223,23 @@ class RewardScorer:
         if answer_match:
             score += 0.3
         
-        # Has numerical output
+        
         if re.search(r'\d+\.?\d*', response):
             score += 0.15
         
-        # Has step-by-step
+        
         steps = re.findall(r'(?:step|stage)\s*\d+', response.lower())
         if len(steps) >= 2:
             score += 0.15
         
-        # Has LaTeX
+        
         if re.search(r'\$.*\$|\\\(.*\\\)|\\begin\{equation\}', response):
             score += 0.1
         
         return min(1.0, score)
 
     def _score_math_reasoning(self, response: str) -> float:
-        """Does math response show step-by-step reasoning?"""
+        
         score = 0.3
         if len(response.split()) > 50:
             score += 0.2
@@ -260,47 +251,47 @@ class RewardScorer:
             score += 0.1
         return min(1.0, score)
 
-    # --- Reasoning ---
+    
     def _score_reasoning_correctness(self, prompt: str, response: str) -> float:
         score = 0.3
-        # Response directly addresses the prompt
+        
         prompt_words = set(re.findall(r'\b\w{4,}\b', prompt.lower()))
         response_words = set(re.findall(r'\b\w{4,}\b', response.lower()))
         overlap = prompt_words & response_words
         if prompt_words:
             score += 0.3 * min(1.0, len(overlap) / len(prompt_words) * 2)
-        # Has conclusion
+        
         if re.search(r'(?:conclusion|therefore|in summary|overall|thus)', response.lower()):
             score += 0.2
-        # Not a refusal
+        
         if not re.search(r'(?:I cannot|I do not|unable to|not able to)', response.lower()):
             score += 0.2
         return min(1.0, score)
 
     def _score_reasoning_depth(self, response: str) -> float:
-        """How deep is the reasoning?"""
+        
         score = 0.3
         words = len(response.split())
         if words > 100:
             score += 0.3
         elif words > 50:
             score += 0.15
-        # Multi-perspective
+        
         perspectives = re.findall(
             r'(?:alternatively|on the other hand|another (?:way|approach|perspective|angle)|'
             r'consider|from the standpoint)',
             response.lower()
         )
         score += min(0.25, len(perspectives) * 0.08)
-        # Counter-arguments
+        
         if re.search(r'(?:however|but|although|while|whereas|conversely)', response.lower()):
             score += 0.1
-        # Citations or examples
+        
         if re.search(r'(?:for example|for instance|such as|e\.g\.|i\.e\.)', response.lower()):
             score += 0.05
         return min(1.0, score)
 
-    # --- General ---
+    
     def _score_general_quality(self, prompt: str, response: str) -> float:
         score = 0.3
         prompt_words = set(re.findall(r'\b\w{4,}\b', prompt.lower()))
@@ -315,56 +306,41 @@ class RewardScorer:
         return min(1.0, score)
 
 
-# ---------------------------------------------------------------------------
-# GRPO Trainer Core
-# ---------------------------------------------------------------------------
+
+
+
 
 @dataclass
 class GRPOConfig:
-    """Configuration for GRPO+SFT hybrid training (DeepSeek R1-style).
     
-    L_total = L_GRPO + sft_coeff * L_SFT
-    """
-    # Group sampling
-    group_size: int = 4          # G: number of responses per prompt
-    num_generations: int = 1     # rollouts per training step
     
-    # Policy loss
-    clip_epsilon: float = 0.2    # PPO-style clipping
-    kl_coeff: float = 0.04       # KL penalty coefficient (β in DeepSeek R1)
-    kl_target: float = 0.01      # Target KL for adaptive coefficient
-    sft_coeff: float = 0.3       # λ: SFT loss weight (0 = pure GRPO, 1 = equal weight)
+    group_size: int = 4          
+    num_generations: int = 1     
     
-    # Optimization
+    
+    clip_epsilon: float = 0.2    
+    kl_coeff: float = 0.04       
+    kl_target: float = 0.01      
+    sft_coeff: float = 0.3       
+    
+    
     learning_rate: float = 1e-5
     max_grad_norm: float = 1.0
     warmup_steps: int = 100
     total_steps: int = 5000
     
-    # Generation
+    
     max_new_tokens: int = 512
-    temperature: float = 0.8     # Higher for exploration
+    temperature: float = 0.8     
     top_p: float = 0.95
     
-    # Memory
+    
     gradient_accumulation_steps: int = 4
     max_prompt_length: int = 1024
 
 
 class GRPOTrainer:
-    """Group Relative Policy Optimization trainer.
-
-    Unlike PPO, GRPO does NOT require a separate critic/value model.
-    Advantages are computed within each group via reward normalization.
-
-    Architecture:
-        Policy model (θ): generates responses, gets updated
-        Reference model (θ_ref): frozen copy, used for KL penalty
-
-    Loss:
-        L = -E[ min(r·A, clip(r, 1-ε, 1+ε)·A) - β·KL(θ||θ_ref) ]
-        where r = π_θ(a|s) / π_old(a|s), A = normalized group advantage
-    """
+    
 
     def __init__(
         self,
@@ -384,7 +360,7 @@ class GRPOTrainer:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else 
                                              "mps" if torch.backends.mps.is_available() else "cpu")
         
-        # Store initial policy as reference
+        
         if reference_model is not None:
             self.reference = reference_model
         else:
@@ -401,26 +377,22 @@ class GRPOTrainer:
         self.metrics_history: List[GRPOMetrics] = []
 
     def _clone_model(self, model: nn.Module) -> nn.Module:
-        """Deep clone a model for the reference policy."""
+        
         import copy
         clone = copy.deepcopy(model)
         clone.eval()
         return clone
 
-    # ------------------------------------------------------------------
-    # Generation (uses llama-cpp for GGUF, or HF generate API)
-    # ------------------------------------------------------------------
+    
+    
+    
 
     def generate_responses(
         self,
         prompts: List[str],
         num_per_prompt: int = None,
     ) -> List[List[str]]:
-        """Generate multiple responses per prompt.
-
-        For GGUF models, use llama-cpp.
-        For HF models, use model.generate().
-        """
+        
         if num_per_prompt is None:
             num_per_prompt = self.config.group_size
 
@@ -435,9 +407,9 @@ class GRPOTrainer:
         return all_responses
 
     def _generate_single(self, prompt: str, seed: int = 0) -> str:
-        """Generate one response."""
+        
         if hasattr(self.generation_model, 'generate') and not hasattr(self.generation_model, 'create_chat_completion'):
-            # HF-style model
+            
             inputs = self.tokenizer(
                 prompt, return_tensors="pt", truncation=True,
                 max_length=self.config.max_prompt_length
@@ -455,7 +427,7 @@ class GRPOTrainer:
                 )
             return self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
         
-        # Fallback: use the model as a callable (llama-cpp style)
+        
         try:
             response = self.generation_model.create_chat_completion(
                 messages=[{"role": "user", "content": prompt}],
@@ -468,16 +440,16 @@ class GRPOTrainer:
         except Exception:
             return "[generation failed]"
 
-    # ------------------------------------------------------------------
-    # Rewards and Advantages
-    # ------------------------------------------------------------------
+    
+    
+    
 
     def compute_rewards(self, prompts: List[str], all_responses: List[List[str]]) -> List[GRPOSample]:
-        """Score all responses and create GRPOSamples."""
+        
         samples = []
         for prompt, group in zip(prompts, all_responses):
             rewards = [self.scorer.score(prompt, resp) for resp in group]
-            # Group-relative advantage: normalize within group
+            
             rewards_t = torch.tensor(rewards, dtype=torch.float32)
             mean_r = rewards_t.mean()
             std_r = rewards_t.std() + 1e-8
@@ -495,14 +467,14 @@ class GRPOTrainer:
             ))
         return samples
 
-    # ------------------------------------------------------------------
-    # Policy Loss (the core GRPO objective)
-    # ------------------------------------------------------------------
+    
+    
+    
 
     def _compute_log_probs(
         self, model: nn.Module, input_ids: torch.Tensor, attention_mask: torch.Tensor
     ) -> torch.Tensor:
-        """Compute sequence-level log probability under the model."""
+        
         outputs = model(input_ids=input_ids, attention_mask=attention_mask)
         logits = outputs.logits[:, :-1, :]
         labels = input_ids[:, 1:]
@@ -520,7 +492,7 @@ class GRPOTrainer:
         self, policy_model: nn.Module, ref_model: nn.Module,
         input_ids: torch.Tensor, attention_mask: torch.Tensor
     ) -> torch.Tensor:
-        """Estimate KL(π_θ || π_ref)."""
+        
         with torch.no_grad():
             ref_outputs = ref_model(input_ids=input_ids, attention_mask=attention_mask)
             ref_logits = ref_outputs.logits
@@ -528,7 +500,7 @@ class GRPOTrainer:
         pol_outputs = policy_model(input_ids=input_ids, attention_mask=attention_mask)
         pol_logits = pol_outputs.logits
         
-        # KL = E[log(π_θ) - log(π_ref)]
+        
         pol_log_probs = F.log_softmax(pol_logits, dim=-1)
         ref_log_probs = F.log_softmax(ref_logits, dim=-1)
         
@@ -542,15 +514,7 @@ class GRPOTrainer:
         references: Optional[List[str]] = None,
         old_log_probs: Optional[List[torch.Tensor]] = None,
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
-        """Compute the GRPO+SFT hybrid loss.
-
-        L_total = L_GRPO + λ * L_SFT
         
-        L_GRPO = -E[min(ratio * advantage, clip(ratio) * advantage) - β * KL]
-        L_SFT  = cross-entropy on reference answers (anchors model to correctness)
-        
-        If no references provided, falls back to pure GRPO (λ=0).
-        """
         total_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
         total_kl = torch.tensor(0.0, device=self.device)
         
@@ -561,16 +525,16 @@ class GRPOTrainer:
         for i, sample in enumerate(samples):
             for j, (response, advantage) in enumerate(zip(sample.responses, sample.advantages)):
                 if advantage == 0.0 and all(a == 0.0 for a in sample.advantages):
-                    continue  # Skip when all rewards are identical
+                    continue  
                 
-                # Tokenize prompt + response
+                
                 full_text = sample.prompt + "\n" + response
                 encoded = self.tokenizer(
                     full_text, return_tensors="pt", truncation=True,
                     max_length=self.config.max_prompt_length + self.config.max_new_tokens
                 ).to(self.device)
                 
-                # Compute log probs
+                
                 new_log_prob = self._compute_log_probs(
                     self.policy, encoded.input_ids, encoded.attention_mask
                 ).mean()
@@ -582,17 +546,17 @@ class GRPOTrainer:
                     if old_log_probs is not None and i < len(old_log_probs):
                         old_log_prob = old_log_probs[i]
                 
-                # Ratio
+                
                 ratio = torch.exp(new_log_prob - old_log_prob)
                 all_ratios.append(ratio.item())
                 
-                # Clipped objective
+                
                 adv = torch.tensor(advantage, device=self.device)
                 clipped_ratio = torch.clamp(ratio, 1 - self.config.clip_epsilon, 
                                             1 + self.config.clip_epsilon)
                 policy_loss = -torch.min(ratio * adv, clipped_ratio * adv)
                 
-                # KL penalty
+                
                 kl = self._kl_divergence(
                     self.policy, self.reference,
                     encoded.input_ids, encoded.attention_mask
@@ -609,7 +573,7 @@ class GRPOTrainer:
         total_loss = total_loss / n_samples
         avg_kl = (total_kl / n_samples).item()
         
-        # --- SFT Loss (cross-entropy anchoring to reference answers) ---
+        
         sft_loss_val = 0.0
         has_sft = references and any(ref and len(ref) > 5 for ref in references)
         if has_sft and self.config.sft_coeff > 0:
@@ -643,7 +607,7 @@ class GRPOTrainer:
                 sft_loss_val = (sft_total / sft_count).item()
                 total_loss = total_loss + self.config.sft_coeff * (sft_total / sft_count)
         
-        # Adaptive KL coefficient (DeepSeek R1 approach)
+        
         if avg_kl > self.config.kl_target * 2:
             self.kl_coeff *= 1.1
         elif avg_kl < self.config.kl_target / 2:
@@ -660,26 +624,26 @@ class GRPOTrainer:
         }
         return total_loss, info
 
-    # ------------------------------------------------------------------
-    # Training Loop
-    # ------------------------------------------------------------------
+    
+    
+    
 
     def train_step(
         self,
         prompts: List[str],
         references: List[str] = None,
     ) -> GRPOMetrics:
-        """One GRPO+SFT hybrid training step."""
+        
         self.policy.train()
         G = self.config.group_size
         
-        # Phase 1: Generate G responses per prompt
+        
         all_responses = self.generate_responses(prompts, num_per_prompt=G)
         
-        # Phase 2: Score and compute advantages
+        
         samples = self.compute_rewards(prompts, all_responses)
         
-        # Phase 3: Compute hybrid loss (GRPO + λ·SFT)
+        
         loss, loss_info = self.hybrid_loss(samples, references=references)
         
         if loss.requires_grad:
@@ -690,7 +654,7 @@ class GRPOTrainer:
         
         self.step_count += 1
         
-        # Collect metrics
+        
         all_rewards = [r for s in samples for r in s.raw_rewards]
         metrics = GRPOMetrics(
             step=self.step_count,
@@ -706,7 +670,7 @@ class GRPOTrainer:
         )
         self.metrics_history.append(metrics)
         
-        # Adaptive KL tracking
+        
         avg_kl = loss_info.get("kl", 0.0)
         if avg_kl > 0.05:
             print(f"  ⚠️  KL={avg_kl:.4f} — model drifting, consider reducing lr or increasing KL coeff")
@@ -721,7 +685,7 @@ class GRPOTrainer:
         save_every: int = 500,
         save_dir: str = "./grpo_checkpoints",
     ) -> List[GRPOMetrics]:
-        """Full GRPO+SFT hybrid training loop."""
+        
         os.makedirs(save_dir, exist_ok=True)
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
         all_metrics = []
@@ -740,7 +704,7 @@ class GRPOTrainer:
                 if self.step_count >= self.config.total_steps:
                     break
                 
-                # Extract prompts and references from batch
+                
                 refs = None
                 if isinstance(batch, dict):
                     prompts = batch.get("prompt", batch.get("text", batch.get("instruction", [])))
@@ -780,15 +744,15 @@ class GRPOTrainer:
             if self.step_count >= self.config.total_steps:
                 break
         
-        # Final save
+        
         final_path = os.path.join(save_dir, "grpo_final")
         self.save_checkpoint(final_path)
-        print(f"\n✅ GRPO+SFT hybrid training complete. {len(all_metrics)} steps. Model saved to {final_path}")
+        print(f"\n[SUCCESS] GRPO+SFT hybrid training complete. {len(all_metrics)} steps. Model saved to {final_path}")
         
         return all_metrics
 
     def save_checkpoint(self, path: str):
-        """Save policy model and optimizer state."""
+        
         os.makedirs(path, exist_ok=True)
         torch.save({
             "policy_state_dict": self.policy.state_dict(),
@@ -799,7 +763,7 @@ class GRPOTrainer:
         }, os.path.join(path, "grpo_checkpoint.pt"))
     
     def load_checkpoint(self, path: str):
-        """Load a training checkpoint."""
+        
         ckpt = torch.load(os.path.join(path, "grpo_checkpoint.pt"), map_location=self.device)
         self.policy.load_state_dict(ckpt["policy_state_dict"])
         self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
@@ -808,19 +772,12 @@ class GRPOTrainer:
         print(f"[GRPO] Resumed from step {self.step_count}")
 
 class GGUFPolicyBridge:
-    """Bridges GGUF inference (via llama-cpp) with a PyTorch trainable adapter.
-
-    For the GRPO loop:
-    - Inference (generation): uses the GGUF model via llama-cpp for high-quality sampling
-    - Policy update: uses a separate torch base + LoRA adapter for gradient-based training
-
-    This is the practical approach for local GGUF models.
-    """
+    
 
     def __init__(
         self,
         gguf_path: str,
-        base_model_name: str,  # e.g., "Qwen/Qwen2.5-Coder-7B-Instruct"
+        base_model_name: str,  
         device: torch.device = None,
         use_4bit: bool = True,
     ):
@@ -830,13 +787,13 @@ class GGUFPolicyBridge:
                                              "mps" if torch.backends.mps.is_available() else "cpu")
         self.use_4bit = use_4bit
         
-        # Will be set up lazily
+        
         self.gguf_llm = None
         self.policy_model = None
         self.tokenizer = None
     
     def setup(self):
-        """Initialize both GGUF and PyTorch models."""
+        
         from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
         from llama_cpp import Llama
         
@@ -877,7 +834,7 @@ class GGUFPolicyBridge:
         print("[GRPO Bridge] ✓ Both models loaded. GGUF for inference, HF for training.")
 
     def generate(self, prompt: str, seed: int = 0, **kwargs) -> str:
-        """Generate using GGUF model."""
+        
         if self.gguf_llm is None:
             self.setup()
         
@@ -891,7 +848,7 @@ class GGUFPolicyBridge:
         return response["choices"][0]["message"]["content"]
 
     def get_trainable_model(self):
-        """Get the PyTorch model (with LoRA) for training."""
+        
         if self.policy_model is None:
             self.setup()
         return self.policy_model
@@ -902,15 +859,12 @@ class GGUFPolicyBridge:
         return self.tokenizer
 
 
-# ---------------------------------------------------------------------------
-# Dataset for GRPO
-# ---------------------------------------------------------------------------
+
+
+
 
 class GRPODataset(Dataset):
-    """Dataset of prompts for GRPO training.
     
-    Each item is just a prompt string. GRPO generates responses on the fly.
-    """
 
     def __init__(
         self,
@@ -942,7 +896,7 @@ class GRPODataset(Dataset):
         response_field: str = None,
         max_samples: int = 5000,
     ):
-        """Load prompts (and optionally references) from a HuggingFace dataset."""
+        
         from datasets import load_dataset
         ds = load_dataset(dataset_name, config, split=split)
         
@@ -951,7 +905,7 @@ class GRPODataset(Dataset):
         for i, item in enumerate(ds):
             if i >= max_samples:
                 break
-            # Extract prompt
+            
             if prompt_field in item:
                 prompt = item[prompt_field]
             elif "question" in item:
@@ -969,7 +923,7 @@ class GRPODataset(Dataset):
                     continue
             prompts.append(prompt)
             
-            # Extract reference (gold answer for SFT anchoring)
+            
             ref = None
             for field in ([response_field] if response_field else 
                           ["output", "response", "answer", "completion", "chosen"]):
@@ -982,7 +936,7 @@ class GRPODataset(Dataset):
 
     @classmethod
     def from_jsonl(cls, path: str, prompt_field: str = "prompt", response_field: str = "response", max_samples: int = 5000):
-        """Load prompts (and optionally references) from a JSONL file."""
+        
         prompts = []
         references = []
         with open(path, 'r') as f:
@@ -997,9 +951,9 @@ class GRPODataset(Dataset):
         return cls(prompts, references if any(references) else None)
 
 
-# ---------------------------------------------------------------------------
-# High-level API for train.py integration
-# ---------------------------------------------------------------------------
+
+
+
 
 def train_with_grpo(
     role: str,
@@ -1013,32 +967,17 @@ def train_with_grpo(
     save_dir: str = "./grpo_models",
     device_type: str = None,
 ) -> List[GRPOMetrics]:
-    """High-level entry point: train a role model with GRPO.
-
-    Args:
-        role: Role name (code, math, reasoning, general, etc.)
-        base_model_id: HF model ID for training (e.g., "Qwen/Qwen2.5-Coder-7B-Instruct")
-        gguf_path: Path to GGUF for inference (optional, auto-detected)
-        prompts_dataset: HF dataset name or local JSONL path for prompts
-        steps: Number of GRPO steps
-        group_size: G — responses per prompt
-        lr: Learning rate
-        save_dir: Checkpoint directory
-        device_type: "cuda", "mps", or "cpu"
-
-    Returns:
-        List of GRPOMetrics per step.
-    """
+    
     device = torch.device(device_type or ("cuda" if torch.cuda.is_available() else
                                           "mps" if torch.backends.mps.is_available() else "cpu"))
     
-    # Load prompts
+    
     if prompts_dataset and os.path.exists(prompts_dataset):
         dataset = GRPODataset.from_jsonl(prompts_dataset)
     elif prompts_dataset:
         dataset = GRPODataset.from_huggingface(prompts_dataset, max_samples=steps)
     else:
-        # Default datasets per role
+        
         role_datasets = {
             "code":      "m-a-p/CodeFeedback-Filtered-Instruction",
             "math":      "EleutherAI/hendrycks_math",
@@ -1051,7 +990,7 @@ def train_with_grpo(
     
     print(f"[GRPO] Loaded {len(dataset)} prompts for role '{role}' (refs: {'yes' if getattr(dataset, 'has_references', False) else 'no'}, λ_SFT={sft_coeff})")
     
-    # Setup bridge
+    
     gguf = gguf_path or _find_gguf_for_role(role)
     bridge = GGUFPolicyBridge(
         gguf_path=gguf,
@@ -1064,7 +1003,7 @@ def train_with_grpo(
     policy = bridge.get_trainable_model()
     tokenizer = bridge.get_tokenizer()
     
-    # Setup GRPO+SFT hybrid config
+    
     config = GRPOConfig(
         group_size=group_size,
         learning_rate=lr,
@@ -1075,14 +1014,14 @@ def train_with_grpo(
         top_p=0.95,
     )
     
-    # Domain-specific reward
+    
     domain_map = {
         "code": RewardDomain.CODE, "math": RewardDomain.MATH,
         "reasoning": RewardDomain.REASONING, "general": RewardDomain.GENERAL,
     }
     scorer = RewardScorer(domain=domain_map.get(role, RewardDomain.MIXED))
     
-    # Train
+    
     trainer = GRPOTrainer(
         policy_model=policy,
         tokenizer=tokenizer,
@@ -1104,7 +1043,7 @@ def train_with_grpo(
 
 
 def _find_gguf_for_role(role: str) -> str:
-    """Find GGUF path for a role in the models directory."""
+    
     model_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
     
     role_to_pattern = {
@@ -1150,7 +1089,7 @@ if __name__ == "__main__":
         device_type=args.device,
     )
     
-    # Summary
+    
     final = metrics[-1] if metrics else None
     if final:
         print(f"\n{'='*60}")

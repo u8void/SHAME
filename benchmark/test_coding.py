@@ -1,10 +1,4 @@
-"""
-test_coding.py — HumanEval benchmark
-Evaluates the CODE and REASONING models against OpenAI's HumanEval dataset.
-Samples N problems, prompts the model to complete the function, extracts the
-code block, executes it with the ground-truth unit tests using exec(), and 
-enforces a 2-second timeout using signals to catch infinite loops.
-"""
+
 
 import re
 import random
@@ -27,7 +21,7 @@ def timeout_handler(signum, frame):
     raise TimeoutException("Execution timed out (infinite loop?)")
 
 def _extract_python_code(response: str) -> str:
-    """Extract the first Python code block from the model response."""
+    
     m = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL | re.IGNORECASE)
     if m:
         return m.group(1).strip()
@@ -37,14 +31,14 @@ def _extract_python_code(response: str) -> str:
     return response.strip()
 
 def run_unit_tests(code_text: str, test_text: str, timeout_sec: int = 2) -> tuple[bool, str | None]:
-    """Execute the model code + unit tests inside a restricted exec context with a watchdog timer."""
-    # Register alarm signal handler
+    
+    
     old_handler = signal.signal(signal.SIGALRM, timeout_handler)
     signal.alarm(timeout_sec)
     
     exec_globals = {}
     try:
-        # Concatenate candidate code and test block
+        
         full_code = f"{code_text}\n\n{test_text}"
         exec(full_code, exec_globals)
         return True, None
@@ -55,7 +49,7 @@ def run_unit_tests(code_text: str, test_text: str, timeout_sec: int = 2) -> tupl
     except Exception as e:
         return False, f"Exception: {e}"
     finally:
-        # Cancel alarm and restore handler
+        
         signal.alarm(0)
         signal.signal(signal.SIGALRM, old_handler)
 
@@ -102,14 +96,14 @@ def run_coding_benchmark(csv_path: str):
         entry_point    = item.get("entry_point", "function")
         test_suite     = item.get("test", "")
 
-        # Stage 1: Reasoning
+        
         plan_prompt = (
             f"You are a master programmer. Analyze the following coding problem and write a step-by-step plan to solve it.\n\n"
             f"Problem:\n```python\n{func_signature}\n```\n\nPlan the solution:"
         )
         plan_out, t1 = run_inference(plan_prompt, role=ModelRole.REASONING, use_routing=False, keep_loaded=True)
 
-        # Stage 2: Coding
+        
         code_prompt = (
             f"You are an expert Python developer. Complete the following Python function based on the provided plan. "
             f"Return ONLY valid Python code inside a ```python``` block.\n\n"
@@ -119,7 +113,7 @@ def run_coding_benchmark(csv_path: str):
         code_out, t2 = run_inference(code_prompt, role=ModelRole.CODE, use_routing=False, keep_loaded=True)
         initial_code = _extract_python_code(code_out)
 
-        # Stage 3: Review
+        
         review_prompt = (
             f"You are an expert Code Reviewer. Review the following Python code for correctness, edge cases, and bugs.\n"
             f"Fix any issues and return the final corrected Python code inside a ```python``` block.\n\n"
@@ -131,8 +125,8 @@ def run_coding_benchmark(csv_path: str):
         
         t = round(t1 + t2 + t3, 2)
 
-        # The HF dataset only defines check(), we must call it.
-        # Guard: fallback built-in tests already include the call, avoid duplicating.
+        
+        
         call_line = f"check({entry_point})"
         if call_line.strip() not in test_suite:
             full_test_suite = f"{test_suite}\n{call_line}\n"

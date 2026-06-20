@@ -60,9 +60,9 @@ def set_volume(action: str, amount: str = "5%"):
                 subprocess.run(["amixer", "set", "Master", f"{amount}+"], check=True)
             elif action == "volume_down":
                 subprocess.run(["amixer", "set", "Master", f"{amount}-"], check=True)
-            return f"✅ Volume action '{action}' executed."
+            return f"[SUCCESS] Volume action '{action}' executed."
         elif os_name == "Windows":
-            return "✅ Volume action simulated on Windows (requires nircmd or custom script)."
+            return "[SUCCESS] Volume action simulated on Windows (requires nircmd or custom script)."
         elif os_name == "Darwin":
             if action == "volume_mute":
                 subprocess.run(["osascript", "-e", "set volume output muted not (output muted of (get volume settings))"])
@@ -70,9 +70,9 @@ def set_volume(action: str, amount: str = "5%"):
                 subprocess.run(["osascript", "-e", "set volume output volume (output volume of (get volume settings) + 5)"])
             elif action == "volume_down":
                 subprocess.run(["osascript", "-e", "set volume output volume (output volume of (get volume settings) - 5)"])
-            return f"✅ Volume action '{action}' executed."
+            return f"[SUCCESS] Volume action '{action}' executed."
     except Exception as e:
-        return f"❌ Failed to control volume: {e}"
+        return f"[ERROR] Failed to control volume: {e}"
 
 def set_brightness(action: str, amount: str = "5%"):
     os_name = platform.system()
@@ -82,13 +82,13 @@ def set_brightness(action: str, amount: str = "5%"):
                 subprocess.run(["brightnessctl", "set", f"+{amount}"], check=True)
             elif action == "brightness_down":
                 subprocess.run(["brightnessctl", "set", f"{amount}-"], check=True)
-            return f"✅ Brightness action '{action}' executed."
+            return f"[SUCCESS] Brightness action '{action}' executed."
         elif os_name == "Darwin":
-            return "❌ Brightness control on macOS requires 3rd party tools like 'brightness'."
+            return "[ERROR] Brightness control on macOS requires 3rd party tools like 'brightness'."
         elif os_name == "Windows":
-            return "✅ Brightness action simulated on Windows."
+            return "[SUCCESS] Brightness action simulated on Windows."
     except Exception as e:
-        return f"❌ Failed to control brightness: {e}"
+        return f"[ERROR] Failed to control brightness: {e}"
 
 def control_power(action: str):
     os_name = platform.system()
@@ -96,16 +96,16 @@ def control_power(action: str):
         if os_name == "Linux":
             if action == "lock_screen":
                 subprocess.run(["xdg-screensaver", "lock"], check=False)
-                return "✅ Screen locked."
+                return "[SUCCESS] Screen locked."
             elif action == "sleep_computer":
                 subprocess.run(["systemctl", "suspend"], check=True)
-                return "✅ Computer suspended."
+                return "[SUCCESS] Computer suspended."
             elif action == "shutdown_computer":
                 subprocess.run(["systemctl", "poweroff"], check=True)
-                return "✅ Computer shutting down."
+                return "[SUCCESS] Computer shutting down."
             elif action == "restart_computer":
                 subprocess.run(["systemctl", "reboot"], check=True)
-                return "✅ Computer restarting."
+                return "[SUCCESS] Computer restarting."
         elif os_name == "Windows":
             if action == "lock_screen":
                 subprocess.run(["rundll32.exe", "user32.dll,LockWorkStation"])
@@ -115,7 +115,7 @@ def control_power(action: str):
                 subprocess.run(["shutdown", "/s", "/t", "0"])
             elif action == "restart_computer":
                 subprocess.run(["shutdown", "/r", "/t", "0"])
-            return f"✅ Power action '{action}' executed."
+            return f"[SUCCESS] Power action '{action}' executed."
         elif os_name == "Darwin":
             if action == "lock_screen":
                 subprocess.run(["pmset", "displaysleepnow"])
@@ -125,9 +125,9 @@ def control_power(action: str):
                 subprocess.run(["osascript", "-e", 'tell app "System Events" to shut down'])
             elif action == "restart_computer":
                 subprocess.run(["osascript", "-e", 'tell app "System Events" to restart'])
-            return f"✅ Power action '{action}' executed."
+            return f"[SUCCESS] Power action '{action}' executed."
     except Exception as e:
-        return f"❌ Failed to execute power action: {e}"
+        return f"[ERROR] Failed to execute power action: {e}"
 
 def manage_clipboard(action: str, text: str = ""):
     try:
@@ -137,11 +137,11 @@ def manage_clipboard(action: str, text: str = ""):
             return f"📋 Clipboard content:\n{content}"
         elif action == "write_clipboard":
             pyperclip.copy(text)
-            return "✅ Copied to clipboard."
+            return "[SUCCESS] Copied to clipboard."
     except ImportError:
-        return "❌ Clipboard actions require the 'pyperclip' package. Run `pip install pyperclip`."
+        return "[ERROR] Clipboard actions require the 'pyperclip' package. Run `pip install pyperclip`."
     except Exception as e:
-        return f"❌ Clipboard error: {e}"
+        return f"[ERROR] Clipboard error: {e}"
 
 import shutil
 import glob
@@ -162,7 +162,7 @@ def find_chrome_pwa_exec(app_name: str):
                 name_val = name_match.group(1).strip().lower()
                 exec_val = exec_match.group(1).strip()
                 if app_name_lower in name_val:
-                    # Return command split to make Popen happy or just run it via shell
+                                                                                       
                     return exec_val
         except Exception:
             pass
@@ -172,12 +172,12 @@ def open_app(name: str):
     os_name = platform.system()
     try:
         if os_name == "Linux":
-            # 1. Try Chrome PWA first (e.g. WhatsApp Web PWA, Telegram Web PWA)
+                                                                               
             pwa_exec = find_chrome_pwa_exec(name)
             if pwa_exec:
-                # Launch via shell because Exec has arguments
+                                                             
                 subprocess.Popen(pwa_exec, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                return f"✅ Opened '{name}' (via Chrome PWA)."
+                return f"[SUCCESS] Opened '{name}' (via Chrome PWA)."
 
             common_map = {
                 "chrome": "google-chrome",
@@ -190,20 +190,20 @@ def open_app(name: str):
             }
             exe = common_map.get(name.lower(), name.lower())
             if not shutil.which(exe):
-                return f"❌ Could not find application '{name}' in PATH or as a Chrome PWA."
+                return f"[ERROR] Could not find application '{name}' in PATH or as a Chrome PWA."
             subprocess.Popen([exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return f"✅ Opened '{name}'."
+            return f"[SUCCESS] Opened '{name}'."
         elif os_name == "Windows":
             subprocess.Popen(f"start {name}", shell=True)
-            return f"✅ Opened '{name}'."
+            return f"[SUCCESS] Opened '{name}'."
         elif os_name == "Darwin":
             subprocess.Popen(["open", "-a", name])
-            return f"✅ Opened '{name}'."
+            return f"[SUCCESS] Opened '{name}'."
     except Exception as e:
-        return f"❌ Failed to open app: {e}"
+        return f"[ERROR] Failed to open app: {e}"
 
 def _resolve_linux_app_exec(app_name: str) -> str:
-    """Dynamically find the true Linux executable name by parsing .desktop files."""
+                                                                                    
     import os, glob
     app_name = app_name.lower()
     dirs = [
@@ -286,7 +286,7 @@ def close_app(name: str):
             import subprocess
             success = False
             for target in aliases:
-                # If we rely on the raw user input, ONLY use exact match to avoid system-wiping (e.g. killing all 'c' processes)
+                                                                                                                                
                 if is_fallback:
                     r1 = subprocess.run(f"pkill -9 -i -x '{target}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     r2 = subprocess.run(f"killall -9 -I -e '{target}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -300,22 +300,22 @@ def close_app(name: str):
                         success = True
             
             if success:
-                return f"✅ Closed '{name}'."
+                return f"[SUCCESS] Closed '{name}'."
             else:
-                return f"❌ Could not find any running process matching '{name}' to close."
+                return f"[ERROR] Could not find any running process matching '{name}' to close."
         elif os_name == "Windows":
             import subprocess
             success = False
             for target in aliases:
-                # taskkill /IM already requires the exact image name
+                                                                    
                 result = subprocess.run(["taskkill", "/IM", f"{target}.exe", "/F"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 if result.returncode == 0:
                     success = True
             
             if success:
-                return f"✅ Closed '{name}'."
+                return f"[SUCCESS] Closed '{name}'."
             else:
-                return f"❌ Could not find any running process matching '{name}' to close."
+                return f"[ERROR] Could not find any running process matching '{name}' to close."
         elif os_name == "Darwin":
             import subprocess
             success = False
@@ -329,26 +329,26 @@ def close_app(name: str):
                     success = True
 
             if success:
-                return f"✅ Closed '{name}'."
+                return f"[SUCCESS] Closed '{name}'."
             else:
-                return f"❌ Could not find any running process matching '{name}' to close."
+                return f"[ERROR] Could not find any running process matching '{name}' to close."
     except Exception as e:
-        return f"❌ Failed to close app '{name}': {e}"
+        return f"[ERROR] Failed to close app '{name}': {e}"
 
 def open_file(path: str):
     os_name = platform.system()
     try:
         if os_name == "Linux":
             subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return f"✅ Opened file '{path}'."
+            return f"[SUCCESS] Opened file '{path}'."
         elif os_name == "Windows":
             os.startfile(path)
-            return f"✅ Opened file '{path}'."
+            return f"[SUCCESS] Opened file '{path}'."
         elif os_name == "Darwin":
             subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return f"✅ Opened file '{path}'."
+            return f"[SUCCESS] Opened file '{path}'."
     except Exception as e:
-        return f"❌ Failed to open file '{path}': {e}"
+        return f"[ERROR] Failed to open file '{path}': {e}"
 
 def search_files(query: str, folder: str = ""):
     os_name = platform.system()
@@ -361,16 +361,16 @@ def search_files(query: str, folder: str = ""):
             if files and files[0]:
                 return f"🔍 Found {len(files)} matches. First few:\n" + "\n".join(files[:5])
             else:
-                return f"❌ No files found matching '{query}' in {folder}."
+                return f"[ERROR] No files found matching '{query}' in {folder}."
         elif os_name == "Windows":
             result = subprocess.run(["cmd", "/c", "dir", "/s", "/b", f"*{query}*"], cwd=folder, capture_output=True, text=True)
             files = result.stdout.strip().split('\n')
             if files and files[0]:
                 return f"🔍 Found {len(files)} matches. First few:\n" + "\n".join(files[:5])
             else:
-                return f"❌ No files found matching '{query}' in {folder}."
+                return f"[ERROR] No files found matching '{query}' in {folder}."
     except Exception as e:
-        return f"❌ Failed to search for file: {e}"
+        return f"[ERROR] Failed to search for file: {e}"
 
 
 def handle_media_command(action: str) -> str:
@@ -387,12 +387,12 @@ def handle_media_command(action: str) -> str:
     system = platform.system()
     try:
         if system == "Linux":
-            # Try playerctl first
+                                 
             if shutil.which("playerctl"):
                 sub_cmd = "play-pause" if action == "media_play_pause" else action.replace("media_", "")
                 subprocess.run(["playerctl", sub_cmd], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                return f"✅ Executed media action: {action} (via playerctl)"
-            # Try xdotool
+                return f"[SUCCESS] Executed media action: {action} (via playerctl)"
+                         
             elif shutil.which("xdotool"):
                 xdo_keys = {
                     "media_play_pause": "XF86AudioPlay",
@@ -401,9 +401,9 @@ def handle_media_command(action: str) -> str:
                     "media_stop": "XF86AudioStop",
                 }
                 subprocess.run(["xdotool", "key", xdo_keys[action]], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                return f"✅ Executed media action: {action} (via xdotool)"
+                return f"[SUCCESS] Executed media action: {action} (via xdotool)"
             
-            # Try dbus-send (MPRIS) which is universally available on Linux
+                                                                           
             elif shutil.which("dbus-send"):
                 dbus_cmd = {
                     "media_play_pause": "PlayPause",
@@ -424,7 +424,7 @@ def handle_media_command(action: str) -> str:
                                     ["dbus-send", "--print-reply", f"--dest={player}", "/org/mpris/MediaPlayer2", f"org.mpris.MediaPlayer2.Player.{dbus_cmd}"],
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                                 )
-                            return f"✅ Executed media action: {action} (via dbus/MPRIS)"
+                            return f"[SUCCESS] Executed media action: {action} (via dbus/MPRIS)"
                     except Exception as e:
                         logger.warning(f"dbus-send media control failed: {e}")
         elif system == "Darwin":
@@ -435,28 +435,28 @@ def handle_media_command(action: str) -> str:
                 "media_stop": "tell application \"System Events\" to key code 17",
             }
             subprocess.run(["osascript", "-e", scripts[action]], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return f"✅ Executed media action: {action} (via osascript)"
+            return f"[SUCCESS] Executed media action: {action} (via osascript)"
     except Exception as e:
-        pass # Fallback to PyAutoGUI
+        pass                        
 
-    # Fallback to PyAutoGUI
+                           
     try:
         import pyautogui
         if not hasattr(pyautogui, 'press'):
             raise AttributeError("PyAutoGUI is incomplete or improperly initialized")
         pyautogui.press(key_name)
-        return f"✅ Executed media action: {action} (via PyAutoGUI)"
+        return f"[SUCCESS] Executed media action: {action} (via PyAutoGUI)"
     except Exception as e:
         if platform.system() == "Linux":
-            return f"❌ Failed to execute media action {action}. Please install 'playerctl' via your package manager."
-        return f"❌ Failed to execute media action {action}: {e}"
+            return f"[ERROR] Failed to execute media action {action}. Please install 'playerctl' via your package manager."
+        return f"[ERROR] Failed to execute media action {action}: {e}"
 
 
 def get_hardcoded_action_json(query: str) -> str | None:
-    """
-    Parse a query and return a hardcoded JSON action string if it matches a
-    simple system command pattern. Returns None if no simple rule matches.
-    """
+\
+\
+\
+       
     if not query:
         return None
     import json
@@ -465,7 +465,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
     q = re.sub(r"\bplease\b", "", q).strip()
     q = re.sub(r"\s+", " ", q)
     
-    # 1. Volume Mute
+                    
     mute_phrases = (
         "mute", "unmute", "mute volume", "unmute volume", "silence", "silence the computer",
         "silence the pc", "toggle mute", "toggle sound", "mute computer", "mute sound",
@@ -476,7 +476,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
     if q in mute_phrases:
         return json.dumps({"action": "volume_mute"})
         
-    # 2. Volume Up/Down
+                       
     vol_up_phrases = (
         "volume up", "increase volume", "louder", "make it louder", "turn volume up",
         "turn the volume up", "increase the volume", "raise volume", "raise the volume",
@@ -497,7 +497,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
     if q in vol_down_phrases:
         return json.dumps({"action": "volume_down"})
         
-    # 3. Volume Set
+                   
     if q in (
         "max volume", "volume max", "maximum volume", "full volume", "turn volume to max",
         "set volume to max", "volume to 100", "volume 100", "100% volume"
@@ -529,7 +529,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
         val = int(m.group(1))
         return json.dumps({"action": "volume_set", "percent": val})
         
-    # 4. Brightness Up/Down
+                           
     bright_up_phrases = (
         "brightness up", "increase brightness", "brighter", "make screen brighter",
         "make the screen brighter", "turn brightness up", "turn up brightness",
@@ -553,7 +553,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
     if q in bright_down_phrases:
         return json.dumps({"action": "brightness_down"})
         
-    # 5. Brightness Set
+                       
     if q in (
         "max brightness", "brightness max", "maximum brightness", "full brightness",
         "set brightness to max", "brightness to max", "brightness to 100", "brightness 100",
@@ -578,7 +578,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
         val = int(m.group(1))
         return json.dumps({"action": "brightness_set", "percent": val})
         
-    # 6. Media Controls
+                       
     play_pause_phrases = (
         "play/pause", "play or pause", "play", "pause", "pause the music", "resume",
         "resume music", "pause the video", "play music", "play video", "resume playback",
@@ -616,7 +616,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
     if q in stop_phrases:
         return json.dumps({"action": "media_stop"})
         
-    # 7. Power / Lock Screen
+                            
     lock_phrases = (
         "lock", "lock screen", "lock the screen", "lock my computer", "lock computer",
         "lock pc", "lock the pc", "lock session", "secure screen", "lock work station",
@@ -651,7 +651,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
     if q in shutdown_phrases:
         return json.dumps({"action": "shutdown_computer"})
         
-    # 8. Dark / Light Mode
+                          
     dark_on_phrases = (
         "turn on dark mode", "switch to dark mode", "enable dark mode", "dark mode on",
         "activate dark mode", "go dark", "dark theme on", "enable dark theme",
@@ -668,7 +668,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
     if q in dark_off_phrases:
         return json.dumps({"action": "dark_mode", "state": "off"})
         
-    # 9. Night Shift / Blue Light Filter
+                                        
     night_on_phrases = (
         "enable night light", "turn on blue light filter", "turn on night light",
         "warm screen tones", "night shift on", "activate night light", "enable night shift",
@@ -687,7 +687,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
     if q in night_off_phrases:
         return json.dumps({"action": "night_shift", "state": "off"})
         
-    # 10. Do Not Disturb
+                        
     dnd_on_phrases = (
         "enable do not disturb", "turn on focus assist", "turn on do not disturb",
         "do not disturb on", "dnd on", "activate do not disturb", "turn dnd on",
@@ -706,7 +706,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
     if q in dnd_off_phrases:
         return json.dumps({"action": "do_not_disturb", "state": "off"})
         
-    # 11. Clipboard (use original query case for content!)
+                                                          
     m = re.match(r"^copy\s+['\"](.*?)['\"]\s+to\s+clipboard$", query, re.IGNORECASE)
     if m:
         return json.dumps({"action": "clipboard_copy", "text": m.group(1)})
@@ -732,7 +732,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
     if q in clipboard_read_phrases:
         return json.dumps({"action": "clipboard_read"})
         
-    # 12. System Info
+                     
     ip_phrases = (
         "what's my ip address", "what is my ip", "show ip", "my ip", "get my ip",
         "show ip address", "what is my ip address", "what's my ip", "ip address",
@@ -789,7 +789,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
     if q in sysinfo_phrases:
         return json.dumps({"action": "system_info", "what": "all"})
         
-    # 13. Storage & Disk
+                        
     storage_phrases = (
         "check how much storage left", "see my storage", "how much disk space do i have",
         "what is my disk usage", "disk space left", "how much storage do i have",
@@ -807,7 +807,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
     if m:
         return json.dumps({"action": "disk_usage", "path": m.group(1).strip()})
         
-    # 14. Screenshot (preserve folder path casing)
+                                                  
     screenshot_phrases = (
         "take a screenshot", "screenshot the screen", "capture the screen", "screenshot",
         "take screenshot", "capture screen", "print screen", "take screen shot",
@@ -823,7 +823,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
             path = f"~/{path_lower.capitalize()}/screenshot.png"
         return json.dumps({"action": "screenshot", "path": path})
         
-    # 15. open_settings
+                       
     settings_phrases = (
         "open settings", "open system settings", "go to settings", "show settings",
         "launch settings", "open control panel", "go to control panel", "open system preferences",
@@ -832,7 +832,7 @@ def get_hardcoded_action_json(query: str) -> str | None:
     if q in settings_phrases:
         return json.dumps({"action": "open_settings"})
         
-    # 16. take_note (preserve note content casing)
+                                                  
     m = re.match(r"^take\s+note\s*(?:of)?:\s*(.+)$", query, re.IGNORECASE)
     if m:
         return json.dumps({"action": "take_note", "content": m.group(1).strip()})
@@ -852,18 +852,18 @@ def get_hardcoded_action_json(query: str) -> str | None:
     if m:
         return json.dumps({"action": "take_note", "content": m.group(1).strip()})
         
-    # 17. search_files / find files (preserve query and folder casing)
+                                                                      
     m = re.match(r"^(?:search\s+for|find\s+all|look\s+for|locate|find)\s+(.+?)\s+(?:in|on|at|inside)\s+(.+)$", query, re.IGNORECASE)
     if m:
         return json.dumps({"action": "search_files", "query": m.group(1).strip(), "folder": m.group(2).strip()})
         
-    # 18. open_file / open folder (preserve file/folder path casing)
+                                                                    
     m = re.match(r"^(?:open|launch|show|view|explore)\s+(.+)$", query, re.IGNORECASE)
     if m:
         path_val = m.group(1).strip()
         path_val_lower = path_val.lower()
         
-        # Check if it mentions "folder" or "directory"
+                                                      
         is_folder_word = False
         for kw in (" folder", " directory"):
             if path_val_lower.endswith(kw):
@@ -880,11 +880,11 @@ def get_hardcoded_action_json(query: str) -> str | None:
             "vlc", "postman", "docker"
         }
         
-        # If it is a known app and the user didn't explicitly say "folder", treat as app
+                                                                                        
         if path_val_lower in known_apps and not is_folder_word:
             return json.dumps({"action": "open_app", "name": path_val_lower})
         
-        # Check if it looks like a website domain (e.g. .com, .org, .net)
+                                                                         
         if re.search(r"\.(?:com|org|net|edu|gov|io|co|info|me|xyz|app|dev|sh|online)(?:/|$)", path_val_lower):
             return None
             
@@ -901,14 +901,14 @@ def get_hardcoded_action_json(query: str) -> str | None:
                 path_val = f"~/{path_val_lower.capitalize()}"
             return json.dumps({"action": "open_file", "path": path_val})
 
-    # 19. open_app / launch app / start app
+                                           
     m = re.match(r"^(?:open|launch|start|run|execute|open\s+the\s+app|launch\s+the\s+app)\s+(?:the\s+|an?\s+)?(.+?)(?:\s+app)?$", q)
     if m:
         app_name = m.group(1).strip()
         if app_name not in ("settings", "system settings", "terminal", "console", "shell"):
             return json.dumps({"action": "open_app", "name": app_name})
             
-    # 20. close_app / kill app / stop app
+                                         
     m = re.match(r"^(?:close|kill|terminate|stop|force\s+quit|force\s+close|quit)\s+(?:the\s+|an?\s+)?(.+?)(?:\s+app)?$", q)
     if m:
         app_name = m.group(1).strip()
@@ -1425,7 +1425,7 @@ def handle_kill_process(name: str) -> str:
         os.kill(pid, 9)
         return f"Killed process PID {pid}."
     else:
-        # Resolve common process name aliases
+                                             
         aliases = [name]
         name_lower = name.lower()
         
@@ -1458,7 +1458,7 @@ def handle_kill_process(name: str) -> str:
             targets = []
             for a in aliases:
                 targets.extend([a, f"{a}.exe"])
-            # Remove duplicates while preserving order
+                                                      
             seen = set()
             unique_targets = [x for x in targets if not (x in seen or seen.add(x))]
             
@@ -1470,7 +1470,7 @@ def handle_kill_process(name: str) -> str:
             if success:
                 return f"Sent terminate signal to process '{name}'."
             else:
-                return f"❌ Could not find any running process matching '{name}' to terminate."
+                return f"[ERROR] Could not find any running process matching '{name}' to terminate."
         else:
             success = False
             for target in aliases:
@@ -1483,7 +1483,7 @@ def handle_kill_process(name: str) -> str:
             if success:
                 return f"Sent terminate signal to process '{name}'."
             else:
-                return f"❌ Could not find any running process matching '{name}' to terminate."
+                return f"[ERROR] Could not find any running process matching '{name}' to terminate."
 
 
 def handle_set_env(key: str, value: str) -> str:
@@ -1672,7 +1672,7 @@ def handle_fix_file(
 
 
 def _resolve(path: str):
-    """Expand ~ and environment variables, return a Path object."""
+                                                                   
     from pathlib import Path
 
     return Path(os.path.expandvars(os.path.expanduser(path)))
@@ -2132,10 +2132,10 @@ $methods.WmiSetBrightness(1, $new)
         except Exception as e:
             return f"Failed to adjust brightness: {e}"
     else:
-        # Linux branch
+                      
         curr = linux_get_brightness()
         if curr == -1:
-            curr = 50  # Default fallback if we cannot query it
+            curr = 50                                          
 
         step = 10
         new_val = curr + step if action == "up" else curr - step
@@ -2182,7 +2182,7 @@ def handle_brightness_set(pct: int):
         except Exception as e:
             return f"Failed to set brightness: {e}"
     else:
-        # Linux branch
+                      
         if linux_set_brightness(pct):
             return f"Brightness set to {pct}%."
         else:
@@ -2190,37 +2190,37 @@ def handle_brightness_set(pct: int):
 
 
 _SIMPLE_ACTIONS: set = {
-    # App management
+                    
     "open_app", "close_app", "focus_app", "kill_app", "kill_process",
-    # Window management
+                       
     "window_close", "window_minimize", "window_maximize", "window_fullscreen", "switch_tab",
-    # Volume / audio
+                    
     "volume_up", "volume_down", "volume_mute", "volume_set",
     "media_play_pause", "media_next", "media_previous", "media_stop",
-    # Brightness / display
+                          
     "brightness_up", "brightness_down", "brightness_set",
     "dark_mode", "night_shift", "set_wallpaper",
-    # Power
+           
     "lock_screen", "sleep_computer", "shutdown_computer", "restart_computer",
     "do_not_disturb",
-    # Clipboard
+               
     "clipboard_copy", "clipboard_read", "read_clipboard", "write_clipboard",
-    # Simple system info / settings
+                                   
     "system_info", "check_storage", "disk_usage", "open_settings",
-    # Simple file ops
+                     
     "create_file", "delete_file", "create_folder", "rename_file",
     "move_file", "copy_file", "open_file", "search_files",
     "read_file", "append_file", "replace_in_file", "compress_files",
     "extract_file", "download_file",
-    # Simple input
+                  
     "type_text", "press_keys", "say", "take_note", "notification",
-    # Screenshot & Recording
+                            
     "screenshot", "screen_record",
-    # Network simple toggles / commands
+                                       
     "wifi", "bluetooth", "vpn", "flush_dns",
-    # YouTube / Web / Spotify
+                             
     "youtube_video", "youtube_channel", "spotify_song", "open_website",
-    # Terminal / quick commands
+                               
     "run_command", "open_terminal",
 }
 
@@ -2239,37 +2239,37 @@ _COMPLEX_ACTIONS: set = {
 from typing import List, Dict
 
 def is_complex_control(query: str, history: List[Dict[str, str]]) -> bool:
-    """Return True if the query requires the 3B model + Open Interpreter or complex tools.
-    
-    Simple tasks (native OS commands, files, display, clipboard, simple toggles) → False (0.5B)
-    Complex tasks (GUI automation, messaging, browser forms, email, jobs, custom coding) → True (3B)
-    """
+\
+\
+\
+\
+       
     q = query.lower()
     
-    # --- Explicit complex indicators ---
-    # These require the 3B model to generate detailed scripts, compose text/emails, or run code.
+                                         
+                                                                                                
     complex_indicators = {
-        # GUI automation / multi-step mouse / keyboard simulator
+                                                                
         "click", "gui", "mouse", "drag", "right-click", "double-click", "right click", "double click",
         "scroll down", "scroll up", "scroll", "move mouse", "hover",
-        # Messaging / Chat platforms (usually multi-step GUI)
+                                                             
         "whatsapp", "telegram", "discord", "slack", "teams", "skype", "send a message", "send message",
         "text him", "text her", "message him", "message her", "chat with", "whatsapp message",
-        # Browser complex tasks (forms, login, jobs, scraping)
+                                                              
         "browser_task", "browser_autopilot", "browser_login", "autopilot",
         "fill form", "fill out", "fill in", "web form", "checkout",
         "login to", "log in to", "sign in to", "log into", "sign into",
         "apply for", "job application", "submit application",
         "scrape", "extract text from website", "extract data from website",
-        # Email / Messaging
+                           
         "send email", "send an email", "compose email", "write email", "draft email", "email him", "email her",
-        # Code execution & Development (3B/OI)
+                                              
         "run code", "execute code", "run script", "execute script", "python code", "run python",
         "write a python script", "bash script", "powershell script", "execute bash",
-        # Package managers & Installers (3B/OI)
+                                               
         "pip", "npm", "gem", "cargo", "docker", "brew", "apt", "winget", "pacman", "yum", "dnf",
         "install package", "install dependency",
-        # Environment variables / system configs
+                                                
         "set env", "environment variable", "set environment variable", "add to path", "export env",
     }
     if any(ind in q for ind in complex_indicators):
@@ -2350,7 +2350,7 @@ COMMAND_PACKAGE_MAP = {
 }
 
 SHELL_BUILTINS = {
-    # Windows
+             
     "dir",
     "cd",
     "echo",
@@ -2374,7 +2374,7 @@ SHELL_BUILTINS = {
     "prompt",
     "title",
     "start",
-    # Unix
+          
     "pwd",
     "local",
     "export",
@@ -2402,7 +2402,7 @@ def extract_executable_name(command_str: str) -> str:
     if not tokens:
         return ""
 
-    # Filter out environment variables at the start (e.g. VAR=value)
+                                                                    
     start_idx = 0
     while (
         start_idx < len(tokens)
@@ -2415,7 +2415,7 @@ def extract_executable_name(command_str: str) -> str:
         return ""
 
     exec_path = tokens[start_idx]
-    # Get the basename without extension
+                                        
     basename = os.path.basename(exec_path)
     name, ext = os.path.splitext(basename)
     return name.lower()
@@ -2428,7 +2428,7 @@ def reload_system_path():
             import winreg
 
             paths = []
-            # Read user PATH
+                            
             try:
                 with winreg.OpenKey(
                     winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ
@@ -2437,7 +2437,7 @@ def reload_system_path():
                     paths.extend(user_path.split(";"))
             except Exception:
                 pass
-            # Read system PATH
+                              
             try:
                 with winreg.OpenKey(
                     winreg.HKEY_LOCAL_MACHINE,
@@ -2463,7 +2463,7 @@ def reload_system_path():
                 f"[Warning] Failed to reload Windows PATH from registry: {e}"
             )
     elif system == "Darwin":
-        # Apple Silicon Homebrew path
+                                     
         brew_bin = "/opt/homebrew/bin"
         if brew_bin not in os.environ.get("PATH", ""):
             os.environ["PATH"] = brew_bin + os.path.pathsep + os.environ.get("PATH", "")
@@ -2542,7 +2542,7 @@ def install_command(exec_name: str) -> bool:
                 except Exception as e:
                     log_action("system", f"Manual download of NirCmd failed: {e}")
             return False
-        # Run winget install command
+                                    
         cmd = f"winget install --silent --accept-source-agreements --accept-package-agreements {pkg_name}"
         log_action("system", f"Running: {cmd}")
         res = _shell(cmd, shell=True, capture_output=True, text=True)
@@ -2576,7 +2576,7 @@ def install_command(exec_name: str) -> bool:
             return False
 
     elif system == "Linux":
-        # Check package managers
+                                
         if shutil.which("apt-get"):
             cmd = f"sudo apt-get update && sudo apt-get install -y {pkg_name}"
         elif shutil.which("dnf"):
@@ -2636,7 +2636,7 @@ def linux_get_brightness() -> int:
     import re
     import shutil
 
-    # 1. Native sysfs read
+                          
     sysfs_dir = "/sys/class/backlight"
     if os.path.exists(sysfs_dir):
         for dev in os.listdir(sysfs_dir):
@@ -2650,7 +2650,7 @@ def linux_get_brightness() -> int:
             except:
                 continue
 
-    # 2. Native GNOME Mutter D-Bus (Wayland/X11 Ubuntu default)
+                                                               
     if shutil.which("gdbus"):
         res = _shell(
             "gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.freedesktop.DBus.Properties.Get org.gnome.Mutter.DisplayConfig Backlight",
@@ -2667,7 +2667,7 @@ def linux_get_brightness() -> int:
                 if mx > 0:
                     return int((curr / mx) * 100)
 
-    # 3. Native KDE D-Bus fallback
+                                  
     if shutil.which("qdbus"):
         res = _shell(
             "qdbus org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement/Actions/BrightnessControl org.kde.Solid.PowerManagement.Actions.BrightnessControl.brightness",
@@ -2690,13 +2690,13 @@ def linux_set_brightness(pct: int) -> bool:
 
     pct = max(0, min(100, pct))
 
-    # 1. Native brightnessctl (Dependency-free on Ubuntu, passwordless)
+                                                                       
     if shutil.which("brightnessctl"):
         res = _shell(f"brightnessctl set {pct}%", shell=True, capture_output=True)
         if res.returncode == 0:
             return True
 
-    # 2. Native sysfs write
+                           
     sysfs_dir = "/sys/class/backlight"
     success = False
     if os.path.exists(sysfs_dir):
@@ -2713,7 +2713,7 @@ def linux_set_brightness(pct: int) -> bool:
     if success:
         return True
 
-    # 3. Native GNOME Mutter D-Bus (Wayland/X11 Ubuntu default)
+                                                               
     if shutil.which("gdbus"):
         res = _shell(
             "gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.freedesktop.DBus.Properties.Get org.gnome.Mutter.DisplayConfig Backlight",
@@ -2738,7 +2738,7 @@ def linux_set_brightness(pct: int) -> bool:
                 if set_res.returncode == 0:
                     return True
 
-    # 3. Native KDE D-Bus fallback
+                                  
     if shutil.which("qdbus"):
         res = _shell(
             f"qdbus org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement/Actions/BrightnessControl org.kde.Solid.PowerManagement.Actions.BrightnessControl.setBrightness {pct}",
@@ -2748,7 +2748,7 @@ def linux_set_brightness(pct: int) -> bool:
         if res.returncode == 0:
             return True
 
-    # 4. Native sysfs write via pkexec (Polkit GUI popup)
+                                                         
     if shutil.which("pkexec") and os.path.exists(sysfs_dir):
         for dev in os.listdir(sysfs_dir):
             try:

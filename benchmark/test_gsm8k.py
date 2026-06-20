@@ -1,9 +1,9 @@
-"""
-test_gsm8k.py — GSM8K benchmark
-Evaluates the MATH and REASONING models against Grade School Math 8K.
-Samples N random questions from the test split, extracts the final numeric
-answer from the model response, and compares it to the ground truth.
-"""
+\
+\
+\
+\
+\
+   
 
 import re
 import random
@@ -22,14 +22,14 @@ from src.iris import ModelRole
 FIELDNAMES = ["Benchmark", "Role", "Prompt", "Expected", "Model_Answer", "Passed", "Time_Sec"]
 
 def _extract_gsm8k_answer(text: str) -> str | None:
-    """Extract the final number after #### in a GSM8K answer string."""
+                                                                       
     m = re.search(r"####\s*(\-?\d+[\d,\.]*)", text)
     if m:
         return m.group(1).replace(",", "").strip()
     return None
 
 def _extract_boxed_content(text: str) -> str | None:
-    """Find the content inside the last \\boxed{...} block, handling nested braces correctly."""
+                                                                                                
     idx = text.rfind(r"\boxed{")
     if idx == -1:
         idx = text.rfind(r"boxed{")
@@ -56,18 +56,18 @@ def _extract_boxed_content(text: str) -> str | None:
     return None
 
 def _extract_model_answer(response: str) -> str | None:
-    """
-    Try to find the model's final numeric answer.
-    Looks for patterns like:
-      - \\boxed{42}
-      - #### 42
-      - The answer is 42
-      - = 42
-      - **42**
-    """
+\
+\
+\
+\
+\
+\
+\
+\
+       
     boxed = _extract_boxed_content(response)
     if boxed:
-        # Extract just the number from the boxed content
+                                                        
         nums = re.findall(r"([\-]?\d[\d,\.]*)", boxed)
         if nums:
             return nums[-1].replace(",", "").strip()
@@ -127,7 +127,7 @@ def run_gsm8k_benchmark(csv_path: str, num_samples: int = 100):
         )
 
 
-        # Auto-correct formatting issues before grading
+                                                       
         if model_answer is not None and ground_truth is not None:
             corrected, was_fixed, log = auto_correct_math_answer(
                 problem=question,
@@ -138,7 +138,7 @@ def run_gsm8k_benchmark(csv_path: str, num_samples: int = 100):
             if was_fixed:
                 model_answer = corrected
 
-        # Multi-strategy smart comparison
+                                         
         passed = False
         reason = ""
         if model_answer is not None and ground_truth is not None:
@@ -161,7 +161,7 @@ def run_gsm8k_benchmark(csv_path: str, num_samples: int = 100):
             "Time_Sec":     t,
         }, FIELDNAMES)
 
-    # Unload model after all questions (kept loaded during benchmark)
+                                                                     
     try:
         from src.iris import unload_model
         unload_model()

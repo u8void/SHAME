@@ -1,9 +1,9 @@
 import os, sys
 
-# ── Auto-install open-interpreter on startup ──────────────────────────────
+
 def _ensure_open_interpreter():
     try:
-        import interpreter  # noqa: F401
+        import interpreter  
     except ImportError:
         import subprocess as _sp
         print("\n[Iris] Installing open-interpreter — one-time setup...", flush=True)
@@ -11,7 +11,7 @@ def _ensure_open_interpreter():
                  "--upgrade", "open-interpreter"], check=True)
         print("[Iris] open-interpreter installed ✓\n", flush=True)
 _ensure_open_interpreter()
-# ─────────────────────────────────────────────────────────────────────────────
+
 
 import os
 os.environ["OMP_NUM_THREADS"] = "4"
@@ -34,7 +34,7 @@ logger = get_logger("app")
 
 from src.iris import ask_stream, solve_math, BookRetriever, analyze_image
 
-# Global generation lock — prevents concurrent llama.cpp calls (segmentation faults)
+
 global_generation_lock = threading.Lock()
 
 parser = argparse.ArgumentParser(description="Run the Iris AI Flask App")
@@ -63,7 +63,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
-# Global voice chat history (shared across all voice sessions)
+
 voice_history = []
 
 def _allowed_file(filename: str) -> bool:
@@ -74,11 +74,10 @@ _retriever_lock   = threading.Lock()
 _retriever_ready  = False
 training_proc = None
 
-# ── Ensure models are freed from RAM when the process exits ──────────────────
+
 import atexit as _atexit
 def _shutdown_cleanup():
-    """Force-free all llama.cpp models from native memory on process exit.
-    Runs on Ctrl+C, SIGTERM, normal exit — ensures no memory leaks."""
+    
     if not PREVIEW_MODE:
         try:
             from src.iris import _force_unload_all_models
@@ -146,7 +145,7 @@ def chat():
     actual_prompt = user_message if user_message else "Please provide a detailed, comprehensive summary and explanation of the attached documents."
     doc_sections = []
 
-    # Read all documents first
+    
     parsed_docs = []
     for doc_file in doc_files:
         if doc_file:
@@ -173,11 +172,11 @@ def chat():
             for filename, text in parsed_docs:
                 doc_sections.append(f"Document `{filename}`:\n<document>\n{text}\n</document>")
         else:
-            # Distribute 12,000 characters fairly across all documents
+            
             budget = 12000
             per_doc_budget = budget // max(1, len(parsed_docs))
             
-            # First pass: give exact lengths to small files and reclaim budget
+            
             final_texts = {}
             remaining_docs = []
             for filename, text in parsed_docs:
@@ -187,14 +186,14 @@ def chat():
                 else:
                     remaining_docs.append((filename, text))
             
-            # Second pass: distribute remaining budget evenly
+            
             if remaining_docs:
                 per_doc_budget = budget // len(remaining_docs)
                 for filename, text in remaining_docs:
                     truncated = text[:per_doc_budget] + f"\n\n[DOCUMENT TRUNCATED DUE TO MAX {per_doc_budget} CHARS]"
                     final_texts[filename] = truncated
 
-            # Reconstruct sections in original order
+            
             for filename, _ in parsed_docs:
                 doc_sections.append(f"Document `{filename}`:\n<document>\n{final_texts[filename]}\n</document>")
 
@@ -225,14 +224,14 @@ def chat():
             frontend_messages = json.loads(data["messages"]) if isinstance(data["messages"], str) else data["messages"]
         except (json.JSONDecodeError, TypeError) as e:
             logger.warning(f"Failed to parse message history: {e}")
-            agent_history = []  # continue but log it
+            agent_history = []  
 
     agent_history = []
     for msg in frontend_messages[:-1][-6:]:
         role = "assistant" if msg.get("role") == "bot" else "user"
         agent_history.append({"role": role, "content": msg.get("content", "")})
 
-    # Support per-request mode override: body { "use_pro": true } OR CLI --pro
+    
     use_pro = str(data.get("use_pro", "")).lower() in ("true", "1", "yes")
     if PRO_MODE or use_pro:
         import asyncio
@@ -297,7 +296,7 @@ def chat():
                     yield f"data: {json.dumps(event)}\n\n"
             except Exception as e:
                 err_msg = str(e)
-                yield f"data: {json.dumps({'type': 'token', 'content': f'\\n\\n> ❌ **Iris Error:** {err_msg}'})}\n\n"
+                yield f"data: {json.dumps({'type': 'token', 'content': f'\\n\\n> [ERROR] **Iris Error:** {err_msg}'})}\n\n"
 
     resp = Response(generate(), mimetype='text/event-stream')
     resp.headers['X-Accel-Buffering'] = 'no'
@@ -307,14 +306,7 @@ def chat():
 
 @app.route("/analyze_image", methods=["POST"])
 def analyze_image_route():
-    """
-    Accept a multipart POST with:
-      - 'image'  : the image file
-      - 'prompt' : (optional) question/instruction about the image
-      - 'chat_id': (optional) session id for logging
-
-    Returns: {"reply": "<analysis text>"}
-    """
+    
     save_path = None
     
     if "image" not in request.files:
@@ -356,14 +348,14 @@ def analyze_image_route():
 
 @app.route("/api/voice/init", methods=["GET"])
 def voice_init_endpoint():
-    """Preloads the voice models into memory to avoid cold start delays."""
+    
     import src.voice_models as vm
     
     vm.load_stt_model()
     vm.load_tts_model()
     vm.load_voice_llm()
     
-    # Pre-synthesize the greeting
+    
     audio_b64_url = vm.synthesize_speech("Hi, How can I assist you today?")
     
     return jsonify({"status": "ready", "audio_url": audio_b64_url})
@@ -378,7 +370,7 @@ def voice_chat_endpoint():
         audio_file = request.files["audio"]
         audio_bytes = audio_file.read()
 
-        # 1. Transcribe audio to text
+        
         import src.voice_models as vm
         user_text = vm.transcribe_audio(audio_bytes, audio_file.filename)
         logger.info(f"[Voice] STT: {user_text[:120]}")
@@ -392,14 +384,14 @@ def voice_chat_endpoint():
             "CRITICAL LANGUAGE RULE: You MUST reply in the EXACT SAME LANGUAGE as the user's CURRENT message. If the user speaks English, reply in English. If the user speaks Arabic, reply in Arabic."
         )
 
-        # 2. Unified Web Search (bulletproof fallback chain)
+        
         from src.web_search import WebSearch, extract_search_keywords
         web_context = ""
         if len(user_text.split()) > 2:
             try:
                 ws = WebSearch()
                 voice_llm = vm.load_voice_llm()
-                # Build context from last turn for pronoun resolution
+                
                 ctx = ""
                 if voice_history:
                     ctx = voice_history[-1]["content"][:200]
@@ -415,7 +407,7 @@ def voice_chat_endpoint():
         import emoji
 
         if web_context:
-            # ── Web-grounded answer: use the fast Voice LLM (no cold start) ──
+            
             llm = vm.load_voice_llm()
             sys_prompt = (
                 f"{VOICE_IDENTITY}\n"
@@ -442,7 +434,7 @@ def voice_chat_endpoint():
             tts_text = emoji.replace_emoji(bot_text, replace='')
             tts_text = tts_text.replace('*', '')
         else:
-            # ── Casual chat: use the fast 1B voice LLM ──
+            
             llm = vm.load_voice_llm()
             system_prompt = (
                 f"{VOICE_IDENTITY}\n"
@@ -463,11 +455,11 @@ def voice_chat_endpoint():
             tts_text = emoji.replace_emoji(bot_text, replace='')
             tts_text = tts_text.replace('*', '')
         
-        # Save to memory (use the raw user_text, not the polluted user_prompt with web context)
+        
         voice_history.append({"role": "user", "content": user_text})
         voice_history.append({"role": "assistant", "content": bot_text})
         
-        # 4. Synthesize speech
+        
         audio_b64_url = vm.synthesize_speech(tts_text)
         
         return jsonify({
@@ -483,7 +475,7 @@ def voice_chat_endpoint():
 
 @app.route("/api/transcribe", methods=["POST"])
 def api_transcribe():
-    """Endpoint exclusively for the text-chat dictation microphone."""
+    
     try:
         import src.voice_models as vm
         if 'audio' not in request.files:
@@ -515,7 +507,7 @@ def generate_title():
             
             llm = load_model(ModelRole.TRIAGE)
             
-            # ── Aggressively trim: 4 turns max, 100 chars each ──
+            
             convo_lines = []
             for msg in messages[-8:]:
                 role = msg.get("role", "user")
@@ -528,7 +520,7 @@ def generate_title():
             if not convo_text:
                 convo_text = messages[-1].get("content", "")[:100]
             
-            # Tiny prompt: fits in 256 tokens easily
+            
             sys_prompt = (
                 "Read this conversation and output a SHORT topic title (3-5 words max). "
                 "Summarize the TOPIC being discussed, NOT the first message. "
@@ -536,7 +528,7 @@ def generate_title():
                 "Conversation:\n" + convo_text + "\n\nTitle:"
             )
             
-            # Use explicit n_ctx=256 via create_completion (lowest token usage)
+            
             res = llm.create_completion(
                 prompt=sys_prompt,
                 max_tokens=12, temperature=0.3,
@@ -594,7 +586,7 @@ def save_model_settings():
         if role not in data["model_settings"]:
             data["model_settings"][role] = {}
             
-        # Update or delete keys based on the incoming settings dict
+        
         for k in ["temperature", "top_p", "top_k", "repetition_penalty", "frequency_penalty", "presence_penalty"]:
             if k in settings:
                 data["model_settings"][role][k] = settings[k]
@@ -769,10 +761,7 @@ def model_status():
     })
 
 def warmup_models():
-    """
-    Pre-loads models into active memory on startup.
-    The user requested the Control model to be loaded by default to avoid cold starts.
-    """
+    
     if PRO_MODE:
         return
     
@@ -785,8 +774,7 @@ def warmup_models():
 
 @app.route("/api/unload_models", methods=["POST"])
 def unload_models_endpoint():
-    """Immediately free all loaded models from RAM/VRAM.
-    Useful when you want to reclaim memory without restarting."""
+    
     if PREVIEW_MODE:
         return jsonify({"status": "preview_mode", "message": "No models loaded in preview mode."})
     try:
@@ -799,7 +787,7 @@ def unload_models_endpoint():
 
 @app.route("/api/shutdown", methods=["POST"])
 def shutdown_endpoint():
-    """Cleanly shut down the Iris server and free all memory."""
+    
     import signal, os
     logger.info("[API] Shutdown requested via /api/shutdown.")
     _shutdown_cleanup()

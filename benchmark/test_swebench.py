@@ -1,9 +1,4 @@
-"""
-test_swebench.py — Local SWE-Bench benchmark
-Evaluates the CODE and REASONING models on realistic codebase repair tasks.
-Presents the model with a buggy function/class and an issue description,
-extracts the fixed code, and runs tests with a 2-second timeout.
-"""
+
 
 import re
 import time
@@ -25,7 +20,7 @@ class TimeoutException(Exception):
 def timeout_handler(signum, frame):
     raise TimeoutException("Execution timed out (infinite loop?)")
 
-# Define the problems
+
 PROBLEMS = [
     {
         "id": "calculator_parser",
@@ -159,7 +154,7 @@ PROBLEMS = [
 ]
 
 def _extract_python_code(response: str) -> str:
-    """Extract code from markdown code fences."""
+    
     m = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL | re.IGNORECASE)
     if m:
         return m.group(1).strip()

@@ -1,28 +1,4 @@
-"""
-compressed_attention.py — DeepSeek-V4 Style Compressed Attention
-================================================================
-Implements three mechanisms for dramatically reducing KV cache RAM:
 
-1. CSA (Compressed Sparse Attention): 4x block-level compression + sparse top-K retrieval.
-   Groups 4 messages/turns into a scored block, keeps only the top-K most relevant blocks,
-   drops the rest. Mimics DeepSeek-V4's FP4 indexer with our lightweight triage model.
-
-2. HCA (Heavily Compressed Attention): Aggressive 128:1-like compression.
-   Crushes arbitrary-length history into a fixed small digest via model summarization.
-   The "wide-angle lens" that lets the model see the full conversation arc cheaply.
-
-3. Hybrid Layer Alternation: Layer 0 uses CSA, layer 1 uses HCA, etc.
-   Translated to our single-model context: older history → HCA digest, mid history → CSA
-   scoring, recent turns → uncompressed. This mirrors the alternating CSA/HCA layers.
-
-4. Shared KV + Ultra-Low Quant: Q4_0 KV cache types for the tiny/small profiles (DeepSeek's
-   FP8/FP4 equivalent), saving 50%+ RAM vs current Q8_0.
-
-Memory savings on 4B model:
-  - Before (Q8_0 KV @ 8192 ctx): ~360 MB KV cache
-  - After  (Q4_0 KV @ 8192 ctx): ~180 MB KV cache  + CSA/HCA smart compression
-  - Combined: ~2.5 GB total → ~2.3 GB total (~12% less, plus infinite effective context)
-"""
 
 import re
 import os
@@ -39,28 +15,28 @@ from src.logger import get_logger
 logger = get_logger("compressed_attention")
 
 
-# ─── Quantization Level Enum ─────────────────────────────────────────────────
+
 
 class KVQuantLevel(str, Enum):
-    """KV cache quantization — mirrors DeepSeek FP8/FP4 approach."""
-    Q4_0  = "q4_0"   # DeepSeek FP4 equivalent: max compression, ~90 MB @ 8K ctx (4B)
-    Q8_0  = "q8_0"   # DeepSeek FP8 equivalent: balanced, ~180 MB @ 8K ctx (4B)
-    F16   = "f16"    # Baseline: ~360 MB @ 8K ctx (4B)
-    AUTO  = "auto"   # Picks based on model size + RAM pressure
+    
+    Q4_0  = "q4_0"   
+    Q8_0  = "q8_0"   
+    F16   = "f16"    
+    AUTO  = "auto"   
 
 
 class CompactionStrategy(str, Enum):
-    CSA  = "csa"     # Compressed Sparse Attention: block scoring + top-K
-    HCA  = "hca"     # Heavily Compressed Attention: aggressive summarization
-    HYBRID = "hybrid"  # Alternating: HCA on old, CSA on mid, raw on recent
+    CSA  = "csa"     
+    HCA  = "hca"     
+    HYBRID = "hybrid"  
     NONE  = "none"
 
 
-# ─── Data Structures ──────────────────────────────────────────────────────────
+
 
 @dataclass
 class BlockScore:
-    """A scored conversation block for CSA top-K selection."""
+    
     block_idx: int
     start_msg_idx: int
     end_msg_idx: int
@@ -79,9 +55,9 @@ class CompressionResult:
     kv_quant: KVQuantLevel
     estimated_ram_mb: float
 
-# ─── KV Cache Quantization ───────────────────────────────────────────────────
 
-# llama.cpp FTYPE constants
+
+
 _LLAMA_FTYPE_MOSTLY_Q4_0 = 2
 _LLAMA_FTYPE_MOSTLY_Q8_0 = 7
 _LLAMA_FTYPE_MOSTLY_F16  = 1
@@ -101,13 +77,7 @@ def select_kv_quant(
     preference: KVQuantLevel = KVQuantLevel.AUTO,
     profile: str = "tiny",
 ) -> KVQuantLevel:
-    """Auto-select KV cache quantization based on model size, context, and RAM.
-
-    Mirrors DeepSeek-V4's FP8/FP4 approach:
-    - Q4_0: tiny/small profiles, models <= 8B, >= 8GB free RAM
-    - Q8_0: medium/large profiles, models > 8B, or tight RAM
-    - F16:  max quality, models > 30B, lots of RAM
-    """
+    
     if preference != KVQuantLevel.AUTO:
         return preference
 
@@ -116,14 +86,14 @@ def select_kv_quant(
     f16_kv = q8_kv * 2
 
     free_ram_est = ram_gb - model_size_gb - 2.0
-    # Q4_0 KV cache requires llama.cpp built with GGML_USE_METAL AND recent ggml
-    # On M2 Metal the safe floor is Q8_0. F16 is recommended for best quality.
+    
+    
     if free_ram_est > 8.0 and profile not in ("tiny",):
         return KVQuantLevel.F16
     return KVQuantLevel.Q8_0
 
 def _estimate_kv_per_token(model_size_gb: float) -> int:
-    """Heuristic: estimate KV elements per token from model size."""
+    
     if model_size_gb <= 1.0:
         return 8000
     elif model_size_gb <= 2.0:
@@ -144,7 +114,7 @@ def estimate_kv_cache_ram(
     n_ctx: int,
     kv_quant: KVQuantLevel,
 ) -> float:
-    """Estimate KV cache RAM in MB."""
+    
     elements = _estimate_kv_per_token(model_size_gb)
     if kv_quant == KVQuantLevel.Q4_0:
         bytes_per = 0.5
@@ -154,7 +124,7 @@ def estimate_kv_cache_ram(
         bytes_per = 2.0
     return (elements * n_ctx * bytes_per) / (1024**2)
 
-# ─── Utility: Token Estimation ───────────────────────────────────────────────
+
 
 def _estimate_msg_tokens(msg: Dict[str, str]) -> int:
     content = msg.get("content", "")
@@ -178,7 +148,7 @@ def _format_messages_as_text(messages: List[Dict[str, str]]) -> str:
         parts.append(f"[{role}] {content_clean}")
     return "\n\n".join(parts)
 
-# ─── CSA: Compressed Sparse Attention ────────────────────────────────────────
+
 
 CSA_BLOCK_SIZE = 4
 
@@ -201,12 +171,8 @@ def _score_block_with_model(
     query: str,
     llm=None,
 ) -> float:
-    """Score a block's relevance using the triage model (fast, cheap).
-
-    This is the DeepSeek FP4 indexer equivalent: a lightweight scoring pass
-    that runs on the smallest model to determine which blocks deserve full attention.
-    """
-    if True: # Always use keyword score; LLM scoring destroys KV cache and adds massive latency
+    
+    if True: 
         keyword_score = _keyword_score(block_text, query)
         return keyword_score * 5.0
         return keyword_score * 5.0
@@ -230,7 +196,7 @@ def _score_block_with_model(
 
 
 def _keyword_score(block_text: str, query: str) -> float:
-    """Fast fallback: keyword overlap scoring without model call."""
+    
     q_words = set(re.findall(r'\w{3,}', query.lower()))
     b_words = set(re.findall(r'\w{3,}', block_text.lower()))
     if not q_words:
@@ -246,17 +212,11 @@ def csa_compress(
     block_size: int = CSA_BLOCK_SIZE,
     llm=None,
 ) -> Tuple[List[Dict[str, str]], List[BlockScore]]:
-    """Compressed Sparse Attention: block history, score, keep top-K.
-
-    DeepSeek-V4 equivalent:
-      - Groups 4 tokens into 1 compressed block → block_size=4 messages
-      - FP4 indexer scores relevance → our triage model scoring
-      - Keeps top 1,024 out of 250,000 blocks → here max_blocks controls the budget
-    """
+    
     if not messages:
         return [], []
 
-    # Last message is the current query — always keep it
+    
     if len(messages) <= block_size + 1:
         return messages, []
 
@@ -277,7 +237,7 @@ def csa_compress(
             token_estimate=est_tokens,
         ))
 
-    # Score all blocks
+    
     for b in blocks:
         b.relevance_score = _score_block_with_model(b.compressed_text, query, llm)
 
@@ -286,7 +246,7 @@ def csa_compress(
     kept_blocks = blocks[:max_blocks]
     kept_blocks.sort(key=lambda b: b.start_msg_idx)
 
-    # Rebuild: keep selected blocks + current message
+    
     result = []
     for b in kept_blocks:
         for i in range(b.start_msg_idx, b.end_msg_idx):
@@ -304,7 +264,7 @@ def csa_with_summary(
     llm=None,
     summarizer_llm=None,
 ) -> Tuple[List[Dict[str, str]], str]:
-    """CSA + summarize dropped blocks into a digest (HCA-lite integration)."""
+    
     kept, all_scores = csa_compress(messages, query, max_blocks, block_size, llm)
 
     dropped_scores = [b for b in all_scores if b.relevance_score < 0.3]
@@ -318,7 +278,7 @@ def csa_with_summary(
         "content": f"[EARLIER CONTEXT (low relevance, summarized)]\n{summary}"
     }
 
-    # Insert digest after system prompt, before the kept messages
+    
     result = [kept[0]] if kept and kept[0].get("role") == "system" else []
     result.append(digest)
     if kept and kept[0].get("role") == "system":
@@ -327,7 +287,7 @@ def csa_with_summary(
         result.extend(kept)
     return result, summary
 
-# ─── HCA: Heavily Compressed Attention ───────────────────────────────────────
+
 
 HCA_COMPRESSION_RATIO = 8
 HCA_TARGET_ENTRIES = 32
@@ -373,13 +333,7 @@ def hca_compress(
     keep_recent: int = 2,
     llm=None,
 ) -> List[Dict[str, str]]:
-    """Heavily Compressed Attention: crush history to a dense digest.
-
-    DeepSeek-V4 equivalent:
-      - 128 tokens → 1 compressed entry (128:1 ratio)
-      - Here: N messages → 1 summary digest (N:1 ratio via ratio param)
-      - Leaves ~7,800 entries from 1M tokens → here target is ~32-64 messages
-    """
+    
     if not messages or len(messages) <= keep_recent + 2:
         return messages
 
@@ -405,11 +359,7 @@ def hca_multilevel(
     llm=None,
     level_sizes: Tuple[int, int, int] = (4, 12, 999),
 ) -> List[Dict[str, str]]:
-    """Multi-level HCA: keeps last 4 raw, summarizes next 12 into mid-digest,
-    compresses everything older into a macro-digest. Three resolution tiers.
-
-    DeepSeek-V4 equivalent: alternates CSA (micro) with HCA (macro) per layer.
-    """
+    
     if not messages or len(messages) <= level_sizes[0]:
         return messages
 
@@ -438,17 +388,10 @@ def hca_multilevel(
     result.extend(recent)
     return result
 
-# ─── Hybrid Compression Manager ──────────────────────────────────────────────
+
 
 class HybridCompressionManager:
-    """Orchestrates CSA/HCA alternation based on context pressure.
-
-    DeepSeek-V4 equivalent: layers alternate between CSA and HCA.
-    Here: pressure-based switching between strategies.
-      - <50% ctx used: no compression
-      - 50-80% ctx used: CSA — score and keep top blocks
-      - >80% ctx used: HCA — aggressive summarization of old history
-    """
+    
 
     def __init__(
         self,
@@ -472,7 +415,7 @@ class HybridCompressionManager:
         max_output_tokens: int = 4096,
         force_strategy: Optional[CompactionStrategy] = None,
     ) -> CompressionResult:
-        """Apply the best compression strategy based on context pressure."""
+        
         if not messages:
             return CompressionResult(
                 messages=[], strategy_used=CompactionStrategy.NONE,
@@ -530,21 +473,16 @@ class HybridCompressionManager:
         )
 
     def auto_compact(self, messages, query="", llm=None, max_output_tokens=4096):
-        """Alias for compress, returns just the message list."""
+        
         result = self.compress(messages, query, llm, max_output_tokens)
         return result.messages
 
-# ─── Shared KV: System Prompt Deduplication ──────────────────────────────────
+
 
 def deduplicate_system_prompts(
     messages: List[Dict[str, str]],
 ) -> List[Dict[str, str]]:
-    """Remove duplicate/overlapping system prompts to enable KV cache sharing.
-
-    DeepSeek-V4's Shared Key-Value Vectors equivalent: when the same system
-    prompt prefix is repeated across messages, llama.cpp can reuse the KV cache.
-    This function ensures only one canonical system prompt per conversation.
-    """
+    
     if not messages:
         return messages
 
@@ -567,7 +505,7 @@ def deduplicate_system_prompts(
 
 
 def estimate_savings(result: CompressionResult) -> Dict[str, Any]:
-    """Generate a human-readable savings report."""
+    
     if result.original_tokens <= 0:
         return {"savings_pct": 0.0, "summary": "No compression needed"}
     savings = 1.0 - (result.compressed_tokens / result.original_tokens)
@@ -587,7 +525,7 @@ def estimate_savings(result: CompressionResult) -> Dict[str, Any]:
         ),
     }
 
-# ─── One-shot "compress if needed" ───────────────────────────────────────────
+
 
 _hm_cache: Dict[str, HybridCompressionManager] = {}
 _hm_lock = threading.Lock()
@@ -597,7 +535,7 @@ def get_compressor(
     kv_quant: KVQuantLevel = KVQuantLevel.AUTO,
     profile: str = "tiny",
 ) -> HybridCompressionManager:
-    """Get or create a HybridCompressionManager (thread-safe singleton per config)."""
+    
     cache_key = f"{n_ctx}:{kv_quant.value}:{profile}"
     with _hm_lock:
         if cache_key not in _hm_cache:
@@ -616,12 +554,8 @@ def smart_compress(
     profile: str = "tiny",
     kv_quant: KVQuantLevel = KVQuantLevel.AUTO,
 ) -> CompressionResult:
-    """One-shot: compress conversation intelligently for given context window.
-
-    This is the primary entry point. Call it before create_chat_completion()
-    to reduce token count and KV cache pressure.
-    """
-    # First: deduplicate system prompts for shared KV
+    
+    
     messages = deduplicate_system_prompts(messages)
 
     compressor = get_compressor(n_ctx, kv_quant, profile)
@@ -629,7 +563,7 @@ def smart_compress(
 
 
 def unload_compressors():
-    """Free compressor cache on shutdown."""
+    
     global _hm_cache
     with _hm_lock:
         _hm_cache.clear()

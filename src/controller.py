@@ -1,8 +1,4 @@
-"""
-controller.py — Iris AI PC Agent
-======================================
-Natural-language control via Iris GGUF brain + Open Interpreter execution.
-"""
+
 
 import os
 import platform
@@ -11,7 +7,7 @@ import sys
 
 def _ensure_open_interpreter():
     try:
-        import interpreter as _test  # noqa: F401
+        import interpreter as _test  
     except ImportError:
         import subprocess as _sp
 
@@ -35,15 +31,15 @@ def _ensure_open_interpreter():
 
 _ensure_open_interpreter()
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 2 ── Standard imports
-# ═══════════════════════════════════════════════════════════════════════════
+
+
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.logger import get_logger
 
 logger = get_logger("controller")
 
-# --- Migrated system_actions ---
+
 from src.system_actions import (
     log_action,
     _SIMPLE_ACTIONS,
@@ -115,31 +111,31 @@ import time
 from pathlib import Path
 from typing import Optional
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 3 ── Initialize Open Interpreter instance
-# ═══════════════════════════════════════════════════════════════════════════
+
+
+
 try:
-    # Import the singleton instance (not the module)
+    
     from interpreter import interpreter as _oi
 
-    _oi.auto_run = True   # execute without user confirmation prompts
+    _oi.auto_run = True   
     _oi.verbose = False
     _oi.max_output = 4000
-    _oi.offline = True    # NEVER call OpenAI — use local model only
-    _oi.sync_computer = False  # prevents the respond.py 'result' NameError bug
-    _oi.loop = False      # stop after one round; no follow-up prompts
+    _oi.offline = True    
+    _oi.sync_computer = False  
+    _oi.loop = False      
 
     _oi.llm.supports_functions = False
     _oi.llm.supports_vision = False
     
-    # ── Iris Native Memory Bridge ──────────────────────────────────────────
-    # Wire Open Interpreter directly to the already-loaded Iris .gguf model!
-    # This prevents loading the 4GB+ model a second time in RAM.
+    
+    
+    
     def _iris_native_oi_llm(*args, **kwargs):
         from src.iris import _model_pool, load_model, ModelRole
         
-        # Use the currently active model (which is now your 3B Coder model!)
-        # This completely skips loading it a second time, making it instant.
+        
+        
         if not _model_pool:
             load_model(ModelRole.CONTROL)
             
@@ -153,7 +149,7 @@ try:
             "temperature": 0.2
         }
         
-        # Yield OpenAI-compatible chunks natively from llama-cpp-python
+        
         for chunk in model_obj.create_chat_completion(**clean_kwargs):
             yield chunk
 
@@ -184,13 +180,13 @@ except Exception as _oi_err:
     OI_AVAILABLE = False
     logger.warning(f"[OI] Open Interpreter unavailable: {_oi_err}")
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 4 ── Shell execution helpers (route through OI when available)
-# ═══════════════════════════════════════════════════════════════════════════
+
+
+
 
 
 class _FakeResult:
-    """Mimics subprocess.CompletedProcess so callers need no changes."""
+    
 
     def __init__(self, stdout="", stderr="", returncode=0):
         self.stdout = stdout
@@ -199,11 +195,7 @@ class _FakeResult:
 
 
 def _shell(cmd, **kw) -> _FakeResult:
-    """Execute a shell command via subprocess.
-
-    Always uses subprocess directly for reliable stdout/stderr/returncode.
-    OI is reserved for high-level chat tasks, not raw shell commands.
-    """
+    
     defaults = dict(shell=isinstance(cmd, str), capture_output=True, text=True)
     defaults.update(kw)
     try:
@@ -215,13 +207,13 @@ def _shell(cmd, **kw) -> _FakeResult:
 
 
 def _popen(cmd, shell: bool = False, **kw) -> None:
-    """Launch a process non-blocking via subprocess."""
+    
     suppress = dict(stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
     suppress.update(kw)
     try:
         return _subprocess.Popen(cmd, shell=shell, start_new_session=True, **suppress)
     except Exception as e:
-        # If list form fails (e.g. multi-word command), retry with shell=True
+        
         if not shell and isinstance(cmd, list):
             try:
                 shell_cmd = " ".join(cmd)
@@ -233,21 +225,21 @@ def _popen(cmd, shell: bool = False, **kw) -> None:
         return None
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 5 ── Action → Shell Command template table (offline, no LLM needed)
-# ═══════════════════════════════════════════════════════════════════════════
-# (Removed hardcoded _LINUX_CMD and _action_dict_to_cmd to fully rely on Open Interpreter for dynamic OS commands)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Smart action resolver — handles any verb_subject action offline, no LLM
-# ═══════════════════════════════════════════════════════════════════════════
 
-# (Removed hardcoded _SUBJECT_MAP, _VERB_PATTERNS, and _smart_action_resolve to fully rely on Open Interpreter)
+
+
+
+
+
+
+
+
 
 
 def _exec_shell_cmd(cmd: str) -> str:
-    """Execute a shell command via subprocess and return output."""
+    
     try:
         r = _subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
         return (r.stdout or r.stderr or "Done.").strip()
@@ -258,11 +250,7 @@ def _exec_shell_cmd(cmd: str) -> str:
 
 
 def _run_oi_task(task: str) -> str:
-    """
-    For UNKNOWN actions: pass a plain-English description to OI's chat().
-    Requires an LLM to be configured (OpenAI key, Ollama, etc.).
-    For KNOWN actions, use _action_dict_to_cmd() + _exec_shell_cmd() instead.
-    """
+    
     if not OI_AVAILABLE:
         return "Open Interpreter unavailable. Install: pip install open-interpreter"
     try:
@@ -301,7 +289,7 @@ def _run_oi_task(task: str) -> str:
         return f"Could not execute via OI: {e}"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+
 import ssl
 import urllib.error
 import urllib.parse
@@ -482,12 +470,7 @@ _WEB_SEARCH_SKIP = re.compile(
 
 
 def should_web_search(text: str) -> bool:
-    """Return True when the query looks like a factual / informational question.
-
-    Added guard: skip web search for very short inputs (< 5 words) since
-    those are almost always greetings or simple commands, not factual queries.
-    A DuckDuckGo fetch adds 1-3 seconds of latency — never worth it for "hi".
-    """
+    
     if len(text.split()) < 5:
         return False
     if _WEB_SEARCH_SKIP.search(text):
@@ -496,10 +479,7 @@ def should_web_search(text: str) -> bool:
 
 
 def web_search(query: str, max_results: int = 5) -> str:
-    """
-    Search DuckDuckGo and return the top snippet results as plain text.
-    Uses only the stdlib — no extra packages needed.
-    """
+    
     try:
         q = urllib.parse.quote_plus(query)
         url = f"https://html.duckduckgo.com/html/?q={q}"
@@ -552,7 +532,7 @@ def web_search(query: str, max_results: int = 5) -> str:
         return f"(Web search unavailable: {exc})"
 
 
-# Removed pyperclip dependency warning
+
 CLIPBOARD_AVAILABLE = True
 try:
     from src.iris import (
@@ -569,7 +549,7 @@ except ImportError:
     logger.warning(
         "[WARNING] iris.py not found or dependencies missing. Running in rule-only mode."
     )
-# Model display name — pulled from environment or iris.conf if available
+
 MLX_MODEL_ID = os.environ.get("IRIS_MODEL_ID", "")
 if not MLX_MODEL_ID:
     try:
@@ -642,7 +622,7 @@ _prompt_path = os.path.join(
 try:
     with open(_prompt_path, "r", encoding="utf-8") as f:
         _content = f.read().strip()
-        # Dynamically locate the start of training data to exclude examples from prompt
+        
         _train_idx = _content.find("# TRAINING DATA")
         if _train_idx == -1:
             _train_idx = _content.find("#  TRAINING DATA")
@@ -669,14 +649,7 @@ _agent_prompt_cache = {"text": None, "mtime": 0}
 
 
 def _get_agent_system_prompt() -> str:
-    """
-    Read training/control.md exactly once; only reloads when the file changes
-    on disk (same mtime-guard pattern used by load_generation_config).
-
-    The prompt is truncated before '# TRAINING DATA' to exclude the training examples
-    and keep prefill fast (< 5 s on M2). Put the most important instructions at the TOP of
-    control.md — they will always be included.
-    """
+    
     global _agent_prompt_cache
     path = os.path.join(
         os.path.dirname(os.path.dirname(__file__)), "training", "control", "control.md"
@@ -686,7 +659,7 @@ def _get_agent_system_prompt() -> str:
         if _agent_prompt_cache["text"] is None or mtime != _agent_prompt_cache["mtime"]:
             with open(path, "r", encoding="utf-8") as f:
                 content = f.read().strip()
-            # Dynamically locate the start of training data to exclude examples from prompt
+            
             train_idx = content.find("# TRAINING DATA")
             if train_idx == -1:
                 train_idx = content.find("#  TRAINING DATA")
@@ -709,7 +682,7 @@ _reply_prefix_cache: dict = {"key": None, "prompt": None}
 
 
 def handle_run_code(code: str) -> str:
-    """Execute Python code in a sandboxed subprocess and return stdout/stderr."""
+    
     import tempfile
 
     if not code or not code.strip():
@@ -744,7 +717,7 @@ def handle_run_code(code: str) -> str:
 
 
 def parse_ai_response(text: str) -> dict | None:
-    """Try to extract a JSON object from Iris's output."""
+    
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
         return None
@@ -755,7 +728,7 @@ def parse_ai_response(text: str) -> dict | None:
 
 
 def ai_agent_handle(user_input: str, retriever=None, history=None, **kwargs):
-    """Generator that yields events for the frontend: tokens, actions, results."""
+    
     history = history or []
 
     force_role = kwargs.get("force_role") or getattr(
@@ -783,7 +756,7 @@ def ai_agent_handle(user_input: str, retriever=None, history=None, **kwargs):
 
 
 def ai_agent_handle_pro(user_input: str, retriever=None, history=None, **kwargs):
-    """Generator that yields events from Iris Pro (async) for the frontend or terminal."""
+    
     import asyncio
     import queue
     import threading
@@ -818,14 +791,14 @@ def ai_agent_handle_pro(user_input: str, retriever=None, history=None, **kwargs)
         if isinstance(item, Exception):
             yield {
                 "type": "raw_response",
-                "content": f"\n\n> ❌ **Iris Pro Error:** {item}",
+                "content": f"\n\n> [ERROR] **Iris Pro Error:** {item}",
             }
             break
         yield item
 
 
 def _handle_check_storage(action_dict: dict) -> str:
-    """Cross-platform disk usage check using shutil."""
+    
     import shutil
     path = action_dict.get("path", "/")
     if platform.system() == "Windows":
@@ -849,20 +822,19 @@ def _handle_check_storage(action_dict: dict) -> str:
 
 
 def _dispatch_action(action: str, d: dict) -> str:
-    """Cross-platform action → handler dispatch. Returns None if no native
-    handler exists (caller then falls back to the template table / OI)."""
-    g = d.get  # shorthand
+    
+    g = d.get  
 
     def clean_url(url_val):
         if not url_val:
             return ""
-        # Match markdown links like [text](url)
+        
         m = re.match(r'^\[.*?\]\((.*?)\)$', str(url_val).strip())
         if m:
             return m.group(1).strip()
         return str(url_val).strip()
 
-    # ── Browser / web ────────────────────────────────────────────────────────
+    
     if action == "open_website":
         return handle_website_from_url(clean_url(g("url", "")))
     if action == "web_search":
@@ -891,7 +863,7 @@ def _dispatch_action(action: str, d: dict) -> str:
             url_clean, g("task", ""), resume_path=g("resume_path")
         )
 
-    # ── Miscellaneous / Core plugins ─────────────────────────────────────────
+    
     if action == "gui_action":
         try:
             from src.gui_agent import perform_gui_action
@@ -907,7 +879,7 @@ def _dispatch_action(action: str, d: dict) -> str:
         except Exception as e:
             return f"Resume parsing unavailable: {e}"
 
-    # ── Hardcoded OS Actions ─────────────────────────────────────────────────
+    
     if action in ("volume_up", "volume_down", "volume_mute"):
         from src.system_actions import set_volume
         return set_volume(action, g("amount", "5%"))
@@ -1063,15 +1035,15 @@ def _dispatch_action(action: str, d: dict) -> str:
     return None
 
 def _pct(val) -> int:
-    """Coerce a percent-ish value ('70', '70%', 70) to an int in [0, 100]."""
+    
     try:
         return max(0, min(100, int(float(str(val).replace("%", "").strip()))))
     except (ValueError, TypeError):
         return 50
 
 
-# Actions whose effects are hard to reverse or shared-state — gate behind a
-# confirmation unless the caller opts into full autonomy.
+
+
 _RISKY_ACTIONS = {
     "delete_file",
     "shutdown_computer",
@@ -1099,7 +1071,7 @@ _RISKY_CMD_RE = re.compile(
 
 
 def is_risky_action(action_dict: dict) -> bool:
-    """True when an action should be confirmed before running in auto mode."""
+    
     action = action_dict.get("action", "")
     if action in _RISKY_ACTIONS:
         return True
@@ -1109,10 +1081,7 @@ def is_risky_action(action_dict: dict) -> bool:
 
 
 def _confirm_risky(action_dict: dict) -> bool:
-    """Interactive y/N confirmation for a risky action. Returns True to proceed.
-
-    Non-interactive sessions default to refusing the action (safe default).
-    """
+    
     if not IS_INTERACTIVE:
         return False
     action = action_dict.get("action", "")
@@ -1135,18 +1104,14 @@ def _confirm_risky(action_dict: dict) -> bool:
 
 
 def execute_action_by_dict(action_dict: dict) -> str:
-    """
-    Execute a single action dict.
-      1. Core native plugins (browser, email, youtube, etc.) via _dispatch_action()
-      2. Dynamic execution via Open Interpreter for all system and file operations
-    """
+    
     action = action_dict.get("action", "chat")
 
-    # Pure conversation / loop terminator — nothing to execute
+    
     if action in ("chat", "finish", "none", ""):
         return ""
 
-    # ── Tier 1: Core native plugins ──────────────────────────────────────────
+    
     try:
         result = _dispatch_action(action, action_dict)
     except Exception as e:
@@ -1156,7 +1121,7 @@ def execute_action_by_dict(action_dict: dict) -> str:
         logger.info(f"[Action] {action} → handled natively (simple)")
         return result
 
-    # ── Tier 2: Open Interpreter via 3B model for complex actions ─────────────
+    
     if action in _SIMPLE_ACTIONS and action not in ("open_app", "close_app", "kill_app", "kill_process"):
         logger.warning(f"[Action] Simple action '{action}' was not handled natively, blocking fallthrough to 3B+OI.")
         return f"Simple action '{action}' could not be completed natively."
@@ -1168,7 +1133,7 @@ def execute_action_by_dict(action_dict: dict) -> str:
             task_parts.append(f"{key}: {val}")
     task_str = "\n".join(task_parts)
     
-    # Load the 3B model into OI before running
+    
     _prime_oi_with_3b()
     return _run_oi_task(task_str)
 
@@ -1194,28 +1159,28 @@ You operate as a multi-step agent. A single request may need several actions.
 from src.system_actions import handle_media_command, get_hardcoded_action_json
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Actions that the 0.5B model handles fully — no OI or 3B needed.
 
-# Actions that REQUIRE the 3B model + Open Interpreter.
+
+
+
 
 
 def _is_complex_action(action: str) -> bool:
-    """Return True if the action should be handled by 3B+OI instead of 0.5B."""
+    
     if action in _COMPLEX_ACTIONS:
         return True
-    # Any action not explicitly listed as simple is treated as complex
+    
     if action not in _SIMPLE_ACTIONS:
         return True
     return False
 
 
 def _prime_oi_with_3b():
-    """Ensure OI's native LLM bridge is wired to the 3B CODE model."""
+    
     if not OI_AVAILABLE:
         return
     from src.iris import ModelRole, load_model, _model_pool
-    # Load the 3B model into the pool so OI picks it up
+    
     try:
         load_model(ModelRole.CODE)
         logger.info("[OI] Primed with 3B CODE model for complex action.")
@@ -1224,11 +1189,7 @@ def _prime_oi_with_3b():
 
 
 def _generate_control_action(messages: list, user_query: str = "", max_tokens: int = 1024) -> str:
-    """Run the appropriate model over `messages`, return raw text.
     
-    - Simple queries → 0.5B CONTROL model (fast, low memory)
-    - Complex queries → 3B CODE model (smarter, handles GUI/browser/email)
-    """
     hardcoded = get_hardcoded_action_json(user_query)
     if hardcoded:
         logger.info(f"[Model] Simple control → using hardcoded rule for: {user_query}")
@@ -1261,18 +1222,7 @@ def agentic_control_loop(
     settings: dict = None,
     model_callable=None,
 ):
-    """Multi-step agent loop for the local CONTROL model.
-
-    Yields the same event dicts the UI/CLI already consume:
-      {"type": "status"|"token"|"action_result"|"raw_response", "content": ...}
-
-    The loop generates one JSON action, executes it (confirming risky ones unless
-    auto_confirm), feeds the result back as an OBSERVATION, and repeats until the
-    model emits {"action": "finish"} / "chat", or max_steps is reached.
-
-    `model_callable(messages) -> str` can be injected for testing; defaults to the
-    local CONTROL model.
-    """
+    
     history = history or []
     settings = settings or {}
     auto_confirm = bool(settings.get("auto_confirm", False))
@@ -1285,7 +1235,7 @@ def agentic_control_loop(
             messages.append({"role": m["role"], "content": m["content"]})
     messages.append({"role": "user", "content": user_query})
 
-    transcript = []  # human-facing summary of each step
+    transcript = []  
     parse_failures = 0
 
     for step in range(max_steps):
@@ -1320,13 +1270,13 @@ def agentic_control_loop(
         action = action_dict.get("action", "chat")
         messages.append({"role": "assistant", "content": raw})
 
-        # ── Model/execution-tier label ─────────────────────────────────────────
+        
         if _is_complex_action(action):
             yield {"type": "status", "content": f"Complex action '{action}' → 3B+OI"}
         else:
             yield {"type": "status", "content": f"Simple action '{action}' → native handler"}
 
-        # ── Terminal actions ─────────────────────────────────────────────────
+        
         if action in ("finish", "none"):
             summary = action_dict.get("summary", "")
             final = summary or _join_transcript(transcript) or "Done."
@@ -1343,7 +1293,7 @@ def agentic_control_loop(
                 _unload_control_model()
             return
 
-        # ── Confirmation gate ─────────────────────────────────────────────────
+        
         if is_risky_action(action_dict) and not auto_confirm:
             if not _confirm_risky(action_dict):
                 obs = f"Action '{action}' was cancelled by the user."
@@ -1352,7 +1302,7 @@ def agentic_control_loop(
                 messages.append({"role": "user", "content": f"OBSERVATION: {obs}"})
                 continue
 
-        # ── Execute ───────────────────────────────────────────────────────────
+        
         yield {"type": "status", "content": f"Executing: {action}"}
         result = execute_action_by_dict(action_dict)
         result = (result or "Done.").strip()
@@ -1361,7 +1311,7 @@ def agentic_control_loop(
             "type": "action_result",
             "content": f"Action '{action}' Executed.\nResult:\n{result}",
         }
-        # ── Inject GUI continuation hint after open_app for messaging tasks ──
+        
         observation_content = f"OBSERVATION: {result[:2000]}"
         if action == "open_app" and result.startswith("✅"):
             _original_task_lower = user_query.lower()
@@ -1379,7 +1329,7 @@ def agentic_control_loop(
                 )
         messages.append({"role": "user", "content": observation_content})
 
-    # max_steps reached without an explicit finish
+    
     final = _join_transcript(transcript) or "Reached the step limit."
     yield {"type": "status", "content": "Step limit reached."}
     yield {"type": "token", "content": final}
@@ -1530,19 +1480,7 @@ _YOUTUBE_VALID_CHANNEL_RE = re.compile(
 
 
 def handle_website_from_url(url: str):
-    """Open a website URL — but first guard against malformed/hallucinated
-    YouTube links.
-
-    The control LLM occasionally routes "open <video> on youtube" through
-    the generic open_website action and writes its own URL instead of using
-    the youtube_video action. Those URLs are frequently malformed (e.g.
-    "youtube.com/watch=some-title" instead of "watch?v=<id>") or point at a
-    fabricated/unavailable video ID, since the model has no way to actually
-    know real video IDs. Any YouTube-host URL that isn't already a
-    well-formed, valid watch/search/channel URL gets treated as a search
-    query and redirected through the verified lookup pipeline instead of
-    being opened as-is.
-    """
+    
     url = (url or "").strip()
     try:
         parsed = urllib.parse.urlparse(url)
@@ -1556,12 +1494,12 @@ def handle_website_from_url(url: str):
             or _YOUTUBE_VALID_SEARCH_RE.match(url)
             or _YOUTUBE_VALID_CHANNEL_RE.match(url)
         ):
-            pass  # already a well-formed, real YouTube URL — open as-is
+            pass  
         else:
-            # Malformed YouTube URL. Recover a search query from whatever
-            # text is available (path segments / query string / fragment)
-            # and route through the real, verified video lookup instead of
-            # opening a broken or hallucinated link.
+            
+            
+            
+            
             guess_bits = [parsed.path, parsed.query, parsed.fragment]
             guess = " ".join(b for b in guess_bits if b)
             guess = re.sub(r"^[/?#]+", "", guess)
@@ -1569,8 +1507,8 @@ def handle_website_from_url(url: str):
             guess = re.sub(r"[=&/_+]+", " ", guess).strip()
             if guess:
                 return handle_youtube_video_from_query(guess)
-            # No usable text to search with — fall back to YouTube home
-            # rather than opening a broken link.
+            
+            
             url = "https://www.youtube.com"
 
     _open_url(url)
@@ -1586,12 +1524,7 @@ def _youtube_search_url(query: str) -> str:
 
 
 def _youtube_video_available(video_id: str) -> bool:
-    """Return True if a video is playable (not removed/private/region-blocked).
-
-    Uses YouTube's public oembed endpoint: 200 + title for available videos,
-    4xx for unavailable ones. Fails open (returns True) on network errors so a
-    transient hiccup doesn't make us skip a good result.
-    """
+    
     url = (
         "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v="
         + video_id
@@ -1608,9 +1541,9 @@ def _youtube_video_available(video_id: str) -> bool:
             data = json.loads(resp.read().decode("utf-8", errors="replace"))
             return bool(data.get("title"))
     except urllib.error.HTTPError:
-        return False  # 400/401/403/404 → unavailable
+        return False  
     except Exception:
-        return True  # network error — don't penalise the result
+        return True  
 
 
 def _youtube_find_first_video(query: str) -> str | None:
@@ -1645,10 +1578,10 @@ def _youtube_find_first_video(query: str) -> str | None:
             logger.warning(f"  [YouTube search error] {e2}")
             return None
 
-    # Extract IDs scoped to actual search-result entries (videoRenderer), in
-    # ranked order. The old approach grabbed the FIRST bare "videoId" anywhere
-    # in the page, which often matched an ad / promoted / "people also watched"
-    # slot — frequently an unavailable video — instead of the top real result.
+    
+    
+    
+    
     ids: list[str] = []
     seen = set()
     for vid in re.findall(
@@ -1658,7 +1591,7 @@ def _youtube_find_first_video(query: str) -> str | None:
             seen.add(vid)
             ids.append(vid)
 
-    # Fallback: if the page structure changes, fall back to the raw scan.
+    
     if not ids:
         for vid in re.findall(r'"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"', html):
             if vid not in seen:
@@ -1668,12 +1601,12 @@ def _youtube_find_first_video(query: str) -> str | None:
     if not ids:
         return None
 
-    # Return the first result that is actually playable (check up to 5).
+    
     for vid in ids[:5]:
         if _youtube_video_available(vid):
             return f"https://www.youtube.com/watch?v={vid}"
 
-    # None verified available — return the top-ranked result anyway.
+    
     return f"https://www.youtube.com/watch?v={ids[0]}"
 
 
@@ -2078,7 +2011,7 @@ def load_iris_model():
 def iris_chat_reply(
     model, tokenizer, device, retriever, history: list, user_text: str
 ) -> str:
-    """Standard chat reply incorporating the RAG Knowledge base and live web search."""
+    
     if model is None:
         return "(Iris model not loaded — only PC-control commands work right now.)"
 
@@ -2296,15 +2229,12 @@ def format_assistant_message(content: str):
     return Group(*renderables)
 
 
-# Global scroll offset — number of rendered lines to skip from the top of the chat body
+
 _scroll_offset: int = 0
 
 
 def _render_body_lines(history, cols: int) -> list[str]:
-    """Render the full chat history into a list of terminal-width text lines.
-    Returns plain text lines (with ANSI codes stripped for measurement).
-    Returns rich-rendered lines for actual printing via a secondary capture.
-    """
+    
     measure_console = Console(color_system="truecolor", width=cols, highlight=False)
     table = Table(box=None, show_header=False, expand=True)
     table.add_column("Role", style="bold", width=10)
@@ -2324,7 +2254,7 @@ def _render_body_lines(history, cols: int) -> list[str]:
 
 
 def get_visible_history(history, body_height):
-    """Legacy shim — not used in the new scroll-aware draw_layout."""
+    
     if not RICH_AVAILABLE:
         return history
     return history
@@ -2367,11 +2297,11 @@ def draw_layout(model, tokenizer, retriever, history, status_text=None):
     if status_text:
         footer_msg = f" [bold yellow]Status: {status_text}[/bold yellow] │{footer_msg}"
 
-    # 2 lines header (status + divider) + 2 lines footer (divider + footer) + 1 prompt line = 5
+    
     reserved_height = 5
     body_height = max(5, rows - reserved_height)
 
-    # ── Clear and re-draw ──────────────────────────────────────────────────────
+    
     sys.stdout.write("\033[2J\033[H")
     sys.stdout.flush()
 
@@ -2391,30 +2321,30 @@ This is a full-featured terminal interface for controlling your computer and cha
 """
         console.print(Markdown(welcome_md))
     else:
-        # Render the entire chat to lines, then apply scroll window
+        
         all_lines = _render_body_lines(history, cols - 2)
         total_lines = len(all_lines)
 
-        # Auto-scroll to bottom whenever new content arrives (offset 0 = bottom)
+        
         max_offset = max(0, total_lines - body_height)
 
-        # Clamp scroll offset
+        
         _scroll_offset = max(0, min(_scroll_offset, max_offset))
 
-        # Which lines to show: offset from top (0 = very beginning, max_offset = end visible)
-        start = max_offset - _scroll_offset  # lines from top to start showing
+        
+        start = max_offset - _scroll_offset  
         end = start + body_height
         visible_lines = all_lines[start:end]
 
-        # Print the sliced lines directly (they already have ANSI codes from the capture)
+        
         for line in visible_lines:
             sys.stdout.write(line + "\n")
 
-        # Padding to fill the body area if content is shorter
+        
         for _ in range(body_height - len(visible_lines)):
             sys.stdout.write("\n")
 
-        # Scroll indicator in the corner when there's more content
+        
         if total_lines > body_height:
             pct = int(100 * (start + body_height) / total_lines)
             scroll_hint = f" ↑↓ scroll ({pct}%) "
@@ -2599,12 +2529,7 @@ def show_model_details():
 
 
 def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) -> str:
-    """Read a line of input while allowing UP/DOWN arrow keys to scroll the chat.
-
-    Uses termios raw-mode on Unix/macOS to intercept escape sequences before
-    they reach readline, then redraws the layout for each scroll step.
-    Falls back to console.input() if raw mode is unavailable (e.g. Windows).
-    """
+    
     global _scroll_offset
 
     import os
@@ -2614,7 +2539,7 @@ def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) ->
         import termios
         import tty
     except ImportError:
-        # Windows — fall back to blocking input
+        
         console.print(prompt_str, end="")
         return input()
 
@@ -2628,7 +2553,7 @@ def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) ->
     buf = []
     try:
         tty.setraw(fd)
-        # Print prompt
+        
         console.print(prompt_str, end="")
         sys.stdout.flush()
  
@@ -2636,31 +2561,31 @@ def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) ->
             ch = sys.stdin.read(1)
  
             if ch == "\r" or ch == "\n":
-                # Enter pressed — submit
+                
                 sys.stdout.write("\r\n")
                 sys.stdout.flush()
                 break
  
             elif ch == "\x03":
-                # Ctrl-C
+                
                 raise KeyboardInterrupt
  
             elif ch == "\x04":
-                # Ctrl-D / EOF
+                
                 raise EOFError
  
             elif ch == "\x7f" or ch == "\x08":
-                # Backspace
+                
                 if buf:
                     buf.pop()
                     sys.stdout.write("\b \b")
                     sys.stdout.flush()
  
             elif ch == "\x1b":
-                # Escape sequence — read 2 more bytes
+                
                 seq = sys.stdin.read(2)
                 if seq in ("[A", "OA"):
-                    # UP arrow — scroll up (show older content)
+                    
                     _scroll_offset = min(_scroll_offset + (body_height // 3), 9999)
                     termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
                     draw_layout(model, tokenizer, retriever, history)
@@ -2669,7 +2594,7 @@ def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) ->
                     sys.stdout.write("".join(buf))
                     sys.stdout.flush()
                 elif seq in ("[B", "OB"):
-                    # DOWN arrow — scroll down (show newer content)
+                    
                     _scroll_offset = max(_scroll_offset - (body_height // 3), 0)
                     termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
                     draw_layout(model, tokenizer, retriever, history)
@@ -2678,8 +2603,8 @@ def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) ->
                     sys.stdout.write("".join(buf))
                     sys.stdout.flush()
                 elif seq == "[5":
-                    # Page Up
-                    sys.stdin.read(1)  # consume trailing ~
+                    
+                    sys.stdin.read(1)  
                     _scroll_offset = min(_scroll_offset + body_height, 9999)
                     termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
                     draw_layout(model, tokenizer, retriever, history)
@@ -2688,8 +2613,8 @@ def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) ->
                     sys.stdout.write("".join(buf))
                     sys.stdout.flush()
                 elif seq == "[6":
-                    # Page Down
-                    sys.stdin.read(1)  # consume trailing ~
+                    
+                    sys.stdin.read(1)  
                     _scroll_offset = max(_scroll_offset - body_height, 0)
                     termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
                     draw_layout(model, tokenizer, retriever, history)
@@ -2697,10 +2622,10 @@ def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) ->
                     console.print(prompt_str, end="")
                     sys.stdout.write("".join(buf))
                     sys.stdout.flush()
-                # Ignore other escape sequences (left/right arrows, mouse clicks, fn keys, etc.)
+                
  
             elif ch >= " ":
-                # Printable character
+                
                 buf.append(ch)
                 sys.stdout.write(ch)
                 sys.stdout.flush()
@@ -2708,7 +2633,7 @@ def _read_input_with_scroll(prompt_str, model, tokenizer, retriever, history) ->
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
-    # Reset scroll to bottom whenever user submits a message
+    
     _scroll_offset = 0
     return "".join(buf)
 
@@ -2949,7 +2874,7 @@ def main():
                 history.append({"role": "user", "content": raw})
                 history.append({"role": "assistant", "content": final_reply})
 
-                # Auto-save code blocks
+                
                 try:
                     code_blocks = re.findall(r"```(\w*)\n([\s\S]*?)```", final_reply)
                     for i, (lang, code) in enumerate(code_blocks):
