@@ -645,7 +645,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
         )
         _selected_kv_type = _get_ftype(_kv_quant)
         _kv_ram_mb = estimate_kv_cache_ram(os.path.getsize(path) / (1024**3), n_ctx, _kv_quant)
-        logger.info(f"[Iris] KV cache: {_kv_quant.value.upper()} → ~{_kv_ram_mb:.0f} MB @ n_ctx={n_ctx}")
+        logger.debug(f"[Iris] KV cache: {_kv_quant.value.upper()} → ~{_kv_ram_mb:.0f} MB @ n_ctx={n_ctx}")
 
         draft_model = None
         # ── Speculative Decoding (Draft Model & N-Gram) ──
@@ -1182,7 +1182,7 @@ def _stream_tokens(
 
         full_messages, _ = auto_compact_for_role(full_messages, role=role, max_output_tokens=min(max_tokens, 1024))
         
-        logger.info(f"[Model Start] Role: {role.value.upper()} | Model: {model_name}")
+        logger.debug(f"[Model Start] Role: {role.value.upper()} | Model: {model_name}")
         stream = llm.create_chat_completion(
             messages=full_messages,
             stream=True,
@@ -1414,7 +1414,7 @@ def _stream_tokens(
             if "finish_reason" in choice and choice["finish_reason"]:
                 finish_reason = choice["finish_reason"]
 
-        logger.info(f"[Model Finish] Role: {role.value.upper()} | Model: {model_name} | Tokens consumed: {token_count} | Status: {finish_reason}")
+        logger.debug(f"[Model Finish] Role: {role.value.upper()} | Model: {model_name} | Tokens consumed: {token_count} | Status: {finish_reason}")
 
         if buffer:
             if think_mode == "hidden" and in_thinking:
@@ -1444,7 +1444,7 @@ def _stream_tokens(
             elif loop_content.strip() and re.search(r'[a-zA-Z0-9,]$', loop_content.strip()):
                 looks_incomplete = True
             
-            logger.info(f"DEBUG LOOP CONTENT END: {repr(loop_content[-20:])} | Incomplete? {looks_incomplete}")
+            logger.debug(f"DEBUG LOOP CONTENT END: {repr(loop_content[-20:])} | Incomplete? {looks_incomplete}")
             
             if looks_incomplete:
                 finish_reason = "length"

@@ -63,23 +63,25 @@ def auto_correct_math_answer(
     # 2. Run MathVerifier for self-consistency
     try:
         from src.harness import MathVerifier
-        mr = MathVerifier.verify(
-            solution=model_raw_output,
-            problem=problem,
-            expected_value=extract_numeric(ground_truth) if ground_truth else None,
-        )
+        if ground_truth:
+            mr = MathVerifier.verify(
+                generated_text=model_raw_output,
+                target_answer=ground_truth,
+            )
 
-        if mr.numerical_match:
-            # Already numerically correct — just fix formatting
-            log_parts.append("MathVerifier: numerically correct")
-            corrected = fix_common_format_issues(str(mr.final_answer_extracted or original))
-            if corrected != original:
-                log_parts.append(f"Format fix: '{original[:40]}' → '{corrected[:40]}'")
+            if mr.is_equivalent:
+                # Already numerically correct — just fix formatting
+                log_parts.append("MathVerifier: numerically correct")
+                corrected = fix_common_format_issues(str(mr.extracted_answer or original))
+                if corrected != original:
+                    log_parts.append(f"Format fix: '{original[:40]}' → '{corrected[:40]}'")
 
-            ok, reason = match(ground_truth, corrected) if ground_truth else (True, "verified")
-            return corrected, (corrected != original), "; ".join(log_parts)
+                ok, reason = match(ground_truth, corrected)
+                return corrected, (corrected != original), "; ".join(log_parts)
 
-        log_parts.append(f"MathVerifier issues: {mr.discrepancies[:3] if mr.discrepancies else 'none'}")
+            log_parts.append(f"MathVerifier issues: {mr.error_message if mr.error_message else 'none'}")
+        else:
+            log_parts.append("MathVerifier issues: no ground truth")
 
     except ImportError:
         log_parts.append("MathVerifier unavailable")

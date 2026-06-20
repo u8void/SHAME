@@ -408,12 +408,11 @@ def match_with_verifier(expected: str | None, actual: str | None,
         expected_num = extract_numeric(expected)
         if expected_num is not None and actual:
             mr = MathVerifier.verify(
-                solution=f"Solution: {actual}\n\\boxed{{{actual}}}",
-                problem=problem,
-                expected_value=expected_num,
+                generated_text=f"Solution: {actual}\n\\boxed{{{actual}}}",
+                target_answer=str(expected_num),
             )
-            if mr.numerical_match:
-                return True, f"math_verifier_numeric({mr.computed_value} ≈ {mr.expected_value})"
+            if mr.is_equivalent:
+                return True, f"math_verifier_numeric({mr.extracted_answer} ≈ {mr.target_answer})"
 
     except ImportError:
         pass

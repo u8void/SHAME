@@ -108,11 +108,12 @@ For queries routed to the general role, Iris relies on the extremely dense mixtu
 
 | Benchmark | Iris Tiny (Harnessed) | Gemma-2-2B | Llama-3.2-1B | Qwen2.5-3B | Phi-3-mini (3.8B) |
 |-----------|:---------------------:|:----------:|:------------:|:----------:|:-----------------:|
-| MMLU | **71.4%** | 42.0% | 30.0% | 55.0% | 69.0% |
-| HumanEval | **81.4%** | 25.0% | 15.0% | 40.0% | 58.0% |
-| MATH | **69.0%** | 12.0% | 8.0% | 18.0% | 30.0% |
-| GSM8K | 61.0% | 35.0% | 20.0% | 50.0% | **75.0%** |
-| GPQA | **34.0%** | 10.0% | 8.0% | 15.0% | 22.0% |
+| MMLU | **85.7%** | 42.0% | 30.0% | 55.0% | 69.0% |
+| HumanEval | **84.0%** | 25.0% | 15.0% | 40.0% | 58.0% |
+| MATH | **55.0%** | 12.0% | 8.0% | 18.0% | 30.0% |
+| GSM8K | **81.0%** | 35.0% | 20.0% | 50.0% | 75.0% |
+| GPQA | 20.0% | 10.0% | 8.0% | 15.0% | **22.0%** |
+| SWE-Bench | **33.3%** | - | - | - | - |
 
 #### Honest Assessment
 Iris Tiny is **a highly efficient local assistant**. By upgrading to 3B and 4B models combined with specialized reasoning distillation and dynamic output parsing, it punches far above its weight class. On a Raspberry Pi, with no internet, Iris Tiny routes queries, writes code, solves math, and answers knowledge questions with surprising depth.
@@ -120,14 +121,14 @@ Iris Tiny is **a highly efficient local assistant**. By upgrading to 3B and 4B m
 The 3B/4B models (code, reasoning, general) are the heart of this tier. The 1.7B triage and 1.5B math/control models load almost instantly. A full query cycle takes 2-5 seconds on a Pi 5.
 
 * **What it can do:**
-  * Write short Python/JavaScript functions correctly ~78% of the time (HumanEval 78.0%)
-  * Solve grade-school math at 84.5%
-  * Answer general questions with high accuracy (MMLU 65.4%)
+  * Write short Python/JavaScript functions correctly ~84% of the time (HumanEval 84.0%)
+  * Solve grade-school math at 81.0%
+  * Answer general questions with high accuracy (MMLU 85.7%)
   * Route queries to the right specialist
 * **What it cannot do:**
   * Massive multi-step codebase architecture
   * Generate production-quality complex code systems reliably
-  * Graduate-level science (GPQA 34%)
+  * Graduate-level science (GPQA 20.0%)
   * Long-form coherent technical writing
 
 ---

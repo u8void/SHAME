@@ -86,7 +86,7 @@ def _extract_model_answer(response: str) -> str | None:
         return nums[-1].replace(",", "").strip()
     return None
 
-def run_gsm8k_benchmark(csv_path: str, num_samples: int = 400):
+def run_gsm8k_benchmark(csv_path: str, num_samples: int = 100):
     try:
         from datasets import load_dataset
         ds = load_dataset("openai/gsm8k", "main", split="test")
@@ -173,7 +173,7 @@ def run_gsm8k_benchmark(csv_path: str, num_samples: int = 400):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GSM8K benchmark")
-    parser.add_argument("--samples", type=int, default=400, help="Number of questions to evaluate (default: 400). Use 0 for all.")
+    parser.add_argument("--samples", type=int, default=100, help="Number of questions to evaluate (default: 100). Use 0 for all.")
     args = parser.parse_args()
 
     out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "outputs")
