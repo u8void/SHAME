@@ -216,7 +216,13 @@ def chat():
 
     math_answer = solve_math(user_message)
     if math_answer is not None:
-        return jsonify({"reply": math_answer})
+        def math_generate():
+            yield f"data: {json.dumps({'type': 'token', 'content': math_answer})}\n\n"
+        resp = Response(math_generate(), mimetype='text/event-stream')
+        resp.headers['X-Accel-Buffering'] = 'no'
+        resp.headers['Cache-Control']     = 'no-cache'
+        resp.headers['Connection']        = 'keep-alive'
+        return resp
 
     if PREVIEW_MODE:
         def preview_generate():
@@ -391,7 +397,9 @@ def voice_chat_endpoint():
         VOICE_IDENTITY = (
             "You are Iris AI, a powerful AI assistant created entirely by Ahmed Barakat. "
             "Under NO circumstances should you mention Alibaba, Qwen, DeepSeek, OpenAI, or any other company/model name. "
-            "CRITICAL LANGUAGE RULE: You MUST reply in the EXACT SAME LANGUAGE as the user's CURRENT message. If the user speaks English, reply in English. If the user speaks Arabic, reply in Arabic."
+            "CRITICAL LANGUAGE RULE: You MUST reply in the EXACT SAME LANGUAGE and DIALECT as the user's CURRENT message. "
+            "If the user speaks casual Egyptian Arabic (or slang), reply entirely in natural Egyptian Arabic. "
+            "Be highly conversational, funny, and human-like. Don't be robotic or overly formal."
         )
 
         

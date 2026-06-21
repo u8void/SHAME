@@ -170,12 +170,18 @@ def find_chrome_pwa_exec(app_name: str):
 
 def open_app(name: str):
     os_name = platform.system()
+    import re
+    cleaned_name = re.sub(r'(?i)\b(please|again|now|thanks)\b', '', name).strip()
+    if cleaned_name:
+        name = cleaned_name
+
+    if name.lower() in ("settings", "system settings", "control panel", "system preferences"):
+        return handle_open_settings()
+
     try:
         if os_name == "Linux":
-                                                                               
             pwa_exec = find_chrome_pwa_exec(name)
             if pwa_exec:
-                                                             
                 subprocess.Popen(pwa_exec, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 return f"[SUCCESS] Opened '{name}' (via Chrome PWA)."
 
@@ -190,17 +196,21 @@ def open_app(name: str):
             }
             exe = common_map.get(name.lower(), name.lower())
             if not shutil.which(exe):
-                return f"[ERROR] Could not find application '{name}' in PATH or as a Chrome PWA."
+                return f"❌ [ERROR] Could not find application '{name}' in PATH or as a Chrome PWA."
             subprocess.Popen([exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return f"[SUCCESS] Opened '{name}'."
         elif os_name == "Windows":
-            subprocess.Popen(f"start {name}", shell=True)
+            res = subprocess.run(f"start {name}", shell=True, capture_output=True, text=True)
+            if res.returncode != 0:
+                return f"❌ [ERROR] Could not open '{name}': {res.stderr.strip()}"
             return f"[SUCCESS] Opened '{name}'."
         elif os_name == "Darwin":
-            subprocess.Popen(["open", "-a", name])
+            res = subprocess.run(["open", "-a", name], capture_output=True, text=True)
+            if res.returncode != 0:
+                return f"❌ [ERROR] Could not open '{name}': {res.stderr.strip()}"
             return f"[SUCCESS] Opened '{name}'."
     except Exception as e:
-        return f"[ERROR] Failed to open app: {e}"
+        return f"❌ [ERROR] Failed to open app: {e}"
 
 def _resolve_linux_app_exec(app_name: str) -> str:
                                                                                     
