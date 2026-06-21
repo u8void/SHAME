@@ -2,6 +2,16 @@ import os, sys
 
 
 def _ensure_open_interpreter():
+    if os.environ.get("SKIP_OPEN_INTERPRETER") == "1":
+        return
+    try:
+        import json
+        with open("config/iris.conf", "r", encoding="utf-8") as f:
+            if json.load(f).get("skip_open_interpreter", False):
+                return
+    except Exception:
+        pass
+
     try:
         import interpreter  
     except ImportError:

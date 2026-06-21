@@ -112,7 +112,7 @@ def parse_args():
                         help="Roles to train: triage, router, math, code, reasoning, general, all")
     parser.add_argument("--quant-type", choices=["q4_k_m", "q8_0", "f16"], default="q4_k_m",
                         help="GGUF quantization level")
-    parser.add_argument("--size", choices=["tiny", "small", "medium", "large", "max"], default="medium",
+    parser.add_argument("--size", choices=["tiny", "small", "medium", "large", "max"], default="tiny",
                         help="Iris AI model size tier (tiny/small/medium/large/max)")
     parser.add_argument("--download-models", "--download-all", action="store_true", dest="download_models",
                         help="Download all models for the selected tier and continue automatically")

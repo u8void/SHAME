@@ -51,8 +51,6 @@ def compact_light(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         result.append({"role": role, "content": content})
     return result
 
-
-
 _SUMMARIZE_PROMPT = """You are a conversation compressor. Summarize the following conversation excerpt into a dense, factual digest. Preserve:
 
 1. The user's original request/goal
