@@ -52,10 +52,15 @@ parser.add_argument("--preview-only", action="store_true",
                     help="Launch UI without loading the AI model")
 parser.add_argument("--pro", action="store_true",
                     help="Use Iris Pro multi-agent API pipeline")
+parser.add_argument("--skip-control", action="store_true",
+                    help="Skip loading the control model and routing to it")
 args, _ = parser.parse_known_args()
 
 PREVIEW_MODE = args.preview_only
 PRO_MODE = args.pro
+
+if args.skip_control:
+    os.environ["SKIP_CONTROL"] = "1"
 
 BACKEND = os.environ.get("IRIS_BACKEND", "cpu")
 MLX_MODEL_ID = os.environ.get("IRIS_MODEL_ID", "iris_001.gguf")

@@ -840,7 +840,7 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
     }
     for kw in control_keywords:
         if q.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", q):
-            if not is_how_to:
+            if not is_how_to and os.environ.get("SKIP_CONTROL") != "1":
                 return TaskType.CONTROL
 
     
@@ -867,7 +867,7 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
     if not is_how_to:
         has_noun = any(re.search(rf"\b{re.escape(n)}\b", q) for n in system_status_nouns)
         has_intent = any(re.search(rf"\b{re.escape(w)}\b", q) for w in status_intent_words)
-        if has_noun and has_intent:
+        if has_noun and has_intent and os.environ.get("SKIP_CONTROL") != "1":
             return TaskType.CONTROL
 
     code_keywords = {
