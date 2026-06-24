@@ -785,7 +785,7 @@ def model_status():
 
 def warmup_models():
     
-    if PRO_MODE:
+    if PRO_MODE or os.environ.get("SKIP_CONTROL") == "1":
         return
     
     from src.iris import load_model, ModelRole
