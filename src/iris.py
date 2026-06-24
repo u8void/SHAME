@@ -302,7 +302,8 @@ REASONING_SYSTEM_PROMPT = (
     "4. Structure your reasoning: problem definition → analysis → approach → solution → verification.\n"
     "5. For explanations: cover mechanics, context, and real-world examples.\n"
     "6. Minimum response: 2-3 solid paragraphs. Maximum: as long as needed to be accurate and complete.\n"
-    "7. End with actionable takeaways or a clear conclusion when applicable."
+    "7. End with actionable takeaways or a clear conclusion when applicable.\n"
+    "8. If you are writing or modifying code, you MUST wrap all code inside standard markdown triple backticks (```language ... ```)."
 )
 
 REVIEWER_SYSTEM_PROMPT = (
@@ -1158,6 +1159,10 @@ def _stream_tokens(
 
     model_name = _get_model_filename(role)
 
+    in_thinking = False
+    thinking_tag = ""
+    hidden_buffer = ""
+
     for loop_idx in range(5):
         
         
@@ -1194,13 +1199,11 @@ def _stream_tokens(
             top_k=top_k,
             min_p=0.05,
             seed=42 + loop_idx,
+            stop=["</s>", "<|eot_id|>", "<|end_of_text|>", "<|im_end|>", "<step_end>"],
         )
         loop_content = ""
         finish_reason = "stop"
-        in_thinking = False
-        thinking_tag = ""
         buffer = ""
-        hidden_buffer = ""
         token_count = 0
 
         for chunk in stream:
@@ -2509,10 +2512,10 @@ def load_daily_dialog(subset_size=None):
     except Exception: return []
 
 
-def load_markdown_files(md_dir="md", pattern="*.md"):
+def load_markdown_files(md_dir="md", pattern="**/*.md"):
     pairs = []
     tag_re = re.compile(r"^(SYSTEM|USER|BOT)\s*:\s*(.*)", re.IGNORECASE)
-    for path in glob.glob(os.path.join(md_dir, pattern)):
+    for path in glob.glob(os.path.join(md_dir, pattern), recursive=True):
         u, b, s, last = [], [], [], None
         file_pairs = []
         try:

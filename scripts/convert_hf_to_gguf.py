@@ -1209,6 +1209,8 @@ class TextModel(ModelBase):
             res = "gpt-2"
         if chkhsh == "0ef9807a4087ebef797fc749390439009c3b9eda9ad1a097abbe738f486c01e5":
             res = "llama-bpe"
+        if chkhsh == "2fb00a3612651d27f1b2bcc45ec466cbe0120c75d6d28a5309f83370b1628fcd":
+            res = "llama-bpe"
         if chkhsh == "049ecf7629871e3041641907f3de7c733e4dbfdc736f57d882ba0b0845599754":
             res = "deepseek-llm"
         if chkhsh == "347715f544604f9118bb75ed199f68779f423cabb20db6de6f31b908d04d7821":

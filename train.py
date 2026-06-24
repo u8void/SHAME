@@ -274,7 +274,11 @@ def load_generic_hf_dataset(path: str, limit: int = None) -> List[Tuple[str, str
 def load_local_json_files(directory: str) -> List[Tuple[str, str]]:
     import glob
     pairs = []
-    for path in glob.glob(os.path.join(directory, "*.json")) + glob.glob(os.path.join(directory, "*.jsonl")):
+    paths = (
+        glob.glob(os.path.join(directory, "**", "*.json"), recursive=True) +
+        glob.glob(os.path.join(directory, "**", "*.jsonl"), recursive=True)
+    )
+    for path in paths:
         if os.path.basename(path) in ("datasets.json", "package.json"):
             continue
         try:
