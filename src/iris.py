@@ -279,6 +279,9 @@ CODE_SYSTEM_PROMPT = (
     "CRITICAL: If you write a code block, the very first line inside the code block MUST be a comment containing ONLY the intended filename (e.g. // main.cpp or # app.py). "
     "Do NOT include explanatory comments inside the code block other than the filename. "
     "Do NOT use LaTeX or MathJax formatting (like $...$ or _{...}) for variable names or identifiers inside code blocks. Code must be syntactically valid plain text. "
+    "WEB DESIGN RULE: If the user asks for a website or web app, you MUST prioritize extreme visual excellence. "
+    "Do NOT output generic or basic UI. You must use modern, premium aesthetics (e.g., highly polished dark modes, vibrant curated colors, glassmorphism, fluid typography, smooth CSS micro-animations, hover effects, and Tailwind CSS if appropriate). "
+    "Always rely heavily on provided RAG context or your deep knowledge of modern UI/UX design to deliver a 'WOW' factor. Use placeholder images (e.g., Unsplash) and complete copy, never 'Lorem Ipsum'. "
     "After the code block, provide a concise explanation of the code. "
     "If the user is ONLY asking for an explanation, summary, or debugging help without needing new code, do NOT generate a code block; just reply in plain text."
 )
@@ -1704,7 +1707,7 @@ def ask_stream(
     yield {"type": "status", "content": f"Task: {task_type.value.upper()}"}
 
     context = ""
-    if retriever is not None and len(user_query.split()) >= 8:
+    if retriever is not None and len(user_query.split()) >= 3:
         rag_cats = {
             TaskType.CODING_SIMPLE:  "coding",
             TaskType.CODING_COMPLEX: "coding",
