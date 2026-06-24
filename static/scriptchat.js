@@ -505,21 +505,31 @@ function renderChatList(query = '') {
 
         work = work.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
             const id = `@@@CODE_${blocks.length}@@@`;
-            // Strip any @@@ placeholders that might have leaked into the lang definition
             const detectedLang = (lang || '').trim().replace(/@@@[A-Z0-9_]+@@@/gi, '') || 'code';
-            const contentTrimmed = codeContent.trim();
-            const isCmdOrShort = isCommandOrShortBlock(detectedLang, contentTrimmed);
+            
+            // Find all thought placeholders inside the code content and move them outside
+            const thoughtRegex = /@@@THOUGHT_\d+@@@/g;
+            let extractedThoughts = "";
+            let matchThought;
+            while ((matchThought = thoughtRegex.exec(codeContent)) !== null) {
+                extractedThoughts += "\n" + matchThought[0] + "\n";
+            }
+            
+            const cleanContent = codeContent.replace(/@@@THOUGHT_\d+@@@/g, '').trim();
+            const isCmdOrShort = isCommandOrShortBlock(detectedLang, cleanContent);
             const isFinished = match.endsWith('```');
+            
             blocks.push({
                 type: 'code',
                 lang: detectedLang,
-                content: contentTrimmed,
+                content: cleanContent,
                 hidden: !isCmdOrShort,
                 autoCard: !isCmdOrShort,
                 claimed: false,
                 finished: isFinished
             });
-            return id;
+            // Inject thoughts outside the code block placeholder
+            return id + extractedThoughts;
         });
 
         // Extract explicit file_card tags emitted by the AI — they override the auto-generated card
