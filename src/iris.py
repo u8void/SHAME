@@ -1124,7 +1124,16 @@ def _stream_tokens(
         return
 
     sys_prompt = system_prompt_override if system_prompt_override is not None else _system_prompt_for(role)
-    full_messages = [{"role": "system", "content": sys_prompt}] + messages
+    if role in (ModelRole.REASONING, ModelRole.GENERAL):
+        full_messages = []
+        for m in messages:
+            full_messages.append({"role": m["role"], "content": m["content"]})
+        if full_messages and full_messages[0]["role"] == "user":
+            full_messages[0]["content"] = f"System Instructions:\n{sys_prompt}\n\nUser Query:\n{full_messages[0]['content']}"
+        else:
+            full_messages = [{"role": "user", "content": f"System Instructions:\n{sys_prompt}"}] + full_messages
+    else:
+        full_messages = [{"role": "system", "content": sys_prompt}] + messages
 
     cfg = load_generation_config()
     model_cfg = cfg.get("model_settings", {}).get(role.value, {})
@@ -1719,7 +1728,12 @@ def ask_stream(
 
     final_query = user_query
     if context:
-        final_query = f"[RETRIEVED CONTEXT]\n{context}\n[END RETRIEVED CONTEXT]\n\n{final_query}"
+        final_query = (
+            f"[RETRIEVED CONTEXT]\n{context}\n[END RETRIEVED CONTEXT]\n\n"
+            f"If the retrieved context is relevant, use it to answer the question. "
+            f"If it is completely irrelevant to the question, IGNORE it and answer from your own knowledge.\n\n"
+            f"{final_query}"
+        )
     if web_context and "(No web results found" not in web_context and "Web search unavailable" not in web_context:
         final_query = (
             f"[WEB SEARCH RESULTS]\n{web_context}\n[END WEB SEARCH RESULTS]\n\n"
