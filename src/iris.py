@@ -1757,12 +1757,12 @@ def ask_stream(
         recent = history[-num_history:]
         optimized = [{"role": m["role"], "content": m["content"]} for m in recent] + optimized
 
-    optimized, _ = auto_compact_for_role(optimized, role=ModelRole.REASONING if task_type == TaskType.REASONING else (ModelRole.CODE if task_type in (TaskType.CODING_SIMPLE, TaskType.CODING_COMPLEX) else ModelRole.GENERAL), max_output_tokens=2048)
+    optimized, _ = auto_compact_for_role(optimized, role=ModelRole.REASONING if task_type == TaskType.REASONING else (ModelRole.CODE if task_type in (TaskType.CODING_SIMPLE, TaskType.CODING_COMPLEX) else ModelRole.GENERAL), max_output_tokens=4096)
 
     if task_type == TaskType.GENERAL:
         yield {"type": "status", "content": "Thinking..."}
         full = ""
-        for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=2048, temperature=0.3, think_mode="pass"):
+        for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=4096, temperature=0.3, think_mode="pass"):
             yield ev
             if ev["type"] == "token":
                 full += ev["content"]
@@ -1778,7 +1778,7 @@ def ask_stream(
         yield {"type": "status", "content": "Analyzing..."}
         full = ""
         _r_temp = 0.4 if web_context else 0.3  
-        _r_tokens = 4096 if web_context else 3072
+        _r_tokens = 6144 if web_context else 4096
         for ev in _stream_tokens(ModelRole.REASONING, optimized, max_tokens=_r_tokens, temperature=_r_temp, think_mode="show"):
             yield ev
             if ev["type"] == "token":
