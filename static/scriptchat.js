@@ -422,32 +422,10 @@ function renderChatList(query = '') {
 
     function _formatRefined(text, isStreaming = false) {
         if (!text) return '';
+        let work = text;
         const blocks = [];
 
-        // 1. Extract Think Block (Internal)
-        let work = text.replace(/(?:<think>|<\|thought_start\|>|<thought>)([\s\S]*?)(?:<\/think>|<\|thought_end\|>|<\/thought>|$)/gi, (match, p1) => {
-            const content = p1.trim();
-            if (!content) return ''; // Do not create a block if there's no thought process
-
-            const isClosed = /(?:<\/think>|<\|thought_end\|>|<\/thought>)$/i.test(match);
-            const id = `@@@THOUGHT_${blocks.length}@@@`;
-            blocks.push({ type: 'thought', content: content, isClosed: isClosed });
-            return id;
-        });
-
-        work = work.replace(/<coding>([\s\S]*?)(?:<\/coding>|$)/gi, (match, p1) => {
-            const id = `@@@CODING_${blocks.length}@@@`;
-            blocks.push({ type: 'coding', content: p1.trim() });
-            return id;
-        });
-
-        work = work.replace(/<review>([\s\S]*?)(?:<\/review>|$)/gi, (match, p1) => {
-            const id = `@@@REVIEW_${blocks.length}@@@`;
-            blocks.push({ type: 'review', content: p1.trim() });
-            return id;
-        });
-
-        // Robust brace-counting extraction for action JSON blocks (handles nesting)
+        // 1. Extract action JSON blocks and results FIRST so they aren't swallowed by think blocks
         let startIdx = work.indexOf('{');
         while (startIdx !== -1) {
             let braceCount = 0;
@@ -470,7 +448,6 @@ function renderChatList(query = '') {
                     const id = `@@@ACTION_${blocks.length}@@@`;
                     blocks.push({ type: 'action', content: candidate });
                     work = work.substring(0, startIdx) + id + work.substring(endIdx);
-                    // Adjust start index search since we replaced the block
                     startIdx = work.indexOf('{', startIdx + id.length);
                     continue;
                 }
@@ -481,6 +458,29 @@ function renderChatList(query = '') {
         work = work.replace(/<action_result>([\s\S]*?)(?:<\/action_result>|$)/gi, (match, p1) => {
             const id = `@@@RESULT_${blocks.length}@@@`;
             blocks.push({ type: 'result', content: p1.trim() });
+            return id;
+        });
+
+        // 2. Extract Think Block (Internal)
+        work = work.replace(/(?:<think>|<\|thought_start\|>|<thought>)([\s\S]*?)(?:<\/think>|<\|thought_end\|>|<\/thought>|$)/gi, (match, p1) => {
+            const content = p1.trim();
+            if (!content) return ''; 
+
+            const isClosed = /(?:<\/think>|<\|thought_end\|>|<\/thought>)$/i.test(match);
+            const id = `@@@THOUGHT_${blocks.length}@@@`;
+            blocks.push({ type: 'thought', content: content, isClosed: isClosed });
+            return id;
+        });
+
+        work = work.replace(/<coding>([\s\S]*?)(?:<\/coding>|$)/gi, (match, p1) => {
+            const id = `@@@CODING_${blocks.length}@@@`;
+            blocks.push({ type: 'coding', content: p1.trim() });
+            return id;
+        });
+
+        work = work.replace(/<review>([\s\S]*?)(?:<\/review>|$)/gi, (match, p1) => {
+            const id = `@@@REVIEW_${blocks.length}@@@`;
+            blocks.push({ type: 'review', content: p1.trim() });
             return id;
         });
 
@@ -745,7 +745,7 @@ function renderChatList(query = '') {
                     const animDelay = -(Date.now() % 1000);
                     let inner = escapeHtml(block.content);
                     let streamingStatus = `
-                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: #a385ff; font-size: 13px;">
+                        <div style="display: flex; align-items: center; gap: 8px; color: #a385ff; font-size: 13px;">
                             <div style="width: 14px; height: 14px; border: 2px solid rgba(163, 133, 255, 0.3); border-top-color: #a385ff; border-radius: 50%; animation: spin-loader 1s linear infinite; animation-delay: ${animDelay}ms;"></div>
                             <span>Writing ${escapeHtml(block.lang || 'code')}...</span>
                         </div>
@@ -754,9 +754,23 @@ function renderChatList(query = '') {
                         const codeMd = "```" + (block.lang || '') + "\n" + block.content + "\n```";
                         const purifyConfig = { ADD_TAGS: ['math', 'mrow', 'mi', 'mo', 'mn', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mphantom', 'mpadded', 'mroot', 'mfrac', 'msub', 'msup', 'msubsup', 'munder', 'mover', 'munderover', 'mmultiscripts', 'msection', 'maction', 'annotation', 'semantics'], ADD_ATTR: ['mathvariant', 'mathcolor', 'mathsize', 'mathbackground', 'display', 'xmlns', 'class'] };
                         let mdHtml = DOMPurify.sanitize(marked.parse(codeMd, { breaks: true, gfm: true }), purifyConfig);
-                        html = `<div>${streamingStatus}${mdHtml}</div>`;
+                        html = `
+                            <div class="code-container">
+                                <div class="code-header" style="justify-content: flex-start; padding-top: 12px; padding-bottom: 12px;">
+                                    ${streamingStatus}
+                                </div>
+                                ${mdHtml}
+                            </div>
+                        `;
                     } else {
-                        html = `<div>${streamingStatus}<pre><code class="language-${escapeHtml(block.lang)}">${inner}</code></pre></div>`;
+                        html = `
+                            <div class="code-container">
+                                <div class="code-header" style="justify-content: flex-start; padding-top: 12px; padding-bottom: 12px;">
+                                    ${streamingStatus}
+                                </div>
+                                <pre><code class="language-${escapeHtml(block.lang)}">${inner}</code></pre>
+                            </div>
+                        `;
                     }
                 } else if (block.hidden) {
                     // Auto-generate a file card for hidden blocks that weren't claimed by an explicit <file_card> tag
@@ -862,7 +876,7 @@ window.extractFilenameFromCode = function(code, ext) {
     if (!code) return 'snippet.' + ext;
     const lines = code.trim().split('\n').slice(0, 10);
     for (const line of lines) {
-        const match = line.match(/(?:(?:#|\/\/)\s*|(?:\/\*\s*))([\w-]+\.\w+)(?:\s*\*\/)?/i);
+        const match = line.match(/^\s*(?:#|\/\/|\/\*|<!--)\s*([\w-]+\.\w+)\s*(?:\*\/|-->)?\s*$/i);
         if (match && match[1]) return match[1];
     }
     const classMatch = code.match(/(?:public\s+)?(?:class|struct|interface)\s+([a-zA-Z0-9_]+)/);
@@ -1148,8 +1162,12 @@ window.downloadCode = (btn, ext) => {
                                 }
                             }
                         } else if (event.type === "action_result") {
-                            
-                            currentResponseText += "\n\n<action_result>" + event.content + "</action_result>";
+                            const isInsideThink = currentResponseText.lastIndexOf("<think>") > currentResponseText.lastIndexOf("</think>");
+                            if (isInsideThink) {
+                                currentResponseText += "\n</think>\n\n<action_result>" + event.content + "</action_result>\n\n<think>\n";
+                            } else {
+                                currentResponseText += "\n\n<action_result>" + event.content + "</action_result>";
+                            }
                             scheduleRender();
                         } else if (event.type === "clear") {
                             if (renderTimer !== null) {
@@ -1187,7 +1205,13 @@ window.downloadCode = (btn, ext) => {
             setGeneratingState(false);
             if (!firstTokenReceived) {
                 removeTypingIndicator();
-                aiMessageDiv.style.display = "";
+                if (currentResponseText.trim() !== '') {
+                    aiMessageDiv.style.display = "";
+                } else {
+                    currentResponseText = "> **System Notification**: Server closed connection without sending any response.";
+                    aiMessageDiv.style.display = "";
+                    aiContentDiv.innerHTML = formatMessage(currentResponseText);
+                }
             }
             
             // Clean up currentResponseText before saving to prevent corrupting the LLM context

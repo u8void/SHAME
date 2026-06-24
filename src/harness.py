@@ -243,25 +243,6 @@ def normalize_header(text: str, language: str='python') -> Tuple[str, List[str]]
         lines.insert(0, '#!/usr/bin/env bash')
         warnings.append('Header: added #!/usr/bin/env bash')
     return ('\n'.join(lines), warnings)
-_PASSES = [('normalize_fences', normalize_fences), ('redact_secrets', redact_secrets), ('repair_truncation', repair_truncation), ('inject_imports', inject_imports), ('normalize_header', normalize_header), ('deduplicate_blocks', deduplicate_blocks), ('clean_whitespace', clean_whitespace)]
-_OPTIONAL_PASSES = {'strip_comments': strip_comments}  
-
-def apply_all(text: str, language: str='python', enabled: Optional[List[str]]=None) -> Tuple[str, List[dict]]:
-    all_warnings: List[dict] = []
-    for name, func in _PASSES:
-        if enabled and name not in enabled:
-            continue
-        try:
-            text, warns = func(text, language)
-            for w in warns:
-                all_warnings.append({'type': 'harness_warning', 'content': w})
-        except Exception:
-            pass
-    return (text, all_warnings)
-
-def apply_code_specific(text: str, language: str='python') -> Tuple[str, List[dict]]:
-    return apply_all(text, language)
-
 def _is_math_output(text: str) -> bool:
     math_signals = ['\\$\\$.*\\$\\$', '\\$[^$]+\\$', '\\\\frac\\{', '\\\\sum_', '\\\\int_', '\\\\lim_', '\\\\sqrt\\{', '\\\\cdot\\b', '\\\\times\\b', '\\\\alpha\\b', '\\\\beta\\b', '\\\\theta\\b', '\\\\pi\\b', '\\\\infty\\b', '\\\\partial\\b', '\\\\nabla\\b', '\\\\forall\\b', '\\\\exists\\b', '\\\\implies?\\b', '\\\\mathbb\\{', '\\\\mathcal\\{', '\\\\mathbf\\{', '\\\\longrightarrow\\b', 'd/d[xX]\\b', '∫', '∂', '∑', '∏', '√', '∞']
     return any((re.search(sig, text) for sig in math_signals))
@@ -277,6 +258,10 @@ def normalize_math_fences(text: str, language: str='') -> Tuple[str, List[str]]:
         text = re.sub('(?<!\\\\)_(?!_)(\\w+)', '$_{\\1}$', text)
     text = re.sub('\\\\frac(\\d)(\\d)', '\\\\frac{\\1}{\\2}', text)
     text = re.sub('\\\\frac(\\w)(\\w)', '\\\\frac{\\1}{\\2}', text)
+    
+    text = re.sub(r'\b([a-zA-Z]\s*=\s*[-0-9\.]+)\s*\$', r'$\1$', text)
+    text = re.sub(r'(\\(?:cos|sin|tan|log|ln|exp|sec|csc|cot)\s*\([^)]+\))\s*\$', r'\1', text)
+    text = re.sub(r'(?<!\$)(?<!\\)(-\s*)?(\\(?:cos|sin|tan|log|ln|exp|sec|csc|cot)\s*\([^)]+\))(?!\$)', r'$\1\2$', text)
     if text != original:
         warnings.append('Math: normalized LaTeX formatting')
     return (text, warnings)
@@ -369,6 +354,25 @@ def separate_math_code_blocks(text: str, language: str='') -> Tuple[str, List[st
         warnings.append('Math: code snippets detected without fence blocks')
     return (text, warnings)
 _MATH_PASSES = [('normalize_math_fences', normalize_math_fences), ('deduplicate_math_steps', deduplicate_math_steps), ('normalize_math_notation', normalize_math_notation), ('normalize_math_steps', normalize_math_steps), ('redact_hallucinated_refs', redact_hallucinated_refs), ('separate_math_code_blocks', separate_math_code_blocks), ('extract_math_answer', extract_math_answer), ('clean_whitespace', clean_whitespace)]
+
+_PASSES = [('normalize_fences', normalize_fences), ('normalize_math_fences', normalize_math_fences), ('redact_secrets', redact_secrets), ('repair_truncation', repair_truncation), ('inject_imports', inject_imports), ('normalize_header', normalize_header), ('deduplicate_blocks', deduplicate_blocks), ('clean_whitespace', clean_whitespace)]
+_OPTIONAL_PASSES = {'strip_comments': strip_comments}  
+
+def apply_all(text: str, language: str='python', enabled: Optional[List[str]]=None) -> Tuple[str, List[dict]]:
+    all_warnings: List[dict] = []
+    for name, func in _PASSES:
+        if enabled and name not in enabled:
+            continue
+        try:
+            text, warns = func(text, language)
+            for w in warns:
+                all_warnings.append({'type': 'harness_warning', 'content': w})
+        except Exception:
+            pass
+    return (text, all_warnings)
+
+def apply_code_specific(text: str, language: str='python') -> Tuple[str, List[dict]]:
+    return apply_all(text, language)
 
 def apply_math(text: str, language: str='') -> Tuple[str, List[dict]]:
     all_warnings: List[dict] = []

@@ -990,8 +990,16 @@ def classify_task(
     minimized = _minimize_history(history, max_entries=2)
     triage_messages = [{"role": "system", "content": TRIAGE_SYSTEM_PROMPT}]
     for msg in minimized:
-        triage_messages.append({"role": msg["role"], "content": msg["content"]})
-    triage_messages.append({"role": "user", "content": user_query + _language_directive(user_query)})
+        c = msg["content"]
+        if len(c) > 150:
+            c = c[:150] + "...[truncated]"
+        triage_messages.append({"role": msg["role"], "content": c})
+
+    triage_query = query_for_classification
+    if len(triage_query) > 1500:
+        triage_query = triage_query[:1000] + "\n\n...[content truncated for routing]...\n\n" + triage_query[-500:]
+    
+    triage_messages.append({"role": "user", "content": triage_query + _language_directive(triage_query)})
 
     llm = load_model(ModelRole.TRIAGE)
     res = llm.create_chat_completion(
@@ -1698,6 +1706,8 @@ def ask_stream(
         context = retriever.retrieve(user_query, top_k=3, category=rag_cats.get(task_type, "general"))
 
     final_query = user_query
+    if context:
+        final_query = f"[RETRIEVED CONTEXT]\n{context}\n[END RETRIEVED CONTEXT]\n\n{final_query}"
     if web_context and "(No web results found" not in web_context and "Web search unavailable" not in web_context:
         final_query = (
             f"[WEB SEARCH RESULTS]\n{web_context}\n[END WEB SEARCH RESULTS]\n\n"
@@ -1749,7 +1759,11 @@ def ask_stream(
                 full += ev["content"]
         if not _keep_loaded:
             unload_model()
-        yield {"type": "raw_response", "content": full}
+        cleaned = _quality_guard(full)
+        if cleaned != full:
+            yield {"type": "clear"}
+            yield {"type": "token", "content": cleaned}
+        yield {"type": "raw_response", "content": cleaned}
 
     elif task_type == TaskType.MATH:
         yield {"type": "status", "content": "Solving..."}
@@ -1912,9 +1926,9 @@ def _language_directive(user_query: str) -> str:
     if not lang:
         return ""
     return (
-        f"\n\nIMPORTANT: The user's message is written in {lang}. "
+        f"\n\n[SYSTEM DIRECTIVE: The user's message is written in {lang}. "
         f"You MUST write your ENTIRE response — including any <think> reasoning — "
-        f"in {lang} only. Do not switch to any other language."
+        f"in {lang} only. Do not switch to any other language.]"
     )
 
 
@@ -2807,37 +2821,40 @@ def _load_vision_model():
         clip_path = os.path.join(models_dir, clip_file)
 
         if os.path.exists(vision_path):
-            logger.info(f"[Vision] Loading GGUF vision model: {vision_file}...")
-            try:
-                n_gpu_layers = cfg.get("n_gpu_layers", -1)
-                n_threads = cfg.get("n_threads", 8)
-                
-                chat_handler = None
-                if clip_file and os.path.exists(clip_path):
-                    logger.info(f"[Vision] Found clip projector: {clip_file}")
-                    from llama_cpp.llama_chat_format import Llava15ChatHandler
-                    chat_handler = Llava15ChatHandler(clip_model_path=clip_path, verbose=False)
-                
-                
-                model_kwargs = {
-                    "model_path": vision_path,
-                    "n_ctx": ROLE_CTX.get(ModelRole.VISION, 4096),
-                    "n_gpu_layers": n_gpu_layers,
-                    "n_threads": n_threads,
-                    "flash_attn": True,
-                    "type_k": getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
-                    "type_v": getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
-                    "verbose": False,
-                }
-                if chat_handler:
-                    model_kwargs["chat_handler"] = chat_handler
+            if "Qwen2.5-VL" in vision_file:
+                logger.info("[Vision] Qwen2.5-VL GGUF projector is known to fail in llama.cpp. Forcing MLX backend.")
+            else:
+                logger.info(f"[Vision] Loading GGUF vision model: {vision_file}...")
+                try:
+                    n_gpu_layers = cfg.get("n_gpu_layers", -1)
+                    n_threads = cfg.get("n_threads", 8)
                     
-                model = Llama(**model_kwargs)
-                _vision_cache = {"model": model, "backend": "gguf"}
-                logger.info("[Vision] GGUF vision model ready.")
-                return _vision_cache
-            except Exception as e:
-                logger.info(f"[Vision] GGUF VLM load failed: {e}. Falling back to MLX...")
+                    chat_handler = None
+                    if clip_file and os.path.exists(clip_path):
+                        logger.info(f"[Vision] Found clip projector: {clip_file}")
+                        from llama_cpp.llama_chat_format import Llava15ChatHandler
+                        chat_handler = Llava15ChatHandler(clip_model_path=clip_path, verbose=False)
+                    
+                    
+                    model_kwargs = {
+                        "model_path": vision_path,
+                        "n_ctx": ROLE_CTX.get(ModelRole.VISION, 4096),
+                        "n_gpu_layers": n_gpu_layers,
+                        "n_threads": n_threads,
+                        "flash_attn": True,
+                        "type_k": getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
+                        "type_v": getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
+                        "verbose": False,
+                    }
+                    if chat_handler:
+                        model_kwargs["chat_handler"] = chat_handler
+                        
+                    model = Llama(**model_kwargs)
+                    _vision_cache = {"model": model, "backend": "gguf"}
+                    logger.info("[Vision] GGUF vision model ready.")
+                    return _vision_cache
+                except Exception as e:
+                    logger.info(f"[Vision] GGUF VLM load failed: {e}. Falling back to MLX...")
         try:
             from mlx_vlm import load as vlm_load
             from mlx_vlm.utils import load_config as vlm_load_config
@@ -2854,6 +2871,11 @@ def _load_vision_model():
                         mlx_repo = size_vision
             except Exception:
                 pass
+
+            if mlx_repo == "Qwen/Qwen2.5-VL-3B-Instruct":
+                mlx_repo = "mlx-community/Qwen2.5-VL-3B-Instruct-4bit"
+            elif mlx_repo == "Qwen/Qwen2.5-VL-7B-Instruct":
+                mlx_repo = "mlx-community/Qwen2.5-VL-7B-Instruct-4bit"
 
             if os.path.exists(_MLX_VISION_ID):
                 mlx_repo = _MLX_VISION_ID

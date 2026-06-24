@@ -906,8 +906,14 @@ class GRPODataset(Dataset):
             if i >= max_samples:
                 break
             
-            if prompt_field in item:
+            if prompt_field and prompt_field in item:
                 prompt = item[prompt_field]
+                if prompt_field == "instruction" and "input" in item and item["input"] and str(item["input"]).strip():
+                    prompt = prompt + "\n\n" + str(item["input"]).strip()
+            elif "instruction" in item:
+                prompt = item["instruction"]
+                if "input" in item and item["input"] and str(item["input"]).strip():
+                    prompt = prompt + "\n\n" + str(item["input"]).strip()
             elif "question" in item:
                 prompt = item["question"]
             elif "text" in item:
@@ -979,9 +985,9 @@ def train_with_grpo(
     else:
         
         role_datasets = {
-            "code":      "m-a-p/CodeFeedback-Filtered-Instruction",
+            "code":      "WithinUsAI/claude_mythos_distilled_25k",
             "math":      "EleutherAI/hendrycks_math",
-            "reasoning": "teknium/OpenHermes-2.5",
+            "reasoning": "attentionAllYouNeed/Vibe-Coding-Claude-Fable-5",
             "general":   "teknium/OpenHermes-2.5",
         }
         ds_name = role_datasets.get(role, "teknium/OpenHermes-2.5")

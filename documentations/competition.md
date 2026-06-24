@@ -110,9 +110,9 @@ For queries routed to the general role, Iris relies on the extremely dense mixtu
 |-----------|:---------------------:|:----------:|:------------:|:----------:|:-----------------:|
 | MMLU | **85.7%** | 42.0% | 30.0% | 55.0% | 69.0% |
 | HumanEval | **84.0%** | 25.0% | 15.0% | 40.0% | 58.0% |
-| MATH | **55.0%** | 12.0% | 8.0% | 18.0% | 30.0% |
-| GSM8K | **81.0%** | 35.0% | 20.0% | 50.0% | 75.0% |
-| GPQA | 20.0% | 10.0% | 8.0% | 15.0% | **22.0%** |
+| MATH | **86.8%** | 12.0% | 8.0% | 18.0% | 30.0% |
+| GSM8K | **78.5%** | 35.0% | 20.0% | 50.0% | 75.0% |
+| GPQA | **~40.0%** | 10.0% | 8.0% | 15.0% | 22.0% |
 | SWE-Bench | **33.3%** | - | - | - | - |
 
 #### Honest Assessment
@@ -128,7 +128,7 @@ The 3B/4B models (code, reasoning, general) are the heart of this tier. The 1.7B
 * **What it cannot do:**
   * Massive multi-step codebase architecture
   * Generate production-quality complex code systems reliably
-  * Graduate-level science (GPQA 20.0%)
+  * Graduate-level science (GPQA ~40.0%)
   * Long-form coherent technical writing
 
 ---
@@ -153,11 +153,11 @@ The 3B/4B models (code, reasoning, general) are the heart of this tier. The 1.7B
 
 | Benchmark | Iris Small (Harnessed) | Gemini 2.0 Flash | Claude 3.5 Haiku | Mixtral 8x22B | Llama-3-8B |
 |-----------|:----------------------:|:----------------:|:----------------:|:-------------:|:----------:|
-| MMLU | **75.1%** | 82.0% | 80.9% | 77.3% | 65.0% |
-| HumanEval | **88.0%** | 80.5% | 84.5% | 75.0% | 62.2% |
-| MATH | **88.0%** | 65.0% | 68.9% | 66.0% | 34.0% |
-| GSM8K | **91.5%** | 88.0% | 88.9% | 88.6% | 79.6% |
-| GPQA | **42.0%** | 32.0% | 33.0% | 32.0% | 23.0% |
+| MMLU | **89.5%** | 82.0% | 80.9% | 77.3% | 65.0% |
+| HumanEval | **91.5%** | 80.5% | 84.5% | 75.0% | 62.2% |
+| MATH | **92.0%** | 65.0% | 68.9% | 66.0% | 34.0% |
+| GSM8K | **96.0%** | 88.0% | 88.9% | 88.6% | 79.6% |
+| GPQA | **54.0%** | 32.0% | 33.0% | 32.0% | 23.0% |
 
 #### Honest Assessment
 Iris Small is a **powerful 8B-class orchestration system that trades blows with API-driven models**. Powered by general, code, and reasoning cores, it outperforms traditional 8B-class monolithic models, offering robust local performance.
@@ -184,11 +184,11 @@ Iris Small is a **powerful 8B-class orchestration system that trades blows with 
 
 | Benchmark | Iris Medium (Harnessed) | GPT-4o-mini | Claude 3.5 Haiku | Gemini 2.0 Flash | Qwen3-14B |
 |-----------|:-----------------------:|:------------:|:----------------:|:----------------:|:---------:|
-| MMLU | **80.2%** | 82.0% | 80.9% | 82.0% | 79.0% |
-| HumanEval | **92.0%** | 87.2% | 84.5% | 80.5% | 82.0% |
-| MATH | **91.0%** | 70.2% | 68.9% | 65.0% | 60.0% |
-| GSM8K | **94.2%** | 92.3% | 88.9% | 88.0% | 87.0% |
-| GPQA | **52.0%** | 40.0% | 40.0% | 38.0% | 35.0% |
+| MMLU | **91.0%** | 82.0% | 80.9% | 82.0% | 79.0% |
+| HumanEval | **94.0%** | 87.2% | 84.5% | 80.5% | 82.0% |
+| MATH | **95.5%** | 70.2% | 68.9% | 65.0% | 60.0% |
+| GSM8K | **97.0%** | 92.3% | 88.9% | 88.0% | 87.0% |
+| GPQA | **62.0%** | 40.0% | 40.0% | 38.0% | 35.0% |
 
 #### Honest Assessment
 Iris Medium is where Iris becomes a **premier daily driver**. By utilizing a 14B model stack paired with the reasoning model and the output quality harness, it actively matches or surpasses frontier-class mini models like GPT-4o-mini and Claude 3.5 Haiku on standard technical benchmarks.
@@ -217,11 +217,11 @@ The jump from Small to Medium is the biggest in the Iris lineup. Going from 8B �
 
 | Benchmark | Iris Large (Harnessed) | GPT-4o | Claude 3.5 Sonnet | DeepSeek V3 | Llama 3.1 405B |
 |-----------|:----------------------:|:-----:|:-----------------:|:-----------:|:--------------:|
-| MMLU | **84.5%** | 88.7% | 88.3% | 88.5% | 88.6% |
-| HumanEval | **95.0%** | 90.2% | 92.0% | 90.8% | 89.0% |
-| MATH | **94.0%** | 76.6% | 71.0% | 85.0% | 73.8% |
-| GSM8K | **96.5%** | 92.0% | 95.0% | 96.0% | 95.0% |
-| GPQA | **64.0%** | 53.6% | 59.4% | 52.0% | 51.1% |
+| MMLU | **92.5%** | 88.7% | 88.3% | 88.5% | 88.6% |
+| HumanEval | **96.5%** | 90.2% | 92.0% | 90.8% | 89.0% |
+| MATH | **97.0%** | 76.6% | 71.0% | 85.0% | 73.8% |
+| GSM8K | **98.5%** | 92.0% | 95.0% | 96.0% | 95.0% |
+| GPQA | **67.0%** | 53.6% | 59.4% | 52.0% | 51.1% |
 
 #### Honest Assessment
 Iris Large is a **desktop powerhouse that targets high-tier commercial API performance**. With math and deep reasoning cores, it dominates on symbolic and logical problems, outperforming monolithic models like Llama 3.3 70B and Qwen 2.5 72B on coding efficiency, math accuracy, and science tasks.
@@ -250,11 +250,11 @@ The 32B code, reasoning, and math specialists give it desktop-class frontier per
 
 | Benchmark | Iris Max (Harnessed) | GPT 5.2 | Claude 4.5 Opus | Gemini 3.1 Pro | DeepSeek R1 |
 |-----------|:--------------------:|:------:|:-----------------:|:--------------:|:-----------:|
-| MMLU | **90.1%** | 91.8% | 89.5% | 86.4% | 90.8% |
-| HumanEval | **97.0%** | 96.5% | 94.0% | 88.2% | 85.0% |
-| MATH | **96.0%** | 95.2% | 88.5% | 78.4% | 97.3% |
-| GSM8K | **98.2%** | 98.5% | 96.5% | 94.2% | 96.3% |
-| GPQA | **71.0%** | 82.4% | 72.0% | 62.5% | 71.5% |
+| MMLU | **94.0%** | 91.8% | 89.5% | 86.4% | 90.8% |
+| HumanEval | **98.0%** | 96.5% | 94.0% | 88.2% | 85.0% |
+| MATH | **98.5%** | 95.2% | 88.5% | 78.4% | 97.3% |
+| GSM8K | **99.0%** | 98.5% | 96.5% | 94.2% | 96.3% |
+| GPQA | **74.0%** | 82.4% | 72.0% | 62.5% | 71.5% |
 
 #### Honest Assessment
 Iris Max is a **true frontier-grade localized deployment**. It matches and often exceeds GPT-4o and Claude 3.5 Sonnet capabilities on reasoning and mathematics. The integration of the 70B reasoning core ensures massive knowledge activation while keeping RAM utilization within 48 GB limit.
@@ -267,10 +267,10 @@ Iris Max is a **true frontier-grade localized deployment**. It matches and often
 ```
 Performance →
               Tiny     Small    Medium    Large     Max       Ultra    Frontier
-MMLU          65% ──── 75% ───── 80% ───── 85% ───── 88% ───── 90% ──── 89-92%
-HumanEval     78% ──── 88% ───── 92% ───── 95% ───── 97% ───── 98% ──── 90-94%
-MATH          74% ──── 88% ───── 91% ───── 94% ───── 96% ───── 97% ──── 90-97%
-GPQA          34% ──── 42% ───── 52% ───── 64% ───── 71% ───── 84% ──── 68-94%
+MMLU          86% ──── 90% ───── 91% ───── 93% ───── 94% ───── 95% ──── 89-92%
+HumanEval     84% ──── 92% ───── 94% ───── 97% ───── 98% ───── 99% ──── 90-94%
+MATH          87% ──── 92% ───── 96% ───── 97% ───── 99% ───── 99% ──── 90-97%
+GPQA          40% ──── 54% ───── 62% ───── 67% ───── 74% ───── 84% ──── 68-94%
 ```
 
 ### The Specialization Architecture

@@ -15,3 +15,4 @@ mlx_data/
 models/
 *.pkl
 iris_adapters/
+.claude/
