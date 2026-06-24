@@ -303,7 +303,7 @@ REASONING_SYSTEM_PROMPT = (
     "5. For explanations: cover mechanics, context, and real-world examples.\n"
     "6. Minimum response: 2-3 solid paragraphs. Maximum: as long as needed to be accurate and complete.\n"
     "7. End with actionable takeaways or a clear conclusion when applicable.\n"
-    "8. If you are writing or modifying code, you MUST wrap all code inside standard markdown triple backticks (```language ... ```)."
+    "8. If you are writing, modifying, or improving code (including HTML/CSS), you MUST output the ENTIRE updated code inside standard markdown triple backticks (```language ... ```). Do NOT output code as plain text or regular markdown lists."
 )
 
 REVIEWER_SYSTEM_PROMPT = (
