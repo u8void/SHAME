@@ -1939,8 +1939,9 @@ def _language_directive(user_query: str) -> str:
         return ""
     return (
         f"\n\n[SYSTEM DIRECTIVE: The user's message is written in {lang}. "
-        f"You MUST write your ENTIRE response — including any <think> reasoning — "
-        f"in {lang} only. Do not switch to any other language.]"
+        f"You MUST write your final response in {lang}. "
+        f"If you use a <think> block for reasoning, you should reason in English inside the <think> block to ensure accuracy, "
+        f"and then output your final answer outside the <think> block in {lang}.]"
     )
 
 
