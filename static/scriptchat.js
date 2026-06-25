@@ -462,13 +462,16 @@ function renderChatList(query = '') {
         });
 
         // 2. Extract Think Block (Internal)
+        let hasThought = false;
         work = work.replace(/(?:<think>|<\|thought_start\|>|<thought>)([\s\S]*?)(?:<\/think>|<\|thought_end\|>|<\/thought>|$)/gi, (match, p1) => {
             const content = p1.trim();
             if (!content) return ''; 
+            if (hasThought) return '';
 
             const isClosed = /(?:<\/think>|<\|thought_end\|>|<\/thought>)$/i.test(match);
             const id = `@@@THOUGHT_${blocks.length}@@@`;
             blocks.push({ type: 'thought', content: content, isClosed: isClosed });
+            hasThought = true;
             return id;
         });
 
