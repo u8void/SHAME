@@ -191,7 +191,7 @@ _MODEL_SOURCES: Dict[str, list] = {
 
 
 ROLE_CTX: Dict[ModelRole, int] = {
-    ModelRole.TRIAGE:    1024,   
+    ModelRole.TRIAGE:    4096,   
     ModelRole.ROUTER:    1024,
     ModelRole.CONTROL:   8192,
     ModelRole.MATH:      4096,
@@ -238,9 +238,13 @@ TRIAGE_SYSTEM_PROMPT = (
     "- If the user asks to 'solve in c++', 'write a script', 'create a website', 'write html/css', pastes a traceback, error log, or a large algorithmic problem description, you MUST route to [ROUTE: CODE_SIMPLE], [ROUTE: CODE_COMPLEX], or [ROUTE: MATH].\n"
     "- For ANY programming error, Python traceback, compilation error, or debugging request, you MUST route to [ROUTE: CODE_COMPLEX]. Do NOT route tracebacks to MATH.\n"
     "- OVERRIDE RULE: If the prompt contains 'build a landing page', 'HTML', or 'Tailwind', you MUST choose [ROUTE: CODE_COMPLEX]. Do not choose [ROUTE: CONTROL] even if the website design mentions mock terminal commands.\n"
-    "- NEVER use [ROUTE: SEARCH] for programming problems, competitive programming questions, or large blocks of text.\n\n"
+    "- NEVER use [ROUTE: SEARCH] for programming problems, competitive programming questions, or large blocks of text.\n"
+    "- LETTER/WORD INTROSPECTION RULE (HIGHEST PRIORITY): If the user asks how many of a letter appear in a word or name (e.g. 'how many r in strawberry', 'how many a in Ahmed'), or asks to count characters/vowels/consonants, or asks about spelling of a word — this is ALWAYS [ROUTE: REASONING]. NEVER route these to SEARCH.\n\n"
     "EXAMPLES:\n"
     "User: what is the capital of France → [ROUTE: SEARCH: capital of France]\n"
+    "User: how many r in strawberry → [ROUTE: REASONING]\n"
+    "User: how many a in Ahmed → [ROUTE: REASONING]\n"
+    "User: count the vowels in elephant → [ROUTE: REASONING]\n"
     "User: explain how photosynthesis works → [ROUTE: REASONING]\n"
     "User: write a python hello world → [ROUTE: CODE_SIMPLE]\n"
     "User: create a tailwind css landing page → [ROUTE: CODE_COMPLEX]\n"
@@ -278,6 +282,10 @@ CODE_SYSTEM_PROMPT = (
     "If you are writing or modifying code, you MUST wrap all code inside standard markdown triple backticks (```language ... ```). "
     "CRITICAL: If you write a code block, the very first line inside the code block MUST be a comment containing ONLY the intended filename (e.g. // main.cpp or # app.py). "
     "Do NOT include explanatory comments inside the code block other than the filename. "
+    "ANTI-POLLUTION RULE (ABSOLUTE): Previous conversation messages may contain LaTeX or math notation from prior turns "
+    "(e.g. \\boxed{}, $...$, $$...$$, _{...}, ^{...}). You MUST NEVER use this syntax inside code. "
+    "All identifiers, function names, and variable names must be plain ASCII (letters, digits, underscores only). "
+    "For example, NEVER write `def convert$_{temps}$(x)` — write `def convert_temps(x)` instead. "
     "Do NOT use LaTeX or MathJax formatting (like $...$ or _{...}) for variable names or identifiers inside code blocks. Code must be syntactically valid plain text. "
     "WEB DESIGN RULE: If the user asks for a website or web app, you MUST prioritize extreme visual excellence. "
     "Do NOT output generic or basic UI. You must use modern, premium aesthetics (e.g., highly polished dark modes, vibrant curated colors, glassmorphism, fluid typography, smooth CSS micro-animations, hover effects, and Tailwind CSS if appropriate). "
@@ -290,7 +298,10 @@ MATH_SYSTEM_PROMPT = (
     f"{IRIS_IDENTITY}\n"
     "You are the Iris AI Math Core. Solve mathematical/algorithmic problems step-by-step. "
     "Use precise notation. Please reason step by step, and put your final answer within \\boxed{}. "
-    "If your solution includes writing code (like Python or C++), DO NOT use LaTeX or MathJax formatting (like $...$ or _{...}) inside the code block. Variable names must be plain text."
+    "ANTI-POLLUTION RULE: If your solution requires writing code (like Python or C++), "
+    "DO NOT use LaTeX or MathJax formatting (like $...$ or _{...}) inside the code block. "
+    "Variable names and function names inside code must be plain ASCII identifiers only. "
+    "LaTeX notation (\\boxed{}, $...$) is ONLY for the mathematical explanation text outside code blocks."
 )
 
 REASONING_SYSTEM_PROMPT = (
@@ -298,6 +309,17 @@ REASONING_SYSTEM_PROMPT = (
     "You are the Iris AI Reasoning Specialist. Think step-by-step using chain-of-thought reasoning. "
     "Break down complex problems methodically before giving the final answer. "
     "You MUST ALWAYS wrap your internal thought process inside <think>...</think> tags before providing your final answer.\n"
+    "COMPLETENESS ENFORCEMENT (ABSOLUTE RULE — OVERRIDES ALL OTHER RULES):\n"
+    "- Your response outside the <think> block MUST be a full, complete answer to the user's request. "
+    "It is NEVER acceptable to output only a short closing phrase like 'The final answer is:', 'Routing Complete.', or 'Done.' "
+    "without the actual explanation. Even if the user imposed a hard stylistic constraint (e.g., 'do not use the letter e'), "
+    "you MUST still attempt the full explanation and satisfy the constraint as best you can. "
+    "A response that bypasses the primary task to satisfy a stylistic rule is a FAILURE.\n"
+    "LETTER/CHARACTER COUNTING RULE (HIGHEST PRIORITY):\n"
+    "- If asked how many times a letter appears in a word or name (e.g. 'how many r in strawberry', 'how many a in Ahmed'), "
+    "you MUST go through the word letter by letter inside <think> tags, listing each position. "
+    "Count ONLY the letters in the exact word given. Do NOT search the web. Do NOT bring up other people or names. "
+    "Example: 'how many a in Ahmad' → A-h-m-a-d: positions 1 and 4 are 'a' (case-insensitive) → answer is 2.\n"
     "ACCURACY RULES (HIGHEST PRIORITY):\n"
     "1. NEVER invent facts, statistics, names, dates, or specific details you are not certain about. "
     "If you do not know something, say 'I'm not certain, but...' or 'Based on my training data...' clearly.\n"
@@ -1009,7 +1031,7 @@ def classify_task(
     if len(triage_query) > 1500:
         triage_query = triage_query[:1000] + "\n\n...[content truncated for routing]...\n\n" + triage_query[-500:]
     
-    triage_messages.append({"role": "user", "content": triage_query + _language_directive(triage_query)})
+    triage_messages.append({"role": "user", "content": triage_query})
 
     llm = load_model(ModelRole.TRIAGE)
     res = llm.create_chat_completion(
@@ -1046,8 +1068,18 @@ def classify_task(
     if answer:
         answer_words = len(answer.split())
         
+        GREETING_PATTERNS = re.compile(
+            r'^(hi|hey|hello|howdy|greetings|yo|sup|good\s*(morning|afternoon|evening|day|night)|'
+            r'welcome|hiya|what\'?s?\s*up|how\s*are\s*you|nice\s*to\s*meet|'
+            r'i\'m\s+iris|i\s+am\s+iris|iris\s+here|i\'m\s+an?\s+ai)',
+            re.IGNORECASE
+        )
         is_greeting_reply = (
-            answer_words <= 25
+            answer_words <= 30
+            and (
+                GREETING_PATTERNS.search(answer)
+                or (answer_words <= 6 and not re.search(r'\b(how\s+many|count|letter|spell|number)\b', answer, re.IGNORECASE))
+            )
             and not re.search(
                 r'\b(is|are|was|were|has|have|had|will|would|can|could|do|does|did|because|therefore|however)\b',
                 answer, re.IGNORECASE
@@ -1055,7 +1087,7 @@ def classify_task(
         )
         if is_greeting_reply:
             return None, answer
-        
+
         logger.info(
             f"[Triage] No routing tag — redirecting to REASONING to prevent hallucination. "
             f"Triage said: {answer[:80]}..."
@@ -1067,6 +1099,23 @@ def classify_task(
 
 
 def _quality_guard(text: str) -> str:
+    # Scrub LaTeX/math syntax that polluted code blocks at generation time
+    def _scrub_latex_in_code(m: re.Match) -> str:
+        block = m.group(0)
+        block = re.sub(r'\$([^$\n]*)\$', r'\1', block)
+        block = re.sub(r'\$\$[\s\S]*?\$\$', '', block)
+        block = re.sub(r'(def |class )([\w$\\{}_^]+)', lambda mm: mm.group(1) + re.sub(r'[\\${}^]|_(?=\{)', '_', mm.group(2)).strip('_'), block)
+        block = re.sub(r'\\(?:boxed|frac|sqrt|text|mathrm|left|right)\{[^}]*\}', '', block)
+        return block
+
+    text = re.sub(r'```[\s\S]*?```', _scrub_latex_in_code, text)
+
+    text = re.sub(
+        r"\\boxed{((?:[^{}]|{[^{}]*})*)}" ,
+        r'<span style="border: 2px solid #4CAF50; padding: 2px 6px; border-radius: 4px; font-weight: bold; background-color: rgba(76, 175, 80, 0.1);">\1</span>',
+        text
+    )
+
     text = re.sub(
         r"(?i)(I('m| am) (DeepSeek|Qwen|Intern|Hermes|a large language model|an AI language model)"
         r"[^.]*\.?\s*)",
@@ -1077,16 +1126,16 @@ def _quality_guard(text: str) -> str:
         if open_tag in text:
             has_close = close_tag in text
             is_at_end = text.strip().endswith(close_tag)
-            
+
             if not has_close or is_at_end:
                 if has_close:
                     text = text.replace(close_tag, "")
-                    
+
                 if "\n\n" in text:
                     parts = text.rsplit("\n\n", 1)
                 else:
                     parts = text.rsplit("\n", 1)
-                    
+
                 if len(parts) > 1 and parts[1].strip():
                     thought = parts[0]
                     actual = parts[1]
@@ -1098,10 +1147,12 @@ def _quality_guard(text: str) -> str:
 
 
 
+
+
 def _stream_tokens(
     role: ModelRole,
     messages: List[Dict[str, str]],
-    max_tokens: int = 512,
+    max_tokens: int = 0,
     temperature: float = 0.7,
     think_mode: str = "pass",
     system_prompt_override: Optional[str] = None,
@@ -1124,16 +1175,59 @@ def _stream_tokens(
         return
 
     sys_prompt = system_prompt_override if system_prompt_override is not None else _system_prompt_for(role)
+    if role not in (ModelRole.TRIAGE, ModelRole.ROUTER) and messages and messages[-1]["role"] == "user":
+        sys_prompt += _language_directive(messages[-1]["content"])
+
+    # --- History Sanitization: strip bleed-causing artifacts per agent role ---
+    def _sanitize_for_role(msgs: List[Dict[str, str]], target_role: ModelRole) -> List[Dict[str, str]]:
+        clean = []
+        for m in msgs:
+            content = m.get("content", "")
+            role_tag = m.get("role", "user")
+            # Always strip <think> blocks from history (they belong inside one turn only)
+            content = re.sub(r'<think>[\s\S]*?</think>', '', content, flags=re.IGNORECASE).strip()
+            content = re.sub(r'<\|thought_start\|>[\s\S]*?<\|thought_end\|>', '', content, flags=re.IGNORECASE).strip()
+            content = re.sub(r'<thought>[\s\S]*?</thought>', '', content, flags=re.IGNORECASE).strip()
+            # Always strip leaked [SYSTEM DIRECTIVE: ...] text injected into previous messages
+            content = re.sub(r'\[SYSTEM DIRECTIVE:[^\]]*\]', '', content).strip()
+            # Always strip "System Instructions:\n..." injected by previous turns
+            content = re.sub(r'^System Instructions:\n.*?\n\nUser Query:\n', '', content, flags=re.DOTALL).strip()
+            if target_role == ModelRole.CODE:
+                # Strip LaTeX/math from history when feeding CODE agent (prevents syntax pollution)
+                content = re.sub(r'\\boxed\{[^}]*\}', '', content)
+                content = re.sub(r'\$\$[\s\S]*?\$\$', '', content)
+                content = re.sub(r'\$[^$\n]+\$', '', content)
+            elif target_role in (ModelRole.REASONING, ModelRole.GENERAL, ModelRole.MATH):
+                # Compress long code blocks from history to avoid CODE-mode bleed into text agents
+                def _compress_code(m):
+                    lines = m.group(0).count('\n')
+                    if lines > 10:
+                        lang = m.group(0).split('\n')[0].replace('```', '').strip()
+                        return f'```{lang}\n[{lines}-line code block from previous turn — omitted]\n```'
+                    return m.group(0)
+                content = re.sub(r'```[\s\S]*?```', _compress_code, content)
+            if content.strip():
+                clean.append({"role": role_tag, "content": content})
+        return clean
+
+    sanitized_messages = _sanitize_for_role(messages, role)
+
     if role in (ModelRole.REASONING, ModelRole.GENERAL):
-        full_messages = []
-        for m in messages:
-            full_messages.append({"role": m["role"], "content": m["content"]})
-        if full_messages and full_messages[0]["role"] == "user":
-            full_messages[0]["content"] = f"System Instructions:\n{sys_prompt}\n\nUser Query:\n{full_messages[0]['content']}"
+        full_messages = list(sanitized_messages)
+        # Inject system prompt into the LAST (current) user message, not the oldest one
+        last_user_idx = next(
+            (i for i in range(len(full_messages) - 1, -1, -1) if full_messages[i]["role"] == "user"),
+            None
+        )
+        if last_user_idx is not None:
+            full_messages[last_user_idx] = {
+                "role": "user",
+                "content": f"System Instructions:\n{sys_prompt}\n\nUser Query:\n{full_messages[last_user_idx]['content']}"
+            }
         else:
             full_messages = [{"role": "user", "content": f"System Instructions:\n{sys_prompt}"}] + full_messages
     else:
-        full_messages = [{"role": "system", "content": sys_prompt}] + messages
+        full_messages = [{"role": "system", "content": sys_prompt}] + sanitized_messages
 
     cfg = load_generation_config()
     model_cfg = cfg.get("model_settings", {}).get(role.value, {})
@@ -1256,6 +1350,7 @@ def _stream_tokens(
                                     loop_content += buffer[:idx]
                                 in_thinking = True
                                 thinking_tag = tag
+                                loop_content += tag
                                 buffer = buffer[idx + len(tag):]
                                 found = True
                                 break
@@ -1284,6 +1379,7 @@ def _stream_tokens(
                         close_tag = CLOSE_TAG_MAP.get(thinking_tag, "</think>")
                         if close_tag in buffer:
                             idx = buffer.index(close_tag)
+                            loop_content += buffer[:idx] + close_tag
                             in_thinking = False
                             thinking_tag = ""
                             buffer = buffer[idx + len(close_tag):]
@@ -1299,6 +1395,7 @@ def _stream_tokens(
                         if partial:
                             break
                         hidden_buffer += buffer
+                        loop_content += buffer
                         buffer = ""
 
                         if len(hidden_buffer) > 500000:
@@ -1322,6 +1419,7 @@ def _stream_tokens(
                                     loop_content += buffer[:idx]
                                 in_thinking = True
                                 thinking_tag = tag
+                                loop_content += tag
                                 buffer = buffer[idx + len(tag):]
                                 found = True
                                 break
@@ -1353,6 +1451,7 @@ def _stream_tokens(
                             thinking_text = buffer[:idx]
                             if thinking_text.strip():
                                 yield {"type": "thinking", "content": thinking_text}
+                            loop_content += thinking_text + close_tag
                             in_thinking = False
                             thinking_tag = ""
                             buffer = buffer[idx + len(close_tag):]
@@ -1388,6 +1487,7 @@ def _stream_tokens(
                                 yield {"type": "status", "content": "Thinking..."}
                                 in_thinking = True
                                 thinking_tag = tag
+                                loop_content += tag
                                 buffer = buffer[idx + len(tag):]
                                 found = True
                                 break
@@ -1416,6 +1516,7 @@ def _stream_tokens(
                         close_tag = CLOSE_TAG_MAP.get(thinking_tag, "</think>")
                         if close_tag in buffer:
                             idx = buffer.index(close_tag)
+                            loop_content += buffer[:idx] + close_tag
                             in_thinking = False
                             thinking_tag = ""
                             buffer = buffer[idx + len(close_tag):]
@@ -1428,6 +1529,7 @@ def _stream_tokens(
                                 break
                         if partial:
                             break
+                        loop_content += buffer
                         buffer = ""
                         break
 
@@ -1454,14 +1556,15 @@ def _stream_tokens(
             looks_incomplete = False
             prompt_est = sum(len(m.get("content", "")) for m in full_messages) // 4
             if in_thinking:
-                looks_incomplete = True
+                # Model stopped mid-think (forgot to close </think>). Do NOT loop —
+                # synthetically close the tag and treat as complete.
+                close_tag = CLOSE_TAG_MAP.get(thinking_tag, "</think>")
+                synthetic_close = f"\n{close_tag}"
+                yield {"type": "thinking", "content": synthetic_close}
+                loop_content += synthetic_close
+                in_thinking = False
+                # looks_incomplete stays False — we're done
             elif loop_content.count("```") % 2 != 0:
-                looks_incomplete = True
-            elif token_count >= max_tokens - 10:
-                looks_incomplete = True
-            elif hasattr(llm, "n_ctx") and (prompt_est + token_count) >= llm.n_ctx() - 50:
-                looks_incomplete = True
-            elif loop_content.strip() and re.search(r'[a-zA-Z0-9,]$', loop_content.strip()):
                 looks_incomplete = True
             
             logger.debug(f"DEBUG LOOP CONTENT END: {repr(loop_content[-20:])} | Incomplete? {looks_incomplete}")
@@ -1472,6 +1575,13 @@ def _stream_tokens(
         yield {"type": "finish", "reason": finish_reason}
 
         if finish_reason == "length":
+            if role in (ModelRole.REASONING, ModelRole.MATH):
+                # Reasoning models are trained to strictly start with <think>. 
+                # Sending a User message to "Continue" forces them to start a new thought process
+                # from scratch, causing infinite repetition.
+                logger.warning(f"[Stream] Model {role.value} hit length limit. Stopping to prevent repeat-loop.")
+                break
+                
             full_messages.append({"role": "assistant", "content": loop_content})
             full_messages.append({
                 "role": "user",
@@ -1529,7 +1639,7 @@ def ask_stream(
         if context:
             sys_p = f"REFERENCE EXCERPT:\n{context}\n\n{sys_p}"
 
-        optimized = [{"role": "user", "content": user_query + _language_directive(user_query)}]
+        optimized = [{"role": "user", "content": user_query}]
         if history:
             cfg = load_generation_config()
             profile = str(cfg.get("compacting_profile", "medium")).lower()
@@ -1541,7 +1651,8 @@ def ask_stream(
         for ev in _stream_tokens(
             force_role, optimized,
             temperature=0.5 if force_role == ModelRole.REASONING else 0.2,
-            think_mode="show" if force_role in (ModelRole.REASONING, ModelRole.GENERAL) else "hide"
+            think_mode="show" if force_role in (ModelRole.REASONING, ModelRole.GENERAL) else "hide",
+            system_prompt_override=sys_p
         ):
             yield ev
             if ev["type"] == "token":
@@ -1620,6 +1731,22 @@ def ask_stream(
     else:
         yield {"type": "status", "content": "Analyzing query..."}
         task_type, direct_answer = classify_task(user_query, history)
+
+    _INTROSPECTION_RE = re.compile(
+        r'\b(how\s+many|count\s+(the\s+)?|number\s+of\s+|how\s+often|occurrences?\s+of\s+)'
+        r'(letter|character|char|vowel|consonant|digit|syllable|word|repeat|letter\s+[a-z]|[a-z]\s+in\b)',
+        re.IGNORECASE
+    )
+    _SPELL_RE = re.compile(
+        r'\b(spell(ing)?|spell\s+out|how\s+do\s+you\s+spell|is\s+\w+\s+spelled\s+correctly)\b',
+        re.IGNORECASE
+    )
+
+    if task_type == TaskType.SEARCH and (
+        _INTROSPECTION_RE.search(original_query) or _SPELL_RE.search(original_query)
+    ):
+        logger.info("[Routing] Overriding SEARCH → REASONING for letter/word introspection query.")
+        task_type = TaskType.REASONING
 
     if task_type == TaskType.SEARCH:
         search_term = direct_answer or user_query
@@ -1744,11 +1871,6 @@ def ask_stream(
             f"Respond in the SAME LANGUAGE as the user's query."
         )
 
-    
-    
-    
-    final_query += _language_directive(user_query)
-
     optimized = [{"role": "user", "content": final_query}]
     if history:
         cfg = load_generation_config()
@@ -1777,7 +1899,7 @@ def ask_stream(
     elif task_type == TaskType.REASONING:
         yield {"type": "status", "content": "Analyzing..."}
         full = ""
-        _r_temp = 0.4 if web_context else 0.3  
+        _r_temp = 0.4 if web_context else 0.3
         _r_tokens = 6144 if web_context else 4096
         for ev in _stream_tokens(ModelRole.REASONING, optimized, max_tokens=_r_tokens, temperature=_r_temp, think_mode="show"):
             yield ev
@@ -1786,10 +1908,56 @@ def ask_stream(
         if not _keep_loaded:
             unload_model()
         cleaned = _quality_guard(full)
+
+        # --- Output Completeness Validation ---
+        # Extract visible content (outside <think> blocks) to check for evasion-loophole collapse
+        _visible = re.sub(r'<think>[\s\S]*?</think>', '', cleaned, flags=re.IGNORECASE).strip()
+        _visible = re.sub(r'<\|thought_start\|>[\s\S]*?<\|thought_end\|>', '', _visible, flags=re.IGNORECASE).strip()
+        _EVASION_PHRASES = re.compile(
+            r'^(the final answer is[:\s]*|routing complete\.?|done\.?|answer[:\s]*|result[:\s]*)$',
+            re.IGNORECASE
+        )
+        _is_collapsed = (
+            len(_visible) < 80
+            or _EVASION_PHRASES.match(_visible.strip())
+        )
+        if _is_collapsed:
+            logger.warning(f"[Completeness] Evasion-loophole detected. Visible output too thin ({len(_visible)} chars). Attempting recovery.")
+            # Recovery 1: extract the think block content and surface it as the answer
+            _think_match = re.search(r'<think>([\s\S]*?)</think>', cleaned, re.IGNORECASE)
+            if _think_match:
+                _think_content = _think_match.group(1).strip()
+                if len(_think_content) > 100:
+                    _recovered = (
+                        f"<think>{_think_content}</think>\n\n"
+                        f"*(Note: The model's visible answer was too brief — the reasoning above contains the full analysis.)*"
+                    )
+                    yield {"type": "clear"}
+                    yield {"type": "token", "content": _recovered}
+                    yield {"type": "raw_response", "content": _recovered}
+                    return
+            # Recovery 2: re-prompt explicitly demanding a full answer
+            yield {"type": "clear"}
+            yield {"type": "status", "content": "Retrying for complete response..."}
+            retry_msgs = optimized + [
+                {"role": "assistant", "content": full},
+                {"role": "user", "content": (
+                    "Your previous response was incomplete — it only contained a closing phrase without the actual answer. "
+                    "Please provide the FULL, complete explanation now. Do not skip or abbreviate."
+                )}
+            ]
+            retry_full = ""
+            for ev in _stream_tokens(ModelRole.REASONING, retry_msgs, max_tokens=_r_tokens, temperature=0.5, think_mode="show"):
+                yield ev
+                if ev["type"] == "token":
+                    retry_full += ev["content"]
+            cleaned = _quality_guard(retry_full)
+
         if cleaned != full:
             yield {"type": "clear"}
             yield {"type": "token", "content": cleaned}
         yield {"type": "raw_response", "content": cleaned}
+
 
     elif task_type == TaskType.MATH:
         yield {"type": "status", "content": "Solving..."}
