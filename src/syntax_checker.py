@@ -10,6 +10,8 @@ from typing import Optional, List, Tuple
 
 def guess_language_from_content(code: str) -> str:
     
+    if re.search(r'<!DOCTYPE\s+html|<html|<body|<head', code, re.IGNORECASE):
+        return "html"
     if re.search(r'\bdef\s+\w+\s*\(|import\s+\w+|\bif\s+__name__\s*==', code):
         return "python"
     if re.search(r'#include\s+<[^>]+>|#include\s+"[^"]+"|\bint\s+main\s*\(', code):
@@ -160,6 +162,15 @@ def _check_rust(code: str) -> Optional[str]:
         except OSError:
             pass
 
+def _check_html(code: str) -> Optional[str]:
+    scripts = re.findall(r'<script\b[^>]*>([\s\S]*?)<\/script>', code, re.IGNORECASE)
+    for script_content in scripts:
+        if script_content.strip():
+            err = _check_javascript(script_content)
+            if err:
+                return f"JavaScript syntax error in HTML: {err}"
+    return None
+
 CHECKERS = {
     "python":     _check_python,
     "py":         _check_python,
@@ -175,6 +186,7 @@ CHECKERS = {
     "go":         _check_go,
     "rust":       _check_rust,
     "rs":         _check_rust,
+    "html":       _check_html,
 }
 
 def check_syntax(code_output: str, language: Optional[str] = None) -> Optional[str]:

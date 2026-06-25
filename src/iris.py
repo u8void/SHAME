@@ -231,13 +231,14 @@ TRIAGE_SYSTEM_PROMPT = (
     "   [ROUTE: REASONING]         — how/why questions, explanations, analysis, comparisons, summaries, document reading\n"
     "   [ROUTE: GENERAL]           — casual chat, opinions, creative writing\n"
     "   [ROUTE: MATH]              — math problems, equations, proofs\n"
-    "   [ROUTE: CODE_SIMPLE]       — small code snippets, functions, HTML/CSS/JS UI elements, or programming problems\n"
+    "   [ROUTE: CODE_SIMPLE]       — small code snippets, functions, HTML/CSS/JS UI elements, canvas animations, SVG graphics, procedural art, or programming problems\n"
     "   [ROUTE: CODE_COMPLEX]      — full projects, multi-file code, games, complete websites or web apps\n"
     "   [ROUTE: CONTROL]           — OS/PC commands, app controls, messaging, browser automation (log in, WhatsApp/Telegram messaging, form filling, clicking web buttons), email, system checks, power control\n\n"
     "CRITICAL ROUTING RULE:\n"
-    "- If the user asks to 'solve in c++', 'write a script', 'create a website', 'write html/css', pastes a traceback, error log, or a large algorithmic problem description, you MUST route to [ROUTE: CODE_SIMPLE], [ROUTE: CODE_COMPLEX], or [ROUTE: MATH].\n"
+    "- If the user asks to 'solve in c++', 'write a script', 'create a website', 'write html/css', 'create an animation', 'draw with canvas', 'make an SVG', pastes a traceback, error log, or a large algorithmic problem description, you MUST route to [ROUTE: CODE_SIMPLE], [ROUTE: CODE_COMPLEX], or [ROUTE: MATH].\n"
     "- For ANY programming error, Python traceback, compilation error, or debugging request, you MUST route to [ROUTE: CODE_COMPLEX]. Do NOT route tracebacks to MATH.\n"
     "- OVERRIDE RULE: If the prompt contains 'build a landing page', 'HTML', or 'Tailwind', you MUST choose [ROUTE: CODE_COMPLEX]. Do not choose [ROUTE: CONTROL] even if the website design mentions mock terminal commands.\n"
+    "- CANVAS / ANIMATION RULE: Any request involving 'canvas', 'HTML5 canvas', 'animation', 'animate', 'SVG', 'procedural art', 'draw', 'render loop', 'requestAnimationFrame' is ALWAYS a code task. Route to [ROUTE: CODE_SIMPLE] for single-file outputs or [ROUTE: CODE_COMPLEX] for multi-file projects. NEVER route these to REASONING or SEARCH.\n"
     "- NEVER use [ROUTE: SEARCH] for programming problems, competitive programming questions, or large blocks of text.\n"
     "- LETTER/WORD INTROSPECTION RULE (HIGHEST PRIORITY): If the user asks how many of a letter appear in a word or name (e.g. 'how many r in strawberry', 'how many a in Ahmed'), or asks to count characters/vowels/consonants, or asks about spelling of a word — this is ALWAYS [ROUTE: REASONING]. NEVER route these to SEARCH.\n\n"
     "EXAMPLES:\n"
@@ -248,6 +249,9 @@ TRIAGE_SYSTEM_PROMPT = (
     "User: explain how photosynthesis works → [ROUTE: REASONING]\n"
     "User: write a python hello world → [ROUTE: CODE_SIMPLE]\n"
     "User: create a tailwind css landing page → [ROUTE: CODE_COMPLEX]\n"
+    "User: make a canvas animation of a bouncing ball → [ROUTE: CODE_SIMPLE]\n"
+    "User: draw a dog using SVG procedurally → [ROUTE: CODE_SIMPLE]\n"
+    "User: create a self-contained HTML5 canvas animation → [ROUTE: CODE_SIMPLE]\n"
     "User: 2+2 → [ROUTE: MATH]\n"
     "User: open spotify → [ROUTE: CONTROL]\n"
     "User: send a whatsapp message to Mom saying hello → [ROUTE: CONTROL]\n"
@@ -289,9 +293,36 @@ CODE_SYSTEM_PROMPT = (
     "Do NOT use LaTeX or MathJax formatting (like $...$ or _{...}) for variable names or identifiers inside code blocks. Code must be syntactically valid plain text. "
     "WEB DESIGN RULE: If the user asks for a website or web app, you MUST prioritize extreme visual excellence. "
     "Do NOT output generic or basic UI. You must use modern, premium aesthetics (e.g., highly polished dark modes, vibrant curated colors, glassmorphism, fluid typography, smooth CSS micro-animations, hover effects, and Tailwind CSS if appropriate). "
-    "Always rely heavily on provided RAG context or your deep knowledge of modern UI/UX design to deliver a 'WOW' factor. Use placeholder images (e.g., Unsplash) and complete copy, never 'Lorem Ipsum'. "
-    "After the code block, provide a concise explanation of the code. "
-    "If the user is ONLY asking for an explanation, summary, or debugging help without needing new code, do NOT generate a code block; just reply in plain text."
+    "Always rely heavily on your deep knowledge of modern UI/UX design to deliver a 'WOW' factor. Write complete, realistic copy — never 'Lorem Ipsum'. "
+    "SELF-CONTAINED ANIMATION / CANVAS RULE (ABSOLUTE — applies whenever the task is a visual animation, canvas sketch, SVG graphic, or procedural art): "
+    "RULE 1 — NO EXTERNAL ASSETS WHATSOEVER: You MUST NOT reference any external file, URL, or resource. "
+    "This includes: src=\"*.svg\", src=\"*.png\", src=\"*.jpg\", url(...), fetch(...), XMLHttpRequest, or any network call. "
+    "Every visual element MUST be drawn procedurally with code. "
+    "RULE 2 — SINGLE RENDERING PARADIGM: You MUST choose exactly ONE rendering approach for the entire output and stick to it exclusively. "
+    "Either: (a) 100% HTML5 Canvas — use ctx.beginPath(), ctx.arc(), ctx.moveTo(), ctx.lineTo(), ctx.quadraticCurveTo(), ctx.bezierCurveTo(), ctx.fillRect(), etc. to draw everything. Do not use CSS animation classes alongside Canvas. "
+    "Or: (b) 100% CSS/SVG/DOM — use only CSS keyframes, SVG <path>, <circle>, <polygon> elements, or DOM manipulation. Do not mix a <canvas> context into a CSS-animated page. "
+    "NEVER split rendering between Canvas context calls and CSS animation classes in the same output. Pick one and use it exclusively. "
+    "RULE 3 — SAFE requestAnimationFrame LOOP: If you use requestAnimationFrame, ALL resource instantiation (new Image(), new Audio(), new Worker(), array precomputation, geometry constants) MUST happen ONCE outside the animation loop, typically in a setup() function called before the loop starts. "
+    "Inside the loop body you may ONLY read pre-computed values, mutate state variables (position, angle, time), and issue draw calls. "
+    "NEVER write `new Image()`, `document.createElement(...)`, or any constructor call inside the requestAnimationFrame callback. "
+    "RULE 4 — RICH PROCEDURAL DETAILS AND GRAPHICS (ABSOLUTE): You MUST NEVER generate basic geometric placeholder shapes (like simple plain circles for characters/dogs, or basic plain rectangles for buildings/trees/clouds). "
+    "All characters, backgrounds, and objects must be drawn using high-fidelity procedural art. "
+    "To animate multi-jointed walking legs, you MUST use pivot-joint matrices with nested ctx.save(), translate, rotate, draw, and restore. For example:\n"
+    "  // Back leg walk cycle:\n"
+    "  const legAngle = Math.sin(time) * 0.4;\n"
+    "  ctx.save();\n"
+    "  ctx.translate(hipX, hipY);\n"
+    "  ctx.rotate(legAngle);\n"
+    "  ctx.ellipse(0, 20, 10, 25, 0, 0, Math.PI * 2); // Thigh\n"
+    "  ctx.translate(0, 35);\n"
+    "  ctx.rotate(-legAngle * 0.5);\n"
+    "  ctx.ellipse(0, 15, 7, 18, 0, 0, Math.PI * 2); // Lower leg\n"
+    "  ctx.restore();\n"
+    "Draw detailed multi-segment body parts (legs with joints, fluffy coat textures, detailed face with nose, eyes, ears, wagging tail) using complex curves (quadraticCurveTo/bezierCurveTo) and smooth color gradients. "
+    "Create highly detailed parallax backgrounds (e.g. detailed academic buildings with window frames, clock faces, tree leaves using overlapping arcs/clusters, textured roads/lawns, layered drifting clouds). "
+    "The animation must look rich, professional, organic, and visually stunning, matching the aesthetic of premium vector-art animations. "
+    "After the code block, provide a concise explanation of the code."
+    " If the user is ONLY asking for an explanation, summary, or debugging help without needing new code, do NOT generate a code block; just reply in plain text."
 )
 
 MATH_SYSTEM_PROMPT = (
@@ -344,6 +375,7 @@ REVIEWER_SYSTEM_PROMPT = (
     "NEVER use placeholders like '...', or comments like '// rest of code remains the same'. You must output the full code. "
     "If you provide corrected code, you MUST wrap your final corrected code inside standard markdown triple backticks. "
     "CRITICAL: If you write a code block, the very first line inside the code block MUST be a comment containing ONLY the intended filename (e.g. // main.cpp or # app.py). "
+    "VISUAL ANIMATION REVIEW RULE (CRITICAL): If the code under review is a visual animation, canvas sketch, or procedural art, you MUST ensure that it DOES NOT use simple geometric placeholders (like basic circles for characters, or plain rectangles for buildings/trees). It must feature rich procedural details, gradients, complex curves (bezierCurveTo, quadraticCurveTo), and detailed multi-layered backgrounds. If the code is basic or generic, you MUST fully implement and expand the visual elements, adding rich textures, curves, and high-fidelity rendering, outputting the complete revised code file. "
     "If no code changes are needed, or if you are just summarizing, just explain your review in plain text without code blocks."
 )
 
@@ -910,6 +942,16 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
         "loop", "array", "pointer", "database", "sql", "api", "json", "xml",
         "html", "css", "docker", "git", "github", "repo", "repository",
         "commit", "push", "pull", "merge", "conflict",
+        # Frontend / creative-coding signals
+        "canvas", "html5 canvas", "svg", "animation", "animate", "procedural",
+        "requestanimationframe", "requestAnimationFrame", "draw", "render loop",
+        "ctx.", "ctx.beginpath", "ctx.arc", "vertex", "shader", "webgl",
+    }
+    # These signals alone guarantee CODING_SIMPLE (single self-contained file)
+    canvas_signals = {
+        "canvas", "html5 canvas", "svg", "animation", "animate",
+        "requestanimationframe", "procedural", "draw", "render loop",
+        "ctx.", "webgl", "vertex", "shader",
     }
     complex_signals = {
         "kernel", "gcc", "clang", "qemu", "driver", "bootloader", "pong",
@@ -917,7 +959,10 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
         "full project", "entire project",
     }
     for kw in code_keywords:
-        if re.search(rf"\b{re.escape(kw)}\b", q):
+        if re.search(rf"\b{re.escape(kw)}\b", q, re.IGNORECASE):
+            if kw in canvas_signals:
+                # Self-contained single-file creative code — never complex
+                return TaskType.CODING_SIMPLE
             if kw in complex_signals or len(q) > 500:
                 return TaskType.CODING_COMPLEX
             return TaskType.CODING_SIMPLE
@@ -973,7 +1018,14 @@ def classify_task(
     
     
     lower_query = query_for_classification.lower()
-    if ("tailwind" in lower_query or "html" in lower_query or "css" in lower_query) and ("build" in lower_query or "landing page" in lower_query or "website" in lower_query or "full-stack developer" in lower_query):
+    has_tech = "tailwind" in lower_query or "html" in lower_query or "css" in lower_query
+    has_intent = (
+        re.search(r"\bbuild\b", lower_query) or 
+        "landing page" in lower_query or 
+        "website" in lower_query or 
+        "full-stack developer" in lower_query
+    )
+    if has_tech and has_intent:
         logger.info("[Triage] Hardcoded intercept: Web development query detected. Routing to CODING_COMPLEX.")
         return TaskType.CODING_COMPLEX, None
 
@@ -984,14 +1036,9 @@ def classify_task(
             pass
         else:
             return result, None
-
-    
-    
-    if history:
-        for msg in history:
-            c = msg.get("content", "")
-            if "OBSERVATION:" in c or '{"action":' in c:
-                return TaskType.CONTROL, None
+            
+    if history and history[-1].get("role") == "user" and history[-1].get("content", "").strip().startswith("OBSERVATION:"):
+        return TaskType.CONTROL, None
 
     
     
@@ -1575,13 +1622,6 @@ def _stream_tokens(
         yield {"type": "finish", "reason": finish_reason}
 
         if finish_reason == "length":
-            if role in (ModelRole.REASONING, ModelRole.MATH):
-                # Reasoning models are trained to strictly start with <think>. 
-                # Sending a User message to "Continue" forces them to start a new thought process
-                # from scratch, causing infinite repetition.
-                logger.warning(f"[Stream] Model {role.value} hit length limit. Stopping to prevent repeat-loop.")
-                break
-                
             full_messages.append({"role": "assistant", "content": loop_content})
             full_messages.append({
                 "role": "user",
@@ -1863,11 +1903,11 @@ def ask_stream(
         )
     if web_context and "(No web results found" not in web_context and "Web search unavailable" not in web_context:
         final_query = (
-            f"[WEB SEARCH RESULTS]\n{web_context}\n[END WEB SEARCH RESULTS]\n\n"
-            f"User Query: {user_query}\n\n"
-            f"INSTRUCTIONS: You MUST think step-by-step inside a <think> block before answering. "
+            f"<search_results>\n{web_context}\n</search_results>\n\n"
+            f"User Query:\n{user_query}\n\n"
+            f"INSTRUCTIONS:\nYou MUST think step-by-step inside a thinking block before answering. "
             f"Use the search results above to inform your answer, especially for recent events or specific facts. "
-            f"If the search results are incomplete, you may use your internal knowledge to supplement the answer. "
+            f"If the search results are incomplete, you may use your internal knowledge to supplement the answer.\n"
             f"Respond in the SAME LANGUAGE as the user's query."
         )
 
@@ -1899,22 +1939,23 @@ def ask_stream(
     elif task_type == TaskType.REASONING:
         yield {"type": "status", "content": "Analyzing..."}
         full = ""
+        thought_process = ""
         _r_temp = 0.4 if web_context else 0.3
         _r_tokens = 6144 if web_context else 4096
         for ev in _stream_tokens(ModelRole.REASONING, optimized, max_tokens=_r_tokens, temperature=_r_temp, think_mode="show"):
             yield ev
             if ev["type"] == "token":
                 full += ev["content"]
+            elif ev["type"] == "thinking":
+                thought_process += ev["content"]
         if not _keep_loaded:
             unload_model()
         cleaned = _quality_guard(full)
 
         # --- Output Completeness Validation ---
-        # Extract visible content (outside <think> blocks) to check for evasion-loophole collapse
-        _visible = re.sub(r'<think>[\s\S]*?</think>', '', cleaned, flags=re.IGNORECASE).strip()
-        _visible = re.sub(r'<\|thought_start\|>[\s\S]*?<\|thought_end\|>', '', _visible, flags=re.IGNORECASE).strip()
+        _visible = cleaned.strip()
         _EVASION_PHRASES = re.compile(
-            r'^(the final answer is[:\s]*|routing complete\.?|done\.?|answer[:\s]*|result[:\s]*)$',
+            r'^(the final answer is[:\s]*|\[?routing complete\]?\.?|done\.?|answer[:\s]*|result[:\s]*)$',
             re.IGNORECASE
         )
         _is_collapsed = (
@@ -1923,24 +1964,28 @@ def ask_stream(
         )
         if _is_collapsed:
             logger.warning(f"[Completeness] Evasion-loophole detected. Visible output too thin ({len(_visible)} chars). Attempting recovery.")
-            # Recovery 1: extract the think block content and surface it as the answer
-            _think_match = re.search(r'<think>([\s\S]*?)</think>', cleaned, re.IGNORECASE)
-            if _think_match:
-                _think_content = _think_match.group(1).strip()
-                if len(_think_content) > 100:
-                    _recovered = (
-                        f"<think>{_think_content}</think>\n\n"
-                        f"*(Note: The model's visible answer was too brief — the reasoning above contains the full analysis.)*"
-                    )
-                    yield {"type": "clear"}
-                    yield {"type": "token", "content": _recovered}
-                    yield {"type": "raw_response", "content": _recovered}
-                    return
+            # Recovery 1: surface the thought process content itself as the answer
+            if len(thought_process) > 100:
+                _recovered = (
+                    f"*(Note: The model's visible answer was evaded due to constraints — surfacing internal thought process instead.)*\n\n"
+                    f"{thought_process.strip()}\n\n"
+                    f"**Final Answer emitted**: {_visible}"
+                )
+                yield {"type": "clear"}
+                yield {"type": "token", "content": _recovered}
+                yield {"type": "raw_response", "content": _recovered}
+                return
+                
             # Recovery 2: re-prompt explicitly demanding a full answer
             yield {"type": "clear"}
             yield {"type": "status", "content": "Retrying for complete response..."}
+            
+            _assistant_context = full
+            if thought_process.strip():
+                _assistant_context = f"<think>{thought_process}</think>\n{full}"
+                
             retry_msgs = optimized + [
-                {"role": "assistant", "content": full},
+                {"role": "assistant", "content": _assistant_context},
                 {"role": "user", "content": (
                     "Your previous response was incomplete — it only contained a closing phrase without the actual answer. "
                     "Please provide the FULL, complete explanation now. Do not skip or abbreviate."
@@ -2122,8 +2167,8 @@ def _language_directive(user_query: str) -> str:
     return (
         f"\n\n[SYSTEM DIRECTIVE: The user's message is written in {lang}. "
         f"You MUST write your final response in {lang}. "
-        f"If you use a <think> block for reasoning, you should reason in English inside the <think> block to ensure accuracy, "
-        f"and then output your final answer outside the <think> block in {lang}.]"
+        f"If you use a thinking block for reasoning, you should reason in English inside the thinking block to ensure accuracy, "
+        f"and then output your final answer outside the thinking block in {lang}.]"
     )
 
 
@@ -2333,7 +2378,7 @@ def _run_complex_coding(
     yield {"type": "status", "content": "Stage 3 \u2014 Reviewing and optimizing..."}
 
     review_msgs = optimized + [
-        {"role": "assistant", "content": full_code},
+        {"role": "assistant", "content": full_code.replace("<coding>\n", "")},
         {"role": "user",
          "content": "Review the above code. Fix all syntax errors, logical bugs, edge cases, "
          "and ensure it compiles/works correctly. Do NOT output conversational filler. Return the final corrected code inside a ``` language block, followed by a brief explanation."}
