@@ -1896,7 +1896,7 @@ def ask_stream(
     final_query = user_query
     if context:
         final_query = (
-            f"[RETRIEVED CONTEXT]\n{context}\n[END RETRIEVED CONTEXT]\n\n"
+            f"<retrieved_context>\n{context}\n</retrieved_context>\n\n"
             f"If the retrieved context is relevant, use it to answer the question. "
             f"If it is completely irrelevant to the question, IGNORE it and answer from your own knowledge.\n\n"
             f"{final_query}"
@@ -1959,7 +1959,7 @@ def ask_stream(
             re.IGNORECASE
         )
         _is_collapsed = (
-            len(_visible) < 80
+            len(_visible) < 5
             or _EVASION_PHRASES.match(_visible.strip())
         )
         if _is_collapsed:
