@@ -97,6 +97,31 @@ try:
 except ImportError:
     DATASETS_AVAILABLE = False
 
+# Windows CUDA DLL directory resolution (Python 3.8+)
+if os.name == 'nt':
+    cuda_path = os.environ.get("CUDA_PATH")
+    if cuda_path and os.path.exists(os.path.join(cuda_path, "bin")):
+        cuda_bin = os.path.join(cuda_path, "bin")
+        try:
+            os.add_dll_directory(cuda_bin)
+            logger.info(f"[Windows CUDA] Added DLL directory from CUDA_PATH: {cuda_bin}")
+        except Exception as e:
+            logger.warning(f"[Windows CUDA] Failed to add DLL directory {cuda_bin}: {e}")
+            
+    common_cuda_root = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
+    if os.path.exists(common_cuda_root):
+        try:
+            for item in os.listdir(common_cuda_root):
+                bin_path = os.path.join(common_cuda_root, item, "bin")
+                if os.path.exists(bin_path):
+                    try:
+                        os.add_dll_directory(bin_path)
+                        logger.info(f"[Windows CUDA] Added DLL directory from default path: {bin_path}")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
 import llama_cpp
 from llama_cpp import Llama
 
@@ -105,7 +130,13 @@ _hw_thread.Thread(target=lambda: __import__('src.hardware_profile', fromlist=['s
 
 import ctypes
 def _llama_log_callback(level, text, user_data):
-    pass
+    if text:
+        try:
+            msg = text.decode('utf-8', errors='ignore').strip()
+            if msg:
+                logger.debug(f"[llama.cpp] {msg}")
+        except Exception:
+            pass
 _log_cb = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p)(_llama_log_callback)
 llama_cpp.llama_log_set(_log_cb, ctypes.c_void_p(0))
 from .syntax_checker import check_syntax, extract_code_blocks
@@ -908,6 +939,9 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
 
         _flash_attn = hw.flash_attn  
 
+        _main_gpu = cfg.get("main_gpu", 0)
+
+        logger.info(f"[Iris] Instantiating Llama: model={path}, n_gpu_layers={n_gpu_layers}, n_threads={n_threads}, main_gpu={_main_gpu}")
         try:
             _new_llm = Llama(
                 model_path=path,
@@ -924,6 +958,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
                 n_ubatch=_n_ubatch,
                 verbose=True,
                 logits_all=(draft_model is not None),
+                main_gpu=_main_gpu,
             )
         except Exception as e:
             logger.error(f"[Iris] Failed to load model from file: {path}. Error: {e}", exc_info=True)
@@ -3425,6 +3460,7 @@ def _load_vision_model():
                         chat_handler = Llava15ChatHandler(clip_model_path=clip_path, verbose=False)
                     
                     
+                    _main_gpu = cfg.get("main_gpu", 0)
                     model_kwargs = {
                         "model_path": vision_path,
                         "n_ctx": ROLE_CTX.get(ModelRole.VISION, 4096),
@@ -3434,6 +3470,7 @@ def _load_vision_model():
                         "type_k": getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
                         "type_v": getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
                         "verbose": False,
+                        "main_gpu": _main_gpu,
                     }
                     if chat_handler:
                         model_kwargs["chat_handler"] = chat_handler
