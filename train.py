@@ -59,13 +59,13 @@ ROLE_TO_GGUF = {
 
 ROLE_NUMBERS = {
     "triage":    "001",
-    "router":    "002",
-    "control":   "003",
-    "math":      "004",
-    "code":      "005",
-    "reasoning": "006",
-    "general":   "007",
-    "vision":    "008",
+    "router":    "001",
+    "control":   "002",
+    "math":      "003",
+    "code":      "004",
+    "reasoning": "005",
+    "general":   "005",
+    "vision":    "006",
 }
 
 SIZE_CONFIG = None  
@@ -127,7 +127,7 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate")
     parser.add_argument("--batch-size", type=int, default=1, help="Batch size")
     parser.add_argument("--accum-steps", type=int, default=8, help="Gradient accumulation steps")
-    parser.add_argument("--max-seq-length", type=int, default=1024, help="Maximum sequence length")
+    parser.add_argument("--max-seq-length", type=int, default=4096, help="Maximum sequence length")
     parser.add_argument("--device", choices=["cuda", "mps", "cpu"], default=None)
 
     parser.add_argument("--max-pairs", type=int, default=5000)

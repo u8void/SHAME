@@ -1341,6 +1341,8 @@ class TextModel(ModelBase):
             res = "kanana2"
         if chkhsh == "862f827721df956049dff5ca81a57f29e575280bc622e290d3bf4e35eca29015":
             res = "f2llmv2"
+        if chkhsh == "a7c4881be1f452c154f379489b28aab0fa461de76000fd6b68791cbcf64c725d":
+            res = "qwen2"
 
         if res is None:
             logger.warning("\n")

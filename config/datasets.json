@@ -84,6 +84,22 @@
       {
         "path": "m-a-p/CodeFeedback-Filtered-Instruction",
         "max_samples": 8000
+      },
+      {
+        "path": "nickrosh/Evol-Instruct-Code-80k",
+        "max_samples": 8000
+      },
+      {
+        "path": "magpie-align/Magpie-Reasoning-150K",
+        "max_samples": 8000
+      },
+      {
+        "path": "Hoglet-33/webdev-coding-dataset",
+        "max_samples": 8000
+      },
+      {
+        "path": "smirki/UI_REASONING_v1.01",
+        "max_samples": 8000
       }
     ],
     "local_dirs": [

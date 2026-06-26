@@ -47,7 +47,6 @@ print("\n" + "="*60)
 print(f"-> Iris AI is available publicly at: {public_url}")
 print("="*60 + "\n")
 
-
 from flask import Flask, request, jsonify, render_template, Response
 from werkzeug.utils import secure_filename
 from src.logger import get_logger
@@ -832,7 +831,7 @@ def shutdown_endpoint():
 
 if __name__ == "__main__":
     if PRO_MODE:
-        mode_label = "IRIS PRO (OpenRouter Multi-Agent API)"
+        mode_label = "IRIS PRO"
     else:
         mode_label = "Local GGUF Multi-Model Routing System"
     logger.info(f"[INFO] Starting Iris AI — {mode_label}")
