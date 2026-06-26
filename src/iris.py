@@ -1153,8 +1153,28 @@ def classify_task(
     query_for_classification = re.sub(r'<document>[\s\S]*?</document>', '', user_query, flags=re.IGNORECASE)
     query_for_classification = re.sub(r'\[IMAGE_UPLOADED:[^\]]+\]', '', query_for_classification, flags=re.IGNORECASE)
     
-    
     lower_query = query_for_classification.lower()
+    
+    # Check if the query is a simple date/time/clock query to prevent routing to SEARCH or REASONING
+    time_patterns = [
+        r"\bwhat\s+(?:is\s+)?(?:the\s+)?(?:current\s+)?time\b",
+        r"\bwhat\s+time\s+is\s+it\b",
+        r"\bwhat's\s+the\s+time\b",
+        r"\bcurrent\s+time\b",
+        r"\bcurrent\s+date\b",
+        r"\bwhat\s+is\s+today's\s+date\b",
+        r"\btoday's\s+date\b",
+        r"\bwhat\s+(?:is\s+)?(?:the\s+)?date\s+today\b",
+        r"\bwhat\s+day\s+is\s+it\b",
+        r"\bwhat\s+day\s+of\s+the\s+week\b",
+        r"\btell\s+me\s+the\s+time\b",
+        r"\btime\s+now\b",
+        r"\btime\s+in\s+[a-zA-Z]+",
+        r"\bdate\s+in\s+[a-zA-Z]+",
+    ]
+    if any(re.search(pat, lower_query) for pat in time_patterns):
+        logger.info("[Triage] Hardcoded intercept: Date/time query detected. Routing to GENERAL.")
+        return TaskType.GENERAL, None
     has_tech = "tailwind" in lower_query or "html" in lower_query or "css" in lower_query
     has_intent = (
         re.search(r"\bbuild\b", lower_query) or 
@@ -1193,7 +1213,17 @@ def classify_task(
             pass
 
     minimized = _minimize_history(history, max_entries=2)
-    triage_messages = [{"role": "system", "content": TRIAGE_SYSTEM_PROMPT}]
+    triage_prompt = TRIAGE_SYSTEM_PROMPT
+    import datetime
+    try:
+        now = datetime.datetime.now().astimezone()
+        time_str = now.strftime("%A, %B %d, %Y, %H:%M:%S %Z")
+        offset_str = now.strftime("%z")
+        formatted_offset = f"{offset_str[:3]}:{offset_str[3:]}" if len(offset_str) >= 5 else offset_str
+        triage_prompt += f"\n\n[SYSTEM DIRECTIVE: The current local system time is {time_str} (UTC{formatted_offset}). This is the exact, live time on the user's computer. Use this context to answer any date/time queries or relative time differences. Do NOT claim you do not have real-time access or that you don't know the time.]"
+    except Exception:
+        pass
+    triage_messages = [{"role": "system", "content": triage_prompt}]
     for msg in minimized:
         c = msg["content"]
         if len(c) > 150:
@@ -1258,7 +1288,7 @@ def classify_task(
                 or (answer_words <= 6 and not re.search(r'\b(how\s+many|count|letter|spell|number)\b', answer, re.IGNORECASE))
             )
             and not re.search(
-                r'\b(is|are|was|were|has|have|had|will|would|can|could|do|does|did|because|therefore|however)\b',
+                r'\b(because|therefore|however)\b',
                 answer, re.IGNORECASE
             )
             and not IDENTITY_PATTERNS.search(answer)
@@ -1341,7 +1371,7 @@ def _quality_guard(text: str) -> str:
                 else:
                     text += f"\n{close_tag}"
 
-    return text or "I'm Iris AI."
+    return text
 
 
 
@@ -1376,6 +1406,17 @@ def _stream_tokens(
     sys_prompt = system_prompt_override if system_prompt_override is not None else _system_prompt_for(role)
     if role not in (ModelRole.TRIAGE, ModelRole.ROUTER) and messages and messages[-1]["role"] == "user":
         sys_prompt += _language_directive(messages[-1]["content"])
+
+    # Inject current local time system directive to keep the model aware of live time/date
+    import datetime
+    try:
+        now = datetime.datetime.now().astimezone()
+        time_str = now.strftime("%A, %B %d, %Y, %H:%M:%S %Z")
+        offset_str = now.strftime("%z")
+        formatted_offset = f"{offset_str[:3]}:{offset_str[3:]}" if len(offset_str) >= 5 else offset_str
+        sys_prompt += f"\n\n[SYSTEM DIRECTIVE: The current local system time is {time_str} (UTC{formatted_offset}). This is the exact, live time on the user's computer. Use this context to answer any date/time queries or relative time differences. Do NOT claim you do not have real-time access or that you don't know the time.]"
+    except Exception as e:
+        logger.warning(f"Failed to inject local time directive: {e}")
 
     # --- History Sanitization: strip bleed-causing artifacts per agent role ---
     def _sanitize_for_role(msgs: List[Dict[str, str]], target_role: ModelRole) -> List[Dict[str, str]]:
@@ -2109,17 +2150,28 @@ def ask_stream(
     if task_type == TaskType.GENERAL:
         yield {"type": "status", "content": "Thinking..."}
         full = ""
-        for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=4096, temperature=0.3, think_mode="pass"):
+        thought_process = ""
+        for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=4096, temperature=0.3, think_mode="show"):
             yield ev
             if ev["type"] == "token":
                 full += ev["content"]
+            elif ev["type"] == "thinking":
+                thought_process += ev["content"]
         if not _keep_loaded:
             unload_model()
         cleaned = _quality_guard(full)
-        if cleaned != full:
+        if full and cleaned and cleaned != full:
             yield {"type": "clear"}
             yield {"type": "token", "content": cleaned}
-        yield {"type": "raw_response", "content": cleaned}
+        
+        final_content = ""
+        if thought_process:
+            final_content += f"<think>\n{thought_process.strip()}\n</think>\n"
+        if cleaned:
+            final_content += cleaned
+        elif not thought_process:
+            final_content = "I'm Iris AI."
+        yield {"type": "raw_response", "content": final_content}
 
     elif task_type == TaskType.REASONING:
         yield {"type": "status", "content": "Analyzing..."}
@@ -2146,7 +2198,7 @@ def ask_stream(
         _is_collapsed = (
             len(_visible) < 5
             or _EVASION_PHRASES.match(_visible.strip())
-        )
+        ) and len(thought_process.strip()) < 50  # Don't flag if model correctly used think tags
         if _is_collapsed:
             logger.warning(f"[Completeness] Evasion-loophole detected. Visible output too thin ({len(_visible)} chars). Attempting recovery.")
             # Recovery 1: surface the thought process content itself as the answer
@@ -2183,10 +2235,16 @@ def ask_stream(
                     retry_full += ev["content"]
             cleaned = _quality_guard(retry_full)
 
-        if cleaned != full:
+        if full and cleaned and cleaned != full:
             yield {"type": "clear"}
             yield {"type": "token", "content": cleaned}
-        yield {"type": "raw_response", "content": cleaned}
+            
+        final_content = ""
+        if thought_process:
+            final_content += f"<think>\n{thought_process.strip()}\n</think>\n"
+        if cleaned:
+            final_content += cleaned
+        yield {"type": "raw_response", "content": final_content}
 
 
     elif task_type == TaskType.MATH:
@@ -2578,6 +2636,11 @@ def _run_complex_coding(
             final_output += ev["content"]
     if not _keep_loaded:
         unload_model()
+
+    # Fallback protection: if final_output is too short or lacks code blocks, fall back to Stage 2 code
+    if len(final_output.strip()) < 50 or "```" not in final_output:
+        logger.warning("[Complex Coding] Stage 3 final output is empty/invalid. Falling back to Stage 2 code.")
+        final_output = full_code
 
     lang = _detect_language(final_output)
     err = check_syntax(final_output, lang)

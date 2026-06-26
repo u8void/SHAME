@@ -2167,7 +2167,7 @@ def print_system_status(model=None, retriever=None):
 from rich.console import Group
 
 
-def format_assistant_message(content: str):
+def format_assistant_message(content: str, is_active: bool = False):
     if not content:
         return Text("")
 
@@ -2207,15 +2207,20 @@ def format_assistant_message(content: str):
     if think_content:
         from rich.panel import Panel
 
-        renderables.append(
-            Panel(
-                Text.from_markup(f"[dim]{think_content}[/dim]"),
-                title="[dim]Thinking[/dim]",
-                title_align="left",
-                border_style="dim",
-                style="on #333333",
+        if is_active:
+            renderables.append(
+                Panel(
+                    Text.from_markup(f"[dim]{think_content}[/dim]"),
+                    title="[dim]Thinking[/dim]",
+                    title_align="left",
+                    border_style="dim",
+                    style="on #333333",
+                )
             )
-        )
+        else:
+            renderables.append(
+                Text.from_markup("[dim]💭 (Thought process omitted)[/dim]")
+            )
 
     main_text = chat_response if chat_response else remaining
     if main_text:
@@ -2233,19 +2238,20 @@ def format_assistant_message(content: str):
 _scroll_offset: int = 0
 
 
-def _render_body_lines(history, cols: int) -> list[str]:
+def _render_body_lines(history, cols: int, is_generating: bool = False) -> list[str]:
     
     measure_console = Console(color_system="truecolor", width=cols, highlight=False)
     table = Table(box=None, show_header=False, expand=True)
     table.add_column("Role", style="bold", width=10)
     table.add_column("Message")
-    for msg in history:
+    for i, msg in enumerate(history):
         role = "You" if msg["role"] == "user" else "Iris"
         role_style = "bold yellow" if msg["role"] == "user" else "bold green"
+        is_active = is_generating and (i == len(history) - 1)
         content_render = (
             Markdown(msg["content"])
             if msg["role"] == "user"
-            else format_assistant_message(msg["content"])
+            else format_assistant_message(msg["content"], is_active=is_active)
         )
         table.add_row(Text(role, style=role_style), content_render)
     with measure_console.capture() as cap:
@@ -2260,7 +2266,7 @@ def get_visible_history(history, body_height):
     return history
 
 
-def draw_layout(model, tokenizer, retriever, history, status_text=None):
+def draw_layout(model, tokenizer, retriever, history, status_text=None, is_generating=False):
     global _scroll_offset
     if not RICH_AVAILABLE:
         return
@@ -2322,7 +2328,7 @@ This is a full-featured terminal interface for controlling your computer and cha
         console.print(Markdown(welcome_md))
     else:
         
-        all_lines = _render_body_lines(history, cols - 2)
+        all_lines = _render_body_lines(history, cols - 2, is_generating=is_generating)
         total_lines = len(all_lines)
 
         
@@ -2795,6 +2801,7 @@ def main():
                         retriever,
                         display_history,
                         status_text=status_text,
+                        is_generating=True,
                     )
 
                 reply_parts = []
@@ -2806,6 +2813,7 @@ def main():
                     else ai_agent_handle(raw, retriever, history)
                 )
 
+                in_thinking_stream = False
                 for event in agent_gen:
                     ev_type = event.get("type")
                     content = event.get("content", "")
@@ -2819,11 +2827,13 @@ def main():
                                 retriever,
                                 display_history,
                                 status_text=status_text,
+                                is_generating=True,
                             )
                         else:
                             logger.info(f"[{status_text}]")
                     elif ev_type == "clear":
                         reply_parts.clear()
+                        in_thinking_stream = False
                         display_history[-1]["content"] = ""
                         if RICH_AVAILABLE:
                             draw_layout(
@@ -2832,10 +2842,31 @@ def main():
                                 retriever,
                                 display_history,
                                 status_text="Refining...",
+                                is_generating=True,
                             )
                         else:
                             logger.info("\n--- Clearing generation buffer ---")
+                    elif ev_type == "thinking":
+                        if not in_thinking_stream:
+                            reply_parts.append("\n<think>\n")
+                            in_thinking_stream = True
+                        reply_parts.append(content)
+                        display_history[-1]["content"] = "".join(reply_parts)
+                        if RICH_AVAILABLE:
+                            draw_layout(
+                                model,
+                                tokenizer,
+                                retriever,
+                                display_history,
+                                status_text="Thinking...",
+                                is_generating=True,
+                            )
+                        else:
+                            logger.info(content, end="", flush=True)
                     elif ev_type == "token":
+                        if in_thinking_stream:
+                            reply_parts.append("\n</think>\n")
+                            in_thinking_stream = False
                         reply_parts.append(content)
                         display_history[-1]["content"] = "".join(reply_parts)
                         if RICH_AVAILABLE:
@@ -2845,10 +2876,14 @@ def main():
                                 retriever,
                                 display_history,
                                 status_text="Responding...",
+                                is_generating=True,
                             )
                         else:
                             logger.info(content, end="", flush=True)
                     elif ev_type == "action_result":
+                        if in_thinking_stream:
+                            reply_parts.append("\n</think>\n")
+                            in_thinking_stream = False
                         display_history.insert(
                             -1,
                             {
@@ -2863,11 +2898,16 @@ def main():
                                 retriever,
                                 display_history,
                                 status_text="Executing action...",
+                                is_generating=True,
                             )
                         else:
                             logger.info(f"\n[Action Output]\n{content}")
                     elif ev_type == "raw_response":
                         final_reply = content
+
+                if in_thinking_stream:
+                    reply_parts.append("\n</think>\n")
+                    in_thinking_stream = False
 
                 if final_reply is None:
                     final_reply = "".join(reply_parts)
