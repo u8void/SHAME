@@ -2024,7 +2024,11 @@ def ask_stream(
     yield {"type": "status", "content": f"Task: {task_type.value.upper()}"}
 
     context = ""
-    if retriever is not None and len(user_query.split()) >= 3:
+    min_words_for_rag = 3
+    if task_type == TaskType.MATH:
+        min_words_for_rag = 12
+
+    if retriever is not None and len(user_query.split()) >= min_words_for_rag:
         rag_cats = {
             TaskType.CODING_SIMPLE:  "coding",
             TaskType.CODING_COMPLEX: "coding",
