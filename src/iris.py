@@ -508,24 +508,115 @@ def _model_path(filename: str) -> str:
     return os.path.join(os.path.dirname(_HERE), "models", filename)
 
 
-def download_gguf(filename: str, quiet: bool = False) -> bool:
+def _parse_hf_url(url: str) -> Optional[Tuple[str, str]]:
+    if "huggingface.co" in url and "/resolve/" in url:
+        try:
+            parts = url.split("huggingface.co/")[-1].split("/resolve/")
+            repo_id = parts[0]
+            subparts = parts[1].split("/")
+            remote_name = "/".join(subparts[1:])
+            return repo_id, remote_name
+        except Exception:
+            pass
+    return None
+
+
+def get_size_config_download_info(filename: str) -> Optional[Tuple[str, str]]:
+    try:
+        cfg = load_generation_config()
+        size = cfg.get("size", "tiny")
+        size_path = os.path.join(os.path.dirname(CONFIG_PATH), "sizes", f"{size}.json")
+        if os.path.exists(size_path):
+            with open(size_path, "r", encoding="utf-8") as f:
+                size_cfg = json.load(f)
+            
+            gguf_map = size_cfg.get("gguf", {})
+            role = None
+            for r, g_name in gguf_map.items():
+                if g_name == filename:
+                    role = r
+                    break
+            
+            if not role and size_cfg.get("clip") == filename:
+                url_map = size_cfg.get("download_urls", {})
+                if filename in url_map:
+                    return url_map[filename], filename
+            
+            if role:
+                src_name = size_cfg.get("source_filenames", {}).get(role)
+                url_map = size_cfg.get("download_urls", {})
+                if src_name and src_name in url_map:
+                    return url_map[src_name], src_name
+    except Exception as e:
+        logger.warning(f"[Iris] Failed to read size config for download URL lookup: {e}")
+    return None
+
+
+def _is_gguf_valid(path: str, url: Optional[str] = None) -> bool:
+    if not os.path.exists(path):
+        return False
     
-    if filename not in _MODEL_SOURCES:
-        if not quiet:
-            logger.info(f"[Iris] No download sources known for {filename}")
+    local_size = os.path.getsize(path)
+    if local_size < 10 * 1024 * 1024:
+        return False
+        
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(4)
+            if magic != b"GGUF":
+                return False
+    except Exception:
         return False
 
+    if url:
+        try:
+            import urllib.request
+            req = urllib.request.Request(url, method="HEAD")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                remote_size = int(resp.getheader("Content-Length", 0))
+                if remote_size > 10 * 1024 * 1024 and local_size != remote_size:
+                    logger.warning(f"[Iris] Size mismatch for {path}: local={local_size}, remote={remote_size}")
+                    return False
+        except Exception as e:
+            logger.debug(f"[Iris] Remote size check skipped: {e}")
+            
+    return True
+
+
+def download_gguf(filename: str, quiet: bool = False) -> bool:
     dest_path = os.path.join(os.path.dirname(_HERE), "models", filename)
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
-    if os.path.exists(dest_path) and os.path.getsize(dest_path) > 1024:
+    download_info = get_size_config_download_info(filename)
+    expected_url = download_info[0] if download_info else None
+
+    if os.path.exists(dest_path) and _is_gguf_valid(dest_path, expected_url):
         if not quiet:
-            logger.info(f"[Iris] {filename} already present, skipping download")
+            logger.info(f"[Iris] {filename} already present and valid, skipping download")
         return True
 
     if not quiet:
         logger.info(f"[Iris] Downloading {filename} ...")
-    sources = _MODEL_SOURCES[filename]
+
+    sources = []
+    if download_info:
+        url, remote_name = download_info
+        hf_parsed = _parse_hf_url(url)
+        if hf_parsed:
+            sources.append(hf_parsed)
+        else:
+            sources.append(("", url))
+    
+    if filename in _MODEL_SOURCES:
+        for repo_id, remote_name in _MODEL_SOURCES[filename]:
+            if (repo_id, remote_name) not in sources:
+                sources.append((repo_id, remote_name))
+
+    if not sources:
+        if not quiet:
+            logger.info(f"[Iris] No download sources known for {filename}")
+        return False
+
     last_error = None
 
     try:
@@ -533,6 +624,8 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
         import time as _time
 
         for repo_id, remote_name in sources:
+            if not repo_id:
+                continue
             try:
                 if not quiet:
                     logger.info(f"  Trying {repo_id}/{remote_name} ...")
@@ -552,9 +645,9 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
                 return True
             except Exception as e:
                 last_error = str(e)
-                if '401' in last_error or 'gated' in last_error.lower():
+                if "401" in last_error or "gated" in last_error.lower():
                     continue
-                if 'already exists' in last_error.lower():
+                if "already exists" in last_error.lower():
                     return True
                 if not quiet:
                     logger.warning(f"  Failed: {last_error[:60]}...")
@@ -566,7 +659,10 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
         import time as _time
 
         for repo_id, remote_name in sources:
-            url = f"https://huggingface.co/{repo_id}/resolve/main/{remote_name}"
+            if not repo_id:
+                url = remote_name
+            else:
+                url = f"https://huggingface.co/{repo_id}/resolve/main/{remote_name}"
             try:
                 if not quiet:
                     logger.info(f"  Trying direct: {url[:80]}...")
@@ -646,12 +742,26 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
                 logger.info(f"[Iris] Evicting cached {role.value} model because n_ctx {cached_n_ctx} < {override_n_ctx}")
                 _unload_locked(role.value)
 
-        if not os.path.exists(path):
-            raise FileNotFoundError(
-                f"GGUF model not found for role '{role.value}'.\n"
-                f"Expected: {path}\n"
-                f"Please place the GGUF file in {os.path.join(os.path.dirname(_HERE), 'models')}/"
-            )
+        # Check if the model is missing, incomplete, or corrupted, and auto-download if needed
+        download_info = get_size_config_download_info(filename)
+        expected_url = download_info[0] if download_info else None
+        
+        if not os.path.exists(path) or not _is_gguf_valid(path, expected_url):
+            if os.path.exists(path):
+                logger.warning(f"[Iris] Model file {filename} at {path} is corrupted, incomplete, or invalid. Deleting and re-downloading...")
+                try:
+                    os.remove(path)
+                except Exception as e:
+                    logger.error(f"[Iris] Failed to remove invalid model file: {e}")
+            
+            logger.info(f"[Iris] Downloading missing/invalid model {filename}...")
+            download_success = download_gguf(filename)
+            if not download_success or not os.path.exists(path):
+                raise FileNotFoundError(
+                    f"GGUF model not found or failed to download for role '{role.value}'.\n"
+                    f"Expected: {path}\n"
+                    f"Please place the GGUF file in {os.path.join(os.path.dirname(_HERE), 'models')}/"
+                )
         cfg = load_generation_config()
         
         hw = get_hardware_profile()
@@ -778,22 +888,37 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
 
         _flash_attn = hw.flash_attn  
 
-        _new_llm = Llama(
-            model_path=path,
-            n_ctx=n_ctx,
-            n_gpu_layers=n_gpu_layers,
-            n_threads=n_threads,
-            n_threads_batch=_n_threads_batch,
-            use_mmap=hw.use_mmap,
-            use_mlock=hw.use_mlock,
-            flash_attn=_flash_attn,
-            type_k=_selected_kv_type,
-            type_v=_selected_kv_type,
-            n_batch=_n_batch,
-            n_ubatch=_n_ubatch,
-            verbose=False,
-            logits_all=(draft_model is not None),
-        )
+        try:
+            _new_llm = Llama(
+                model_path=path,
+                n_ctx=n_ctx,
+                n_gpu_layers=n_gpu_layers,
+                n_threads=n_threads,
+                n_threads_batch=_n_threads_batch,
+                use_mmap=hw.use_mmap,
+                use_mlock=hw.use_mlock,
+                flash_attn=_flash_attn,
+                type_k=_selected_kv_type,
+                type_v=_selected_kv_type,
+                n_batch=_n_batch,
+                n_ubatch=_n_ubatch,
+                verbose=False,
+                logits_all=(draft_model is not None),
+            )
+        except Exception as e:
+            logger.error(f"[Iris] Failed to load model from file: {path}. Error: {e}", exc_info=True)
+            try:
+                if os.path.exists(path):
+                    logger.warning(f"[Iris] Deleting potentially corrupted model file: {path}")
+                    os.remove(path)
+            except Exception as del_err:
+                logger.error(f"[Iris] Failed to delete corrupted model file: {del_err}")
+                
+            raise RuntimeError(
+                f"Failed to load model from file: {path}. "
+                f"This usually indicates the file is corrupted/incomplete or you ran out of memory (RAM/VRAM). "
+                f"The corrupted file has been deleted. Please try again to trigger a clean re-download."
+            )
         
         if draft_model is not None:
             _new_llm.draft_model = draft_model
