@@ -197,6 +197,13 @@ def auto_compact_for_role(
     if not messages:
         return [], "empty"
 
+    # Extract system message to prevent it from being summarized
+    system_msg = None
+    history_msgs = messages
+    if messages and messages[0].get("role") == "system":
+        system_msg = messages[0]
+        history_msgs = messages[1:]
+
     n_ctx = iris_module.ROLE_CTX.get(role, iris_module.DEFAULT_CTX)
     available = n_ctx - 256 - max_output_tokens
 
@@ -208,4 +215,7 @@ def auto_compact_for_role(
     if tokens > available * 3:
         level = CompactionLevel.AGGRESSIVE
 
-    return compact_context(messages, role=role, level=level, n_ctx=n_ctx)
+    compacted_history, info = compact_context(history_msgs, role=role, level=level, n_ctx=n_ctx)
+    if system_msg:
+        return [system_msg] + compacted_history, info
+    return compacted_history, info

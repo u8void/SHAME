@@ -1180,17 +1180,6 @@ def classify_task(
         except ValueError:
             pass
 
-    if _active_role is not None and history:
-        role_to_task = {
-            ModelRole.CODE: TaskType.CODING_SIMPLE,
-            ModelRole.MATH: TaskType.MATH,
-            ModelRole.CONTROL: TaskType.CONTROL,
-            ModelRole.REASONING: TaskType.REASONING,
-            ModelRole.GENERAL: TaskType.GENERAL,
-        }
-        if _active_role in role_to_task:
-            return role_to_task[_active_role], None
-
     minimized = _minimize_history(history, max_entries=2)
     triage_messages = [{"role": "system", "content": TRIAGE_SYSTEM_PROMPT}]
     for msg in minimized:
@@ -1208,7 +1197,7 @@ def classify_task(
     llm = load_model(ModelRole.TRIAGE)
     res = llm.create_chat_completion(
         messages=triage_messages,
-        max_tokens=64,
+        max_tokens=256,
         temperature=0.1,
     )
     answer = res["choices"][0]["message"]["content"].strip()
@@ -1384,29 +1373,14 @@ def _stream_tokens(
 
     sanitized_messages = _sanitize_for_role(messages, role)
 
-    if role in (ModelRole.REASONING, ModelRole.GENERAL):
-        full_messages = list(sanitized_messages)
-        # Inject system prompt into the LAST (current) user message, not the oldest one
-        last_user_idx = next(
-            (i for i in range(len(full_messages) - 1, -1, -1) if full_messages[i]["role"] == "user"),
-            None
-        )
-        if last_user_idx is not None:
-            full_messages[last_user_idx] = {
-                "role": "user",
-                "content": f"System Instructions:\n{sys_prompt}\n\nUser Query:\n{full_messages[last_user_idx]['content']}"
-            }
-        else:
-            full_messages = [{"role": "user", "content": f"System Instructions:\n{sys_prompt}"}] + full_messages
-    else:
-        full_messages = [{"role": "system", "content": sys_prompt}] + sanitized_messages
+    full_messages = [{"role": "system", "content": sys_prompt}] + sanitized_messages
 
     cfg = load_generation_config()
     model_cfg = cfg.get("model_settings", {}).get(role.value, {})
 
     
     actual_temp = temperature
-    rep_penalty = 1.0
+    rep_penalty = 1.1
     freq_penalty = 0.05 if role in (ModelRole.CODE, ModelRole.REASONING) else 0.0
     pres_penalty = 0.05 if role in (ModelRole.CODE, ModelRole.REASONING) else 0.0
     top_p = 0.9
