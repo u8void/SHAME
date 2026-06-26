@@ -580,8 +580,7 @@ def _is_gguf_valid(path: str, url: Optional[str] = None) -> bool:
             with urllib.request.urlopen(req, timeout=3) as resp:
                 remote_size = int(resp.getheader("Content-Length", 0))
                 if remote_size > 10 * 1024 * 1024 and local_size != remote_size:
-                    logger.warning(f"[Iris] Size mismatch for {path}: local={local_size}, remote={remote_size}")
-                    return False
+                    logger.warning(f"[Iris] Size mismatch for {path}: local={local_size}, remote={remote_size}. Keeping local file as it has a valid GGUF header.")
         except Exception as e:
             logger.debug(f"[Iris] Remote size check skipped: {e}")
             
@@ -949,6 +948,14 @@ def unload_model() -> None:
     
     with _model_lock:
         _unload_locked(None)
+
+
+def _force_unload_all_models() -> None:
+    unload_model()
+    try:
+        unload_vision_model()
+    except Exception:
+        pass
 
 
 
