@@ -573,17 +573,6 @@ def _is_gguf_valid(path: str, url: Optional[str] = None) -> bool:
     except Exception:
         return False
 
-    if url:
-        try:
-            import urllib.request
-            req = urllib.request.Request(url, method="HEAD")
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                remote_size = int(resp.getheader("Content-Length", 0))
-                if remote_size > 10 * 1024 * 1024 and local_size != remote_size:
-                    logger.warning(f"[Iris] Size mismatch for {path}: local={local_size}, remote={remote_size}. Keeping local file as it has a valid GGUF header.")
-        except Exception as e:
-            logger.debug(f"[Iris] Remote size check skipped: {e}")
-            
     return True
 
 
@@ -1188,9 +1177,23 @@ def classify_task(
 
     result = _fallback_classify(query_for_classification)
     if result is not None:
-        
         if result == TaskType.CONTROL and ("mockup" in lower_query or "terminal element" in lower_query or "terminal window" in lower_query):
             pass
+        elif history and result in (TaskType.SEARCH, TaskType.REASONING):
+            words = query_for_classification.split()
+            has_pronoun = False
+            pronoun_pattern = re.compile(
+                r'\b(he|him|his|she|her|hers|it|its|they|them|their|theirs|this|that|these|those|here|there|then|they\'re|it\'s|that\'s|this\'s|them\'s|where\'s|what\'s|how\'s|who\'s|why\'s|'
+                r'هو|هي|هما|هم|هن|هذا|هذه|هذان|هاتان|هؤلاء|ذلك|تلك|أولئك|ده|دي|دول|فين|ليه|إيه|ايه|عنه|عنها|عنهم|فيه|فيها|فيهم|منه|منها|منهم)\b',
+                re.IGNORECASE
+            )
+            if len(words) < 6 or pronoun_pattern.search(query_for_classification):
+                has_pronoun = True
+            
+            if has_pronoun:
+                logger.info(f"[Triage] Query '{query_for_classification}' appears to be a follow-up or contextual. Bypassing fallback classify to use LLM Triage.")
+            else:
+                return result, None
         else:
             return result, None
             

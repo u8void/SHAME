@@ -744,7 +744,7 @@ def ai_agent_handle(user_input: str, retriever=None, history=None, **kwargs):
 
     from src.iris import ask_stream
 
-    keep_loaded = kwargs.get("keep_loaded", True)
+    keep_loaded = kwargs.get("keep_loaded", False)
     yield from ask_stream(
         user_input,
         history,

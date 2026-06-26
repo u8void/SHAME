@@ -311,7 +311,7 @@ def chat():
                     get_retriever(),
                     agent_history,
                     settings=settings,
-                    keep_loaded=True
+                    keep_loaded=False
                 ):
                     yield f"data: {json.dumps(event)}\n\n"
             except Exception as e:
@@ -783,16 +783,8 @@ def model_status():
     })
 
 def warmup_models():
-    
-    if PRO_MODE or os.environ.get("SKIP_CONTROL") == "1":
-        return
-    
-    from src.iris import load_model, ModelRole
-    try:
-        logger.info("[Warmup] Loading and locking Control model into memory...")
-        load_model(ModelRole.CONTROL)
-    except Exception as e:
-        logger.warning(f"[Warmup] Failed to load Control model: {e}")
+    # Warmup disabled as requested to prevent loading/locking models in RAM on startup.
+    pass
 
 @app.route("/api/unload_models", methods=["POST"])
 def unload_models_endpoint():
