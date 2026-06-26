@@ -225,7 +225,8 @@ TRIAGE_SYSTEM_PROMPT = (
     f"{IRIS_IDENTITY}\n"
     "You are the Iris AI Router. Your ONLY job is to output ONE routing tag.\n"
     "Rules:\n"
-    "1. Greetings, 'hi', 'hello', 'who are you', 'what language do you speak' → answer directly, NO tag.\n"
+    "1. Simple greetings like 'hi', 'hello', 'good morning' → answer with a SHORT greeting, NO tag.\n"
+    "   BUT: identity questions like 'who are you', 'who made you', 'what are you' → [ROUTE: GENERAL]\n"
     "2. For EVERY other query, output EXACTLY ONE of these tags and NOTHING ELSE:\n"
     "   [ROUTE: SEARCH: keywords]  — factual question, current events, people, places, products, history, definitions\n"
     "   [ROUTE: REASONING]         — how/why questions, explanations, analysis, comparisons, summaries, document reading\n"
@@ -256,7 +257,11 @@ TRIAGE_SYSTEM_PROMPT = (
     "User: open spotify → [ROUTE: CONTROL]\n"
     "User: send a whatsapp message to Mom saying hello → [ROUTE: CONTROL]\n"
     "User: login to github for me → [ROUTE: CONTROL]\n"
-    "User: hi → Hello! How can I help you today?\n\n"
+    "User: hi → Hello! How can I help you today?\n"
+    "User: who are you → [ROUTE: GENERAL]\n"
+    "User: who made you → [ROUTE: GENERAL]\n"
+    "User: what are you → [ROUTE: GENERAL]\n"
+    "User: من أنت → [ROUTE: GENERAL]\n\n"
     "Output ONLY the tag. No explanation. No other text."
 )
 
@@ -1231,8 +1236,12 @@ def classify_task(
         
         GREETING_PATTERNS = re.compile(
             r'^(hi|hey|hello|howdy|greetings|yo|sup|good\s*(morning|afternoon|evening|day|night)|'
-            r'welcome|hiya|what\'?s?\s*up|how\s*are\s*you|nice\s*to\s*meet|'
-            r'i\'m\s+iris|i\s+am\s+iris|iris\s+here|i\'m\s+an?\s+ai)',
+            r'welcome|hiya|what\'?s?\s*up|how\s*are\s*you|nice\s*to\s*meet)',
+            re.IGNORECASE
+        )
+        # Identity-like answers must NOT be treated as greetings — route to GENERAL instead
+        IDENTITY_PATTERNS = re.compile(
+            r'(i\'?m\s+(iris|an?\s+ai)|i\s+am\s+(iris|an?\s+ai)|iris\s+here|created\s+by|made\s+by|built\s+by|أنا)',
             re.IGNORECASE
         )
         is_greeting_reply = (
@@ -1245,6 +1254,7 @@ def classify_task(
                 r'\b(is|are|was|were|has|have|had|will|would|can|could|do|does|did|because|therefore|however)\b',
                 answer, re.IGNORECASE
             )
+            and not IDENTITY_PATTERNS.search(answer)
         )
         if is_greeting_reply:
             return None, answer
@@ -1272,16 +1282,36 @@ def _quality_guard(text: str) -> str:
     text = re.sub(r'```[\s\S]*?```', _scrub_latex_in_code, text)
 
     text = re.sub(
-        r"\\boxed{((?:[^{}]|{[^{}]*})*)}" ,
+        r"\\boxed{((?:[^{}]|{[^{}]*})*)}",
         r'<span style="border: 2px solid #4CAF50; padding: 2px 6px; border-radius: 4px; font-weight: bold; background-color: rgba(76, 175, 80, 0.1);">\1</span>',
         text
     )
 
+    # Strip identity bleed from upstream models (DeepSeek, Qwen, etc.)
     text = re.sub(
-        r"(?i)(I('m| am) (DeepSeek|Qwen|Intern|Hermes|a large language model|an AI language model)"
+        r"(?i)(I('m| am) (DeepSeek|Qwen|Intern|Hermes|Llama|Meta|Mistral|"
+        r"a large language model|an AI language model|an artificial intelligence)"
         r"[^.]*\.?\s*)",
         "", text
     ).strip()
+
+    # --- Repetition loop detection: truncate if a sentence repeats 3+ times ---
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) > 6:
+        seen = {}
+        cut_idx = None
+        for i, s in enumerate(sentences):
+            normalized = s.strip().lower()
+            if len(normalized) < 15:
+                continue
+            seen[normalized] = seen.get(normalized, 0) + 1
+            if seen[normalized] >= 3:
+                cut_idx = i
+                break
+        if cut_idx is not None:
+            text = ' '.join(sentences[:cut_idx])
+            if not text.endswith(('.', '!', '?')):
+                text += '.'
 
     for open_tag, close_tag in [("<think>", "</think>"), ("<thought>", "</thought>"), ("<|thought_start|>", "<|thought_end|>")]:
         if open_tag in text:
@@ -1378,13 +1408,25 @@ def _stream_tokens(
     cfg = load_generation_config()
     model_cfg = cfg.get("model_settings", {}).get(role.value, {})
 
-    
+    # --- Role-aware default generation parameters ---
     actual_temp = temperature
     rep_penalty = 1.1
-    freq_penalty = 0.05 if role in (ModelRole.CODE, ModelRole.REASONING) else 0.0
-    pres_penalty = 0.05 if role in (ModelRole.CODE, ModelRole.REASONING) else 0.0
+    freq_penalty = 0.05
+    pres_penalty = 0.05
     top_p = 0.9
     top_k = 40
+
+    # Role-specific min_p: higher for smaller/precision roles, lower for creative roles
+    _min_p_defaults = {
+        ModelRole.TRIAGE: 0.1,
+        ModelRole.CONTROL: 0.1,
+        ModelRole.MATH: 0.1,
+        ModelRole.CODE: 0.05,
+        ModelRole.REVIEWER: 0.05,
+        ModelRole.REASONING: 0.05,
+        ModelRole.GENERAL: 0.03,
+    }
+    min_p = _min_p_defaults.get(role, 0.05)
 
     
     actual_temp = cfg.get("temperature", actual_temp)
@@ -1455,7 +1497,7 @@ def _stream_tokens(
             presence_penalty=pres_penalty,
             top_p=top_p,
             top_k=top_k,
-            min_p=0.05,
+            min_p=min_p,
             seed=42 + loop_idx,
             stop=["</s>", "<|eot_id|>", "<|end_of_text|>", "<|im_end|>", "<step_end>"],
         )
@@ -2750,6 +2792,13 @@ def solve_math(user_text: str) -> Optional[str]:
     text = re.sub(r'^(solve|calculate|what is|compute)\s+', '', text, flags=re.IGNORECASE).strip()
 
     def normalise(expr: str) -> str:
+        # Normalize Unicode math symbols BEFORE anything else
+        expr = expr.replace('×', '*').replace('✕', '*').replace('✖', '*')
+        expr = expr.replace('÷', '/').replace('⁄', '/')
+        expr = expr.replace('−', '-').replace('–', '-').replace('—', '-')
+        expr = expr.replace('²', '**2').replace('³', '**3')
+        expr = expr.replace('π', 'pi')
+        # Implicit multiplication: 2x → 2*x
         expr = re.sub(r'([0-9])([a-zA-Z])', r'\1*\2', expr)
         expr = re.sub(r'\^', '**', expr)
         return expr
@@ -2782,13 +2831,22 @@ def solve_math(user_text: str) -> Optional[str]:
     else:
         if not re.search(r'\d', text):
             return None
+        normalized = normalise(text)
+        # If after normalization it's purely arithmetic (no variables), evaluate directly
+        has_variables = bool(re.findall(r'\b([a-zA-Z])\b', normalized.replace('pi', '')))
         try:
-            expr = parse_expr(normalise(text), transformations=transformations)
+            expr = parse_expr(normalized, transformations=transformations)
+            if has_variables:
+                simplified = simplify(expr)
+                return str(simplified)
             result = expr.evalf()
             if result.is_integer:
                 return str(int(result))
             elif result.is_Float:
-                return str(round(float(result), 6))
+                rounded = round(float(result), 6)
+                if rounded == int(rounded):
+                    return str(int(rounded))
+                return str(rounded)
             else:
                 return str(result)
         except Exception:
