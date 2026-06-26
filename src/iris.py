@@ -1347,7 +1347,8 @@ def _stream_tokens(
     temperature: float = 0.7,
     think_mode: str = "pass",
     system_prompt_override: Optional[str] = None,
-    settings: Optional[dict] = None
+    settings: Optional[dict] = None,
+    extra_stop_words: Optional[List[str]] = None
 ) -> Generator[Dict[str, str], None, None]:
     global _keep_loaded
 
@@ -1411,8 +1412,8 @@ def _stream_tokens(
     # --- Role-aware default generation parameters ---
     actual_temp = temperature
     rep_penalty = 1.1
-    freq_penalty = 0.05
-    pres_penalty = 0.05
+    freq_penalty = 0.3 if role in (ModelRole.CODE, ModelRole.REASONING) else 0.05
+    pres_penalty = 0.3 if role in (ModelRole.CODE, ModelRole.REASONING) else 0.05
     top_p = 0.9
     top_k = 40
 
@@ -1450,6 +1451,9 @@ def _stream_tokens(
         actual_temp = settings.get("temperature", actual_temp)
         rep_penalty = settings.get("repetition_penalty", rep_penalty)
 
+    if role == ModelRole.CODE and rep_penalty < 1.15:
+        rep_penalty = 1.15
+        
     THINK_PAIRS = [
         ("<think>", "</think>"),
         ("<|thought_start|>", "<|thought_end|>"),
@@ -1487,10 +1491,15 @@ def _stream_tokens(
         full_messages, _ = auto_compact_for_role(full_messages, role=role, max_output_tokens=min(max_tokens, 1024))
         
         logger.debug(f"[Model Start] Role: {role.value.upper()} | Model: {model_name}")
+        stop_list = ["</s>", "<|eot_id|>", "<|end_of_text|>", "<|im_end|>", "<step_end>", "## Conversation"]
+        if extra_stop_words:
+            stop_list.extend(extra_stop_words)
+            
+        actual_max_tokens = None if max_tokens >= 4000 else max_tokens
         stream = llm.create_chat_completion(
             messages=full_messages,
             stream=True,
-            max_tokens=max_tokens,
+            max_tokens=actual_max_tokens,
             temperature=actual_temp,
             repeat_penalty=rep_penalty,
             frequency_penalty=freq_penalty,
@@ -1499,7 +1508,7 @@ def _stream_tokens(
             top_k=top_k,
             min_p=min_p,
             seed=42 + loop_idx,
-            stop=["</s>", "<|eot_id|>", "<|end_of_text|>", "<|im_end|>", "<step_end>"],
+            stop=stop_list,
         )
         loop_content = ""
         finish_reason = "stop"
@@ -1759,16 +1768,40 @@ def _stream_tokens(
             
             if looks_incomplete:
                 finish_reason = "length"
+            elif role == ModelRole.CODE:
+                try:
+                    from src.iris_pro import verify_code_syntax
+                    blocks = re.findall(r'```(\w*)\n(.*?)```', loop_content, re.DOTALL)
+                    if blocks:
+                        lang, code = blocks[-1]
+                        err = verify_code_syntax(code, lang)
+                        if err is not None:
+                            logger.warning(f"Syntax verification failed in normal mode: {err}")
+                            yield {"type": "status", "content": "Fixing syntax errors..."}
+                            yield {"type": "clear"}
+                            full_messages.append({"role": "assistant", "content": loop_content})
+                            full_messages.append({
+                                "role": "user",
+                                "content": f"The following code you generated has a syntax error:\n\n```\n{err}\n```\n\nCode:\n```\n{code}\n```\n\nFix the error immediately and output the complete, corrected code."
+                            })
+                            finish_reason = "error_fix"
+                except Exception as exc:
+                    logger.error(f"Error during syntax verification: {exc}")
 
-        yield {"type": "finish", "reason": finish_reason}
+        if finish_reason != "error_fix":
+            yield {"type": "finish", "reason": finish_reason}
 
         if finish_reason == "length":
-            full_messages.append({"role": "assistant", "content": loop_content})
+            content_to_keep = loop_content[-6000:] if len(loop_content) > 6000 else loop_content
+            prefix = "...[TRUNCATED]...\n" if len(loop_content) > 6000 else ""
+            full_messages.append({"role": "assistant", "content": prefix + content_to_keep})
             full_messages.append({
                 "role": "user",
                 "content": "Continue exactly where you left off, from the very next character. "
                 "Do not repeat anything."
             })
+        elif finish_reason == "error_fix":
+            continue
         else:
             break
 
@@ -2488,7 +2521,9 @@ def _run_complex_coding(
     reasoning_prompt = (
         "You are the Iris AI Reasoning Specialist. Analyze the user's coding request "
         "and produce a detailed architecture plan. Consider file structure, algorithms, "
-        "edge cases, and dependencies. Do NOT write code \u2014 only the plan. "
+        "edge cases, and dependencies.\n\n"
+        "CRITICAL INSTRUCTION: DO NOT WRITE ANY IMPLEMENTATION CODE. NO ``` CODE BLOCKS. "
+        "If you write any code implementations, you will be heavily penalized. Leave the actual code to the coding model.\n\n"
         "Your ENTIRE response MUST be wrapped in <think>...</think> tags. "
         "Do NOT output any final answer outside of the <think> tags."
     )
@@ -2498,7 +2533,7 @@ def _run_complex_coding(
     reasoning_msgs = [{"role": "system", "content": reasoning_prompt}] + optimized
 
     raw_reasoning = ""
-    for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="pass", settings=settings):
+    for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="pass", settings=settings, extra_stop_words=["```"]):
         yield ev
         if ev["type"] in ("token", "thinking"):
             raw_reasoning += ev["content"]
@@ -2508,11 +2543,11 @@ def _run_complex_coding(
     yield {"type": "status", "content": "Stage 2 \u2014 Writing code..."}
     code_msgs = optimized[:-1] + [
         {"role": "user",
-         "content": f"User Query: {user_query}\n\nArchitecture/Plan:\n{raw_reasoning[-8000:]}\n\nWrite the complete code based on the plan. Do NOT output any conversational filler. Enclose all final code inside proper ``` language blocks."}
+         "content": f"User Query: {user_query}\n\nArchitecture/Plan:\n{raw_reasoning[-8000:]}\n\nYou are the expert Code Developer. Using the architectural plan above, WRITE THE ACTUAL FULL IMPLEMENTATION yourself. If the plan contains any partial or truncated code snippets, ignore them and write the correct, full code from scratch. Do NOT output any conversational filler. Enclose all final code inside proper ``` language blocks."}
     ]
     yield {"type": "token", "content": "<coding>\n"}
     full_code = "<coding>\n"
-    for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.2, think_mode="pass", settings=settings):
+    for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.4, think_mode="pass", settings=settings):
         yield ev
         if ev["type"] == "token":
             full_code += ev["content"]
@@ -2526,10 +2561,11 @@ def _run_complex_coding(
         {"role": "assistant", "content": full_code.replace("<coding>\n", "")},
         {"role": "user",
          "content": "Review the above code. Fix all syntax errors, logical bugs, edge cases, "
-         "and ensure it compiles/works correctly. Do NOT output conversational filler. Return the final corrected code inside a ``` language block, followed by a brief explanation."}
+         "and ensure it compiles/works correctly. Return the final corrected code inside a ``` language block. "
+         "IMPORTANT: Immediately AFTER the code block, you MUST write a detailed explanation of the code and its features for the user."}
     ]
     final_output = ""
-    for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+    for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=None, temperature=0.4, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT, settings=settings):
         yield ev
         if ev["type"] == "token":
             final_output += ev["content"]

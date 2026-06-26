@@ -416,6 +416,9 @@ function renderChatList(query = '') {
 
         // Strip leading special tokens/headers that sometimes leak from certain models
         let formatted = text.replace(/^(\s|<\|endoftext\|>|<\|im_start\|>assistant<\|im_sep\|>|<\|im_end\|>)+/gi, '');
+        
+        // Strip <coding> tags as they interfere with markdown parsing and shouldn't be rendered
+        formatted = formatted.replace(/<\/?coding>/gi, '');
 
         return _formatRefined(formatted, isStreaming);
     }

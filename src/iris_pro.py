@@ -48,6 +48,38 @@ IRIS_IDENTITY = (
     "CRITICAL LANGUAGE RULE: You MUST always respond in the EXACT SAME LANGUAGE as the user's input. If the user speaks Arabic, you MUST reply entirely in Arabic. This includes your internal <think> process: if the user speaks Arabic, your <think> block MUST ALSO be in Arabic to prevent cross-lingual hallucinations and degradation of depth."
 )
 
+def verify_code_syntax(code: str, lang: str) -> str | None:
+    import ast
+    import subprocess
+    import tempfile
+    
+    lang = lang.lower().strip()
+    if lang in ["python", "py"]:
+        try:
+            ast.parse(code)
+            return None
+        except SyntaxError as e:
+            return f"SyntaxError: {e}"
+    elif lang in ["html", "js", "javascript"]:
+        js_code = code
+        if lang == "html":
+            import re
+            scripts = re.findall(r'<script\b[^>]*>(.*?)</script>', code, re.DOTALL | re.IGNORECASE)
+            js_code = "\n".join(scripts)
+        if js_code.strip():
+            with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+                f.write(js_code)
+                temp_path = f.name
+            try:
+                res = subprocess.run(["node", "-c", temp_path], capture_output=True, text=True)
+                if res.returncode != 0:
+                    return res.stderr.strip()
+            except Exception:
+                pass
+            finally:
+                os.remove(temp_path)
+    return None
+
 class Model(str, Enum):
     ORCHESTRATOR  = "cmc/xiaomi/mimo-v2.5-pro"
     
@@ -1331,6 +1363,54 @@ async def ask_stream(
                         else:
                             break
                             
+                    # === STAGE 4: EXECUTION & VERIFICATION ===
+                    yield {"type": "status", "content": "Stage 4 — Verifying execution/syntax..."}
+                    log.info("Starting syntax verification (Stage 4)...")
+                    
+                    for _attempt in range(2):
+                        blocks = re.findall(r'```(\w*)\n(.*?)```', raw_review, re.DOTALL)
+                        if not blocks:
+                            break
+                            
+                        lang, code = blocks[-1]
+                        err = verify_code_syntax(code, lang)
+                        if err is None:
+                            break
+                        
+                        log.warning("Syntax verification failed: %s", err)
+                        yield {"type": "status", "content": "Stage 4 — Fixing syntax errors..."}
+                        yield {"type": "clear"}
+                        
+                        fix_messages = [
+                            {"role": "system", "content": CODE_REVIEWER_SYSTEM_PROMPT},
+                            {"role": "user", "content": f"The following code you generated has a syntax error:\n\n```\n{err}\n```\n\nCode:\n```\n{code}\n```\n\nFix the error immediately and output the complete, corrected code."}
+                        ]
+                        raw_review = ""
+                        try:
+                            last_review_usage = {}
+                            async for chunk in client.stream_chat(
+                                model=Model.CODE_REVIEWER.value,
+                                messages=fix_messages,
+                                temperature=0.1,
+                                max_tokens=MAX_TOKENS,
+                            ):
+                                try:
+                                    choice = chunk.get("choices", [{}])[0]
+                                    if chunk.get("usage"):
+                                        last_review_usage = chunk["usage"]
+                                    delta = choice.get("delta", {})
+                                    token = delta.get("content", "")
+                                    if token:
+                                        raw_review += token
+                                        yield {"type": "token", "content": token}
+                                    if chunk.get("keepalive"):
+                                        yield {"type": "status", "content": "Fixing code..."}
+                                except (KeyError, IndexError):
+                                    pass
+                        except Exception as exc:
+                            log.exception("Error during auto-correction: %s", exc)
+                            break
+                            
                     elapsed = time.perf_counter() - t0_review
                     synthetic_raw = {
                         "choices": [{"message": {"content": raw_review}}],
@@ -1340,7 +1420,7 @@ async def ask_stream(
                     hop_rev.log_summary()
                     hops.append(hop_rev)
                 except Exception as exc:
-                    log.exception("Error in Code Review stage: %s", exc)
+                    log.exception("Error in Code Review/Execution stage: %s", exc)
                     raise
 
         elif mode == "fast":
