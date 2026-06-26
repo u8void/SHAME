@@ -35,6 +35,18 @@ import uuid
 import argparse
 import threading
 import subprocess
+from pyngrok import ngrok
+
+# Automatically inject the user ngrok auth token
+os.environ["NGROK_AUTHTOKEN"] = "3EBKvZCNqbEzWqq5W2Il55gze9F_7yi85EtZZcJQQoWzKM2CY"
+ngrok.set_auth_token(os.environ["NGROK_AUTHTOKEN"])
+
+# Create an ngrok tunnel on port 5050
+public_url = ngrok.connect(5050).public_url
+print("\n" + "="*60)
+print(f"-> Iris AI is available publicly at: {public_url}")
+print("="*60 + "\n")
+
 
 from flask import Flask, request, jsonify, render_template, Response
 from werkzeug.utils import secure_filename
