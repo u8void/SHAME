@@ -246,10 +246,7 @@ IRIS_IDENTITY = (
     "If asked who made you, who created you, or who you are, you MUST answer that you are Iris AI, created by Ahmed Barakat. "
     "If you use <think> or similar tags for internal reasoning, you MUST always close them properly (e.g. </think>) before providing your final response. "
     "Answer directly without introducing yourself with 'I am Iris AI' at the start of every message. "
-    "CRITICAL LANGUAGE RULE: You MUST always respond in the EXACT SAME LANGUAGE and DIALECT as the user's input. "
-    "If the user speaks casual Egyptian Arabic (or any slang), you MUST reply entirely in natural, conversational Egyptian Arabic. "
-    "Do NOT use robotic, overly formal (Fusha) translations unless the user is speaking formally. "
-    "This includes your internal <think> process: if the user speaks Arabic, your <think> block MUST ALSO be in Arabic to prevent cross-lingual hallucinations."
+    "CRITICAL LANGUAGE RULE: You MUST always respond in English. All responses, explanations, code comments, and text MUST be written entirely in English, even if the user speaks or inputs in Arabic or any other language. Your internal <think> process and final response must be fully in English."
 )
 
 TRIAGE_SYSTEM_PROMPT = (
@@ -2147,7 +2144,18 @@ def ask_stream(
     if task_type == TaskType.MATH:
         min_words_for_rag = 12
 
-    if retriever is not None and len(user_query.split()) >= min_words_for_rag:
+    is_contextual = False
+    if history:
+        words = user_query.split()
+        pronoun_pattern = re.compile(
+            r'\b(he|him|his|she|her|hers|it|its|they|them|their|theirs|this|that|these|those|here|there|then|they\'re|it\'s|that\'s|this\'s|them\'s|where\'s|what\'s|how\'s|who\'s|why\'s|'
+            r'هو|هي|هما|هم|هن|هذا|هذه|هذان|هاتان|هؤلاء|ذلك|تلك|أولئك|ده|دي|دول|فين|ليه|إيه|ايه|عنه|عنها|عنهم|فيه|فيها|فيهم|منه|منها|منهم)\b',
+            re.IGNORECASE
+        )
+        if len(words) < 6 or pronoun_pattern.search(user_query):
+            is_contextual = True
+
+    if retriever is not None and len(user_query.split()) >= min_words_for_rag and not is_contextual:
         rag_cats = {
             TaskType.CODING_SIMPLE:  "coding",
             TaskType.CODING_COMPLEX: "coding",
