@@ -171,10 +171,10 @@ _MODEL_SOURCES: Dict[str, list] = {
         ("Qwen/Qwen2.5-Coder-7B-Instruct-GGUF", "qwen2.5-coder-7b-instruct-q4_k_m.gguf"),
     ],
     "iris_003.gguf": [
-        ("Qwen/Qwen2.5-Math-7B-Instruct-GGUF", "qwen2.5-math-7b-instruct-q4_k_m.gguf"),
+        ("bartowski/Qwen2.5-Math-7B-Instruct-GGUF", "Qwen2.5-Math-7B-Instruct-Q4_K_M.gguf"),
     ],
     "iris_004.gguf": [
-        ("unsloth/Qwen3-Coder-14B-GGUF", "Qwen3-Coder-14B-Q4_K_M.gguf"),
+        ("Qwen/Qwen2.5-Coder-14B-Instruct-GGUF", "qwen2.5-coder-14b-instruct-q4_k_m.gguf"),
     ],
     "iris_005.gguf": [
         ("unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF", "DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"),

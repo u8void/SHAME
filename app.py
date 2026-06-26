@@ -38,7 +38,7 @@ import subprocess
 from pyngrok import ngrok
 
 # Automatically inject the user ngrok auth token
-os.environ["NGROK_AUTHTOKEN"] = "3EBKvZCNqbEzWqq5W2Il55gze9F_7yi85EtZZcJQQoWzKM2CY"
+os.environ["NGROK_AUTHTOKEN"] = "3FfksVtocdWyUYoTTRjma1UPSmR_4mYKhAWv7P5Po298Pf1Kt"
 ngrok.set_auth_token(os.environ["NGROK_AUTHTOKEN"])
 
 # Create an ngrok tunnel on port 5050

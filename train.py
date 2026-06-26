@@ -991,8 +991,8 @@ def download_all_models(roles_to_train: List[str] = None):
         fallback = {
             "iris_001.gguf": ("https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf", "Qwen3-4B-Q4_K_M.gguf"),
             "iris_004.gguf": ("https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf", "qwen2.5-coder-7b-instruct-q4_k_m.gguf"),
-            "iris_003.gguf": ("https://huggingface.co/Qwen/Qwen2.5-Math-7B-Instruct-GGUF/resolve/main/qwen2.5-math-7b-instruct-q4_k_m.gguf", "qwen2.5-math-7b-instruct-q4_k_m.gguf"),
-            "iris_004.gguf": ("https://huggingface.co/unsloth/Qwen3-Coder-14B-GGUF/resolve/main/Qwen3-Coder-14B-Q4_K_M.gguf", "Qwen3-Coder-14B-Q4_K_M.gguf"),
+            "iris_003.gguf": ("https://huggingface.co/bartowski/Qwen2.5-Math-7B-Instruct-GGUF/resolve/main/Qwen2.5-Math-7B-Instruct-Q4_K_M.gguf", "Qwen2.5-Math-7B-Instruct-Q4_K_M.gguf"),
+            "iris_004.gguf": ("https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF/resolve/main/qwen2.5-coder-14b-instruct-q4_k_m.gguf", "qwen2.5-coder-14b-instruct-q4_k_m.gguf"),
             "iris_005.gguf": ("https://huggingface.co/unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf", "DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"),
             "InternVL3_5-4B-Q4_K.gguf": ("https://huggingface.co/unsloth/InternVL3_5-4B-GGUF/resolve/main/InternVL3_5-4B-Q4_K_M.gguf", "InternVL3_5-4B-Q4_K_M.gguf"),
             "mmproj-InternVL3_5-4B-f16.gguf": ("https://huggingface.co/unsloth/InternVL3_5-4B-GGUF/resolve/main/mmproj-InternVL3_5-4B-f16.gguf", "mmproj-F16.gguf"),
