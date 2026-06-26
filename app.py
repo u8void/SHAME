@@ -38,7 +38,7 @@ import subprocess
 from pyngrok import ngrok
 
 # Automatically inject the user ngrok auth token
-os.environ["NGROK_AUTHTOKEN"] = "3FfksVtocdWyUYoTTRjma1UPSmR_4mYKhAWv7P5Po298Pf1Kt"
+os.environ["NGROK_AUTHTOKEN"] = "3EBKvZCNqbEzWqq5W2Il55gze9F_7yi85EtZZcJQQoWzKM2CY"
 ngrok.set_auth_token(os.environ["NGROK_AUTHTOKEN"])
 
 # Create an ngrok tunnel on port 5050
@@ -46,6 +46,7 @@ public_url = ngrok.connect(5050).public_url
 print("\n" + "="*60)
 print(f"-> Iris AI is available publicly at: {public_url}")
 print("="*60 + "\n")
+
 
 from flask import Flask, request, jsonify, render_template, Response
 from werkzeug.utils import secure_filename
@@ -831,7 +832,7 @@ def shutdown_endpoint():
 
 if __name__ == "__main__":
     if PRO_MODE:
-        mode_label = "IRIS PRO"
+        mode_label = "IRIS PRO (OpenRouter Multi-Agent API)"
     else:
         mode_label = "Local GGUF Multi-Model Routing System"
     logger.info(f"[INFO] Starting Iris AI — {mode_label}")
