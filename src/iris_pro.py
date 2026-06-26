@@ -68,6 +68,7 @@ class TaskType(str, Enum):
     REASONING      = "reasoning"
     GENERAL        = "general"
     SEARCH         = "search"
+    CONTROL        = "control"
 
 
 TASK_TO_MODEL: dict[TaskType, Model] = {
@@ -1147,6 +1148,7 @@ async def ask_stream(
                     yield {"type": "status", "content": "Stage 1 — Deep reasoning..."}
                     log.info("Starting reasoning stage with %s...", Model.REASONING.value)
                     last_yield_time = time.time()
+                    in_thinking = False
                     try:
                         async for chunk in client.stream_chat(
                             model=Model.REASONING.value,
@@ -1155,12 +1157,28 @@ async def ask_stream(
                             max_tokens=MAX_TOKENS,
                             extra_body={"include_reasoning": True}
                         ):
-                            token = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            
+                            if "reasoning_content" in delta and delta["reasoning_content"]:
+                                if not in_thinking:
+                                    yield {"type": "token", "content": "<think>\n"}
+                                    in_thinking = True
+                                yield {"type": "token", "content": delta["reasoning_content"]}
+                                raw_reasoning += delta["reasoning_content"]
+                            else:
+                                if in_thinking:
+                                    yield {"type": "token", "content": "\n</think>\n\n"}
+                                    in_thinking = False
+                                    
+                            token = delta.get("content", "")
                             if token:
                                 raw_reasoning += token
                             if time.time() - last_yield_time > 2.0:
                                 yield {"type": "status", "content": "Deep reasoning..."}
                                 last_yield_time = time.time()
+                                
+                        if in_thinking:
+                            yield {"type": "token", "content": "\n</think>\n\n"}
                                 
                         elapsed = time.perf_counter() - t0_reasoning
                         hop1 = _timed_hop("1:reasoning", Model.REASONING.value, {"content": raw_reasoning}, elapsed)
