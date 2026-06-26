@@ -360,55 +360,55 @@ function renderChatList(query = '') {
             const to = getVal("to", "recipient");
             const subj = getVal("subject", "sub");
             const subjStr = subj ? ` (Subject: ${subj})` : '';
-            return `⚙️ Sending email to ${to}${subjStr}...`;
+            return `Sending email to ${to}${subjStr}...`;
         }
 
         if (action.includes("search") && action.includes("file")) {
             const query = getVal("query", "name");
             const folder = getVal("folder", "dir");
-            return `⚙️ Searching for '${query}' in '${folder || 'Documents'}'...`;
+            return `Searching for '${query}' in '${folder || 'Documents'}'...`;
         }
 
         if (action.includes("file")) {
             const path = getVal("path", "file");
-            return `⚙️ Opening file: ${path}...`;
+            return `Opening file: ${path}...`;
         }
 
         if (action.includes("terminal")) {
             const cmd = getVal("command", "cmd");
-            return `⚙️ Opening terminal and running: \`${cmd}\`...`;
+            return `Opening terminal and running: \`${cmd}\`...`;
         }
 
         if (action.includes("command")) {
             const cmd = getVal("command", "cmd");
-            return `⚙️ Running command: \`${cmd}\`...`;
+            return `Running command: \`${cmd}\`...`;
         }
 
-        if (action === "volume_up") return "⚙️ Increasing system volume...";
-        if (action === "volume_down") return "⚙️ Decreasing system volume...";
-        if (action === "volume_mute") return "⚙️ Muting system volume...";
+        if (action === "volume_up") return "Increasing system volume...";
+        if (action === "volume_down") return "Decreasing system volume...";
+        if (action === "volume_mute") return "Muting system volume...";
         if (action.includes("volume_set") || action.includes("volume")) {
             const pct = getVal("percent", "pct", "level", "value");
-            return `⚙️ Setting system volume to ${pct}%...`;
+            return `Setting system volume to ${pct}%...`;
         }
 
-        if (action === "brightness_up") return "⚙️ Increasing screen brightness...";
-        if (action === "brightness_down") return "⚙️ Decreasing screen brightness...";
+        if (action === "brightness_up") return "Increasing screen brightness...";
+        if (action === "brightness_down") return "Decreasing screen brightness...";
         if (action.includes("brightness_set") || action.includes("brightness")) {
             const pct = getVal("percent", "pct", "level", "value");
-            return `⚙️ Setting screen brightness to ${pct}%...`;
+            return `Setting screen brightness to ${pct}%...`;
         }
 
         if (action.includes("system")) {
             const what = getVal("what", "info", "query");
-            return `⚙️ Retrieving system ${what || 'information'}...`;
+            return `Retrieving system ${what || 'information'}...`;
         }
 
-        if (action.includes("clipboard") && action.includes("copy")) return "⚙️ Copying text to clipboard...";
-        if (action.includes("clipboard") && action.includes("read")) return "⚙️ Reading clipboard content...";
+        if (action.includes("clipboard") && action.includes("copy")) return "Copying text to clipboard...";
+        if (action.includes("clipboard") && action.includes("read")) return "Reading clipboard content...";
 
         const cleanAction = action.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        return `⚙️ Performing action: ${cleanAction}...`;
+        return `Performing action: ${cleanAction}...`;
     }
 
     function formatMessage(text, isStreaming = false) {
@@ -502,8 +502,9 @@ function renderChatList(query = '') {
             return false;
         }
         // Auto-wrap raw HTML in backticks if the model forgot them (Browser Markdown Chokehold prevention)
-        if (!work.includes("```html") && !work.includes("```\n<!DOCTYPE") && !work.includes("```\n<html")) {
-            work = work.replace(/(?:^|\n)(?:html\s*\n)?(<!DOCTYPE html>[\s\S]*?(?:<\/html>|$)|<html[\s\S]*?(?:<\/html>|$))/gi, '\n```html\n$1\n```\n');
+        if (!work.includes("```html") && !work.includes("```\n<!DOCTYPE") && !work.includes("```\n<html") && !work.includes("```\n<div") && !work.includes("```\n<nav")) {
+            // Find raw HTML blocks that appear on a new line and wrap them to the end of the text
+            work = work.replace(/(?:^|\n)(?:html\s*\n|CODE\s*\n|CODE\s*\nhtml\s*\n)?((?:<!DOCTYPE|<html|<body|<nav|<div|<main|<header|<footer|<section|<canvas|<svg|<style|<script|<h1|<h2|<h3)[\s\S]*)$/i, '\n```html\n$1\n```\n');
         }
 
         work = work.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {

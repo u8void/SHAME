@@ -211,21 +211,21 @@ class WebSearch:
         deadline = time.time() + timeout
         all_results: List[SearchResult] = []
 
-        
-        if time.time() < deadline:
-            wiki_results = self._search_wikipedia(query, max_results=max_results)
-            if wiki_results:
-                logger.info(f"[WebSearch] Wikipedia returned {len(wiki_results)} results")
-                all_results.extend(wiki_results)
-
-        
-        if len(all_results) < max_results and self._ddg_available:
-            ddg_results = self._search_ddg(query, max_results - len(all_results), timeout=min(6.0, timeout))
+        # 1. Try DuckDuckGo first (Best quality general search)
+        if self._ddg_available and time.time() < deadline:
+            ddg_results = self._search_ddg(query, max_results=max_results, timeout=min(6.0, timeout))
             if ddg_results:
                 logger.info(f"[WebSearch] DDG returned {len(ddg_results)} results for '{query[:60]}'")
                 all_results.extend(ddg_results)
 
-        
+        # 2. Wikipedia Fallback (If DDG didn't get enough results or was rate-limited)
+        if len(all_results) < max_results and time.time() < deadline:
+            wiki_results = self._search_wikipedia(query, max_results=max_results - len(all_results))
+            if wiki_results:
+                logger.info(f"[WebSearch] Wikipedia returned {len(wiki_results)} results")
+                all_results.extend(wiki_results)
+
+        # 3. Google Scrape Fallback
         if len(all_results) == 0 and time.time() < deadline:
             google_results = self._search_google_scrape(query)
             if google_results:
@@ -245,10 +245,9 @@ class WebSearch:
         results = self.search(query, max_results)
         if not results:
             return ""
-        lines = ["\n[LIVE INTERNET SEARCH RESULTS]"]
+        lines = []
         for i, r in enumerate(results, 1):
             lines.append(f"Result {i}: {r.to_context_str()}")
-        lines.append("[END LIVE INTERNET SEARCH RESULTS]\n")
         return "\n".join(lines)
 
     def _fetch_full_text(self, url: str, timeout: float = 4.0) -> str:
