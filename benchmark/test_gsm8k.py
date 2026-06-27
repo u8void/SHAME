@@ -127,13 +127,12 @@ def run_gsm8k_benchmark(csv_path: str, num_samples: int = 100):
         )
 
 
-                                                       
-        if model_answer is not None and ground_truth is not None:
+        # Formatting-only cleanup of the model's own answer. No ground truth
+        # is passed in here — this cannot nudge the answer toward correct.
+        if model_answer is not None:
             corrected, was_fixed, log = auto_correct_math_answer(
                 problem=question,
                 model_raw_output=response,
-                ground_truth=ground_truth,
-                max_attempts=2,
             )
             if was_fixed:
                 model_answer = corrected

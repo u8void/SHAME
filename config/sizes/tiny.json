@@ -1,6 +1,4 @@
 {
-  "_description": "Iris AI \u2014 Tiny (\u22648GB RAM). Optimized for accuracy over breadth. Key insight: triage=small is fine, but reasoning/general MUST be the best model that fits.",
-  "_changes": "v4 \u2014 split reasoning to VibeThinker-3B (native <think>) and general to Qwen3.5-4B (fast, no think).",
   "models": {
     "triage": "Qwen/Qwen2.5-1.5B-Instruct",
     "router": "Qwen/Qwen2.5-1.5B-Instruct",

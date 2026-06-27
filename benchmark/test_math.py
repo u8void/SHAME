@@ -145,14 +145,12 @@ def run_math_benchmark(csv_path: str, num_samples: int = 100):
         )
         model_answer_raw = _extract_boxed_content(response)
 
-        
-                                                       
+        # Formatting-only cleanup of the model's own answer. No ground truth
+        # is passed in here — this cannot nudge the answer toward correct.
         if model_answer_raw is not None:
             corrected, was_fixed, _ = auto_correct_math_answer(
                 problem=problem,
                 model_raw_output=response,
-                ground_truth=ground_truth_raw,
-                max_attempts=2,
             )
             if was_fixed:
                 model_answer_raw = corrected
