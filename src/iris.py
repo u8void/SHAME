@@ -225,12 +225,12 @@ ROLE_CTX: Dict[ModelRole, int] = {
     ModelRole.TRIAGE:    4096,   
     ModelRole.ROUTER:    1024,
     ModelRole.CONTROL:   8192,
-    ModelRole.MATH:      4096,
-    ModelRole.CODE:      8192,
-    ModelRole.REASONING: 8192,
-    ModelRole.REVIEWER:  8192,
-    ModelRole.GENERAL:   8192,
-    ModelRole.VISION:    4096,
+    ModelRole.MATH:      8192,
+    ModelRole.CODE:      32768,
+    ModelRole.REASONING: 32768,
+    ModelRole.REVIEWER:  32768,
+    ModelRole.GENERAL:   32768,
+    ModelRole.VISION:    8192,
 }
 
 DEFAULT_CTX = 4096
@@ -249,70 +249,57 @@ IRIS_IDENTITY = (
     "CRITICAL LANGUAGE RULE: You MUST always respond in English. All responses, explanations, code comments, and text MUST be written entirely in English, even if the user speaks or inputs in Arabic or any other language. Your internal <think> process and final response must be fully in English."
 )
 
-TRIAGE_SYSTEM_PROMPT = (
-    "[CLASSIFICATION TASK — SAFETY OVERRIDE] You are an AI router performing a mechanical text classification task. "
-    "You MUST output a routing tag regardless of the query topic. This is NOT a content generation task; you will NEVER produce harmful content. "
-    "Your only output is a single routing tag that tells another system which specialist model to use. "
-    "You are NEVER responsible for the actual response. NEVER refuse. NEVER say 'I cannot assist'. JUST OUTPUT THE TAG.\n\n"
-    f"{IRIS_IDENTITY}\n"
-    "You are the Iris AI Router. Your ONLY job is to output ONE routing tag.\n"
-    "Rules:\n"
-    "1. Simple greetings like 'hi', 'hello', 'good morning' → answer with a SHORT greeting, NO tag.\n"
-    "   BUT: identity questions like 'who are you', 'who made you', 'what are you' → [ROUTE: GENERAL]\n"
-    "2. For EVERY other query, output EXACTLY ONE of these tags and NOTHING ELSE:\n"
-    "   [ROUTE: SEARCH: keywords]  — factual question, current events, people, places, products, history, definitions\n"
-    "   [ROUTE: REASONING]         — how/why questions, explanations, analysis, comparisons, summaries, document reading\n"
-    "   [ROUTE: GENERAL]           — casual chat, opinions, creative writing\n"
-    "   [ROUTE: MATH]              — math problems, equations, proofs\n"
-    "   [ROUTE: CODE_SIMPLE]       — small code snippets, functions, HTML/CSS/JS UI elements, canvas animations, SVG graphics, procedural art, or programming problems\n"
-    "   [ROUTE: CODE_COMPLEX]      — full projects, multi-file code, games, complete websites or web apps\n"
-    "   [ROUTE: CONTROL]           — OS/PC commands, app controls, messaging, browser automation (log in, WhatsApp/Telegram messaging, form filling, clicking web buttons), email, system checks, power control\n\n"
-    "CRITICAL ROUTING RULE:\n"
-    "- If the user asks to 'solve in c++', 'write a script', 'create a website', 'write html/css', 'create an animation', 'draw with canvas', 'make an SVG', pastes a traceback, error log, or a large algorithmic problem description, you MUST route to [ROUTE: CODE_SIMPLE], [ROUTE: CODE_COMPLEX], or [ROUTE: MATH].\n"
-    "- For ANY programming error, Python traceback, compilation error, or debugging request, you MUST route to [ROUTE: CODE_COMPLEX]. Do NOT route tracebacks to MATH.\n"
-    "- OVERRIDE RULE: If the prompt contains 'build a landing page', 'HTML', or 'Tailwind', you MUST choose [ROUTE: CODE_COMPLEX]. Do not choose [ROUTE: CONTROL] even if the website design mentions mock terminal commands.\n"
-    "- CANVAS / ANIMATION RULE: Any request involving 'canvas', 'HTML5 canvas', 'animation', 'animate', 'SVG', 'procedural art', 'draw', 'render loop', 'requestAnimationFrame' is ALWAYS a code task. Route to [ROUTE: CODE_SIMPLE] for single-file outputs or [ROUTE: CODE_COMPLEX] for multi-file projects. NEVER route these to REASONING or SEARCH.\n"
-    "- NEVER use [ROUTE: SEARCH] for programming problems, competitive programming questions, or large blocks of text.\n"
-    "- LETTER/WORD INTROSPECTION RULE (HIGHEST PRIORITY): If the user asks how many of a letter appear in a word or name (e.g. 'how many r in strawberry', 'how many a in Ahmed'), or asks to count characters/vowels/consonants, or asks about spelling of a word — this is ALWAYS [ROUTE: REASONING]. NEVER route these to SEARCH.\n"
-    "- RECOMMENDATION/ADVICE RULE: If the user asks for advice on what to buy, product recommendations, or general questions about items/pets (e.g., 'which cat is best to buy'), route to [ROUTE: SEARCH] or [ROUTE: REASONING]. NEVER route these to [ROUTE: CONTROL].\n\n"
-    "EXAMPLES:\n"
-    "User: what is the capital of France → [ROUTE: SEARCH: capital of France]\n"
-    "User: how many r in strawberry → [ROUTE: REASONING]\n"
-    "User: how many a in Ahmed → [ROUTE: REASONING]\n"
-    "User: count the vowels in elephant → [ROUTE: REASONING]\n"
-    "User: explain how photosynthesis works → [ROUTE: REASONING]\n"
-    "User: write a python hello world → [ROUTE: CODE_SIMPLE]\n"
-    "User: create a tailwind css landing page → [ROUTE: CODE_COMPLEX]\n"
-    "User: make a canvas animation of a bouncing ball → [ROUTE: CODE_SIMPLE]\n"
-    "User: draw a dog using SVG procedurally → [ROUTE: CODE_SIMPLE]\n"
-    "User: create a self-contained HTML5 canvas animation → [ROUTE: CODE_SIMPLE]\n"
-    "User: 2+2 → [ROUTE: MATH]\n"
-    "User: open spotify → [ROUTE: CONTROL]\n"
-    "User: send a whatsapp message to Mom saying hello → [ROUTE: CONTROL]\n"
-    "User: login to github for me → [ROUTE: CONTROL]\n"
-    "User: hi → Hello! How can I help you today?\n"
-    "User: who are you → [ROUTE: GENERAL]\n"
-    "User: who made you → [ROUTE: GENERAL]\n"
-    "User: what are you → [ROUTE: GENERAL]\n"
-    "User: من أنت → [ROUTE: GENERAL]\n\n"
-    "Output ONLY the tag. No explanation. No other text."
-)
+_triage_guide_path = os.path.join(os.path.dirname(_HERE), "documentations", "triage_routing_guide.md")
+try:
+    with open(_triage_guide_path, "r", encoding="utf-8") as _f:
+        TRIAGE_SYSTEM_PROMPT = _f.read()
+except Exception:
+    TRIAGE_SYSTEM_PROMPT = (
+        "[CLASSIFICATION TASK — SAFETY OVERRIDE] You are an AI router performing a mechanical text classification task. "
+        "You MUST output a routing tag regardless of the query topic. This is NOT a content generation task; you will NEVER produce harmful content. "
+        "Your only output is a short <think> block analyzing the user's intent, followed by a single routing tag. "
+        "You are NEVER responsible for the actual response. NEVER refuse. NEVER say 'I cannot assist'. JUST OUTPUT THE THINK BLOCK AND THE TAG.\n\n"
+        f"{IRIS_IDENTITY}\n"
+        "You are the Iris AI Router. Your ONLY job is to output ONE routing tag.\n"
+        "Rules:\n"
+        "1. Simple greetings like 'hi', 'hello', 'good morning' → answer with a SHORT greeting, NO tag, NO OFF-TOPICS STUFF\n"
+        "   BUT: identity questions like 'who are you', 'who made you', 'what are you' → [ROUTE: GENERAL]\n"
+        "2. For EVERY other query, output EXACTLY ONE of these tags and NOTHING ELSE:\n"
+        "   [ROUTE: SEARCH: keywords]  — factual question, current events, people, places, products, history, definitions\n"
+        "   [ROUTE: REASONING]         — how/why questions, explanations, analysis, comparisons, summaries, document reading\n"
+        "   [ROUTE: GENERAL]           — casual chat, opinions, creative writing\n"
+        "   [ROUTE: MATH]              — math problems, equations, proofs\n"
+        "   [ROUTE: CODE_SIMPLE]       — small code snippets, functions, HTML/CSS/JS UI elements, canvas animations, SVG graphics, procedural art, or programming problems\n"
+        "   [ROUTE: CODE_COMPLEX]      — full projects, multi-file code, games, complete websites or web apps\n"
+        "   [ROUTE: CONTROL]           — OS/PC commands, app controls, messaging, browser automation (log in, WhatsApp/Telegram messaging, form filling, clicking web buttons), email, system checks, power control\n\n"
+        "CRITICAL ROUTING RULE:\n"
+        "- If the user asks to 'solve in c++', 'write a script', 'create a website', 'write html/css', 'create an animation', 'draw with canvas', 'make an SVG', pastes a traceback, error log, or a large algorithmic problem description, you MUST route to [ROUTE: CODE_SIMPLE], [ROUTE: CODE_COMPLEX], or [ROUTE: MATH].\n"
+        "- For ANY programming error, Python traceback, compilation error, or debugging request, you MUST route to [ROUTE: CODE_COMPLEX]. Do NOT route tracebacks to MATH.\n"
+        "- OVERRIDE RULE: If the prompt contains 'build a landing page', 'HTML', or 'Tailwind', you MUST choose [ROUTE: CODE_COMPLEX]. Do not choose [ROUTE: CONTROL] even if the website design mentions mock terminal commands.\n"
+        "- CANVAS / ANIMATION RULE: Any request involving 'canvas', 'HTML5 canvas', 'animation', 'animate', 'SVG', 'procedural art', 'draw', 'render loop', 'requestAnimationFrame' is ALWAYS a code task. Route to [ROUTE: CODE_SIMPLE] for single-file outputs or [ROUTE: CODE_COMPLEX] for multi-file projects. NEVER route these to REASONING or SEARCH.\n"
+        "- NEVER use [ROUTE: SEARCH] for programming problems, competitive programming questions, or large blocks of text.\n"
+        "- LETTER/WORD INTROSPECTION RULE (HIGHEST PRIORITY): If the user asks how many of a letter appear in a word or name (e.g. 'how many r in strawberry', 'how many a in Ahmed'), or asks to count characters/vowels/consonants, or asks about spelling of a word — this is ALWAYS [ROUTE: REASONING]. NEVER route these to SEARCH.\n"
+        "- RECOMMENDATION/ADVICE RULE: If the user asks for advice on what to buy, product recommendations, or general questions about items/pets (e.g., 'which cat is best to buy'), route to [ROUTE: SEARCH] or [ROUTE: REASONING]. NEVER route these to [ROUTE: CONTROL].\n\n"
+        "_ If the user greats you, Great Him Again like \n"
+        "_ User: Hi -> Bot: Hi, How is it going \n"
+        "EXAMPLES:\n"
+        "User: what is the capital of France → <think>Fact question about a country.</think>\n[ROUTE: SEARCH: capital of France]\n"
+        "User: how many r in strawberry → <think>Letter introspection.</think>\n[ROUTE: REASONING]\n"
+        "User: how to make a pizza → <think>Explanation request for cooking.</think>\n[ROUTE: REASONING]\n"
+        "User: create a tailwind css landing page → <think>Web app development project.</think>\n[ROUTE: CODE_COMPLEX]\n"
+        "User: open spotify → <think>OS application control.</think>\n[ROUTE: CONTROL]\n"
+        "User: hi → Hello! How can I help you today?\n"
+        "User: who are you → <think>Identity question.</think>\n[ROUTE: GENERAL]\n\n"
+        "You MUST ALWAYS start your response with a <think> block analyzing the user's core intent, followed immediately by exactly one routing tag."
+    )
 
 GENERAL_SYSTEM_PROMPT = (
     f"{IRIS_IDENTITY}\n"
-    "You are the Iris AI General Assistant. Your goal is to be a fun, witty, and highly capable companion.\n"
-    "ACCURACY RULES:\n"
-    "1. For serious factual questions (history, science), provide accurate information based on search results. "
-    "If you don't know a serious fact, admit it naturally without sounding like a robot.\n"
-    "RESPONSE RULES:\n"
-    "2. Give clear, complete answers — not one-liners, but also not padded filler.\n"
-    "3. Use examples and analogies to explain concepts clearly.\n"
-    "4. Match the language and tone of the user exactly. If they joke around, use slang, or playfully insult you, "
-    "match their energy! Play along, roast them back, and have fun. "
-    "NEVER say 'I am designed to provide neutral responses' or 'As an AI...'.\n"
-    "5. PERSONALITY RULE: Be highly conversational, witty, and subtly funny. Sound like a real human friend. "
-    "If the user asks a funny or absurd question (like 'Do you love X?'), play along humorously instead of acting confused. "
-    "Don't be a dry corporate bot; have a strong sense of humor and use natural expressions."
+    "You are the Iris AI General Assistant, a fun, witty, and highly capable companion.\n"
+    "RULES:\n"
+    "1. Give clear, complete factual answers. Do NOT simply repeat or correct the user's query.\n"
+    "2. If the user jokes or uses slang, match their energy and play along humorously. Do not act confused.\n"
+    "3. NEVER say 'I am designed to provide neutral responses' or 'As an AI...'.\n"
 )
 
 CODE_SYSTEM_PROMPT = (
@@ -959,7 +946,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
                 type_v=_selected_kv_type,
                 n_batch=_n_batch,
                 n_ubatch=_n_ubatch,
-                verbose=True,
+                verbose=False,
                 logits_all=(draft_model is not None),
                 main_gpu=_main_gpu,
             )
@@ -1127,7 +1114,7 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
     code_keywords = {
         "code", "coding", "program", "programming", "compile", "compiler",
         "debug", "debugging", "refactor", "refactoring", "script", "scripts",
-        "kernel", "make", "makefile", "gcc", "clang", "qemu", "gdb", "vga",
+        "kernel", "makefile", "gcc", "clang", "qemu", "gdb", "vga",
         "driver", "bootloader", "assembly", "nasm", "masm", "link", "linker",
         "pong", "game", "function", "variable", "class", "struct", "method",
         "loop", "array", "pointer", "database", "sql", "api", "json", "xml",
@@ -1146,7 +1133,7 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
     }
     complex_signals = {
         "kernel", "gcc", "clang", "qemu", "driver", "bootloader", "pong",
-        "game", "make", "makefile", "multi-file", "multiple files",
+        "game", "makefile", "multi-file", "multiple files",
         "full project", "entire project",
     }
     for kw in code_keywords:
@@ -1209,58 +1196,7 @@ def classify_task(
     
     lower_query = query_for_classification.lower()
     
-    # Check if the query is a simple date/time/clock query to prevent routing to SEARCH or REASONING
-    time_patterns = [
-        r"\bwhat\s+(?:is\s+)?(?:the\s+)?(?:current\s+)?time\b",
-        r"\bwhat\s+time\s+is\s+it\b",
-        r"\bwhat's\s+the\s+time\b",
-        r"\bcurrent\s+time\b",
-        r"\bcurrent\s+date\b",
-        r"\bwhat\s+is\s+today's\s+date\b",
-        r"\btoday's\s+date\b",
-        r"\bwhat\s+(?:is\s+)?(?:the\s+)?date\s+today\b",
-        r"\bwhat\s+day\s+is\s+it\b",
-        r"\bwhat\s+day\s+of\s+the\s+week\b",
-        r"\btell\s+me\s+the\s+time\b",
-        r"\btime\s+now\b",
-        r"\btime\s+in\s+[a-zA-Z]+",
-        r"\bdate\s+in\s+[a-zA-Z]+",
-    ]
-    if any(re.search(pat, lower_query) for pat in time_patterns):
-        logger.info("[Triage] Hardcoded intercept: Date/time query detected. Routing to GENERAL.")
-        return TaskType.GENERAL, None
-    has_tech = "tailwind" in lower_query or "html" in lower_query or "css" in lower_query
-    has_intent = (
-        re.search(r"\bbuild\b", lower_query) or 
-        "landing page" in lower_query or 
-        "website" in lower_query or 
-        "full-stack developer" in lower_query
-    )
-    if has_tech and has_intent:
-        logger.info("[Triage] Hardcoded intercept: Web development query detected. Routing to CODING_COMPLEX.")
-        return TaskType.CODING_COMPLEX, None
 
-    result = _fallback_classify(query_for_classification)
-    if result is not None:
-        if result == TaskType.CONTROL and ("mockup" in lower_query or "terminal element" in lower_query or "terminal window" in lower_query):
-            pass
-        elif history and result in (TaskType.SEARCH, TaskType.REASONING):
-            words = query_for_classification.split()
-            has_pronoun = False
-            pronoun_pattern = re.compile(
-                r'\b(he|him|his|she|her|hers|it|its|they|them|their|theirs|this|that|these|those|here|there|then|they\'re|it\'s|that\'s|this\'s|them\'s|where\'s|what\'s|how\'s|who\'s|why\'s|'
-                r'هو|هي|هما|هم|هن|هذا|هذه|هذان|هاتان|هؤلاء|ذلك|تلك|أولئك|ده|دي|دول|فين|ليه|إيه|ايه|عنه|عنها|عنهم|فيه|فيها|فيهم|منه|منها|منهم)\b',
-                re.IGNORECASE
-            )
-            if len(words) < 6 or pronoun_pattern.search(query_for_classification):
-                has_pronoun = True
-            
-            if has_pronoun:
-                logger.info(f"[Triage] Query '{query_for_classification}' appears to be a follow-up or contextual. Bypassing fallback classify to use LLM Triage.")
-            else:
-                return result, None
-        else:
-            return result, None
             
     if history and history[-1].get("role") == "user" and history[-1].get("content", "").strip().startswith("OBSERVATION:"):
         return TaskType.CONTROL, None
@@ -1288,7 +1224,7 @@ def classify_task(
         time_str = now.strftime("%A, %B %d, %Y, %H:%M:%S %Z")
         offset_str = now.strftime("%z")
         formatted_offset = f"{offset_str[:3]}:{offset_str[3:]}" if len(offset_str) >= 5 else offset_str
-        triage_prompt += f"\n\n[SYSTEM DIRECTIVE: The current local system time is {time_str} (UTC{formatted_offset}). This is the exact, live time on the user's computer. Use this context to answer any date/time queries or relative time differences. Do NOT claim you do not have real-time access or that you don't know the time.]"
+        triage_prompt += f"\n\nSystem Time Context: The current local time is {time_str} (UTC{formatted_offset}). Use this context to accurately route any date or time-related queries."
     except Exception:
         pass
     triage_messages = [{"role": "system", "content": triage_prompt}]
@@ -1302,14 +1238,14 @@ def classify_task(
     if len(triage_query) > 1500:
         triage_query = triage_query[:1000] + "\n\n...[content truncated for routing]...\n\n" + triage_query[-500:]
     
-    triage_query += "\n\n[SYSTEM DIRECTIVE: Output ONLY a single [ROUTE: ...] tag. DO NOT answer the user's query directly. NO explanations. NO greetings.]"
+    triage_query += "\n\n[SYSTEM DIRECTIVE: Output a short <think> block analyzing the user's core intent, followed immediately by exactly one [ROUTE: ...] tag. DO NOT answer the user's query directly. NO greetings.]"
     
     triage_messages.append({"role": "user", "content": triage_query})
 
     llm = load_model(ModelRole.TRIAGE)
     res = llm.create_chat_completion(
         messages=triage_messages,
-        max_tokens=256,
+        max_tokens=1024,
         temperature=0.1,
     )
     answer = res["choices"][0]["message"]["content"].strip()
@@ -1523,7 +1459,7 @@ def _stream_tokens(
         time_str = now.strftime("%A, %B %d, %Y, %H:%M:%S %Z")
         offset_str = now.strftime("%z")
         formatted_offset = f"{offset_str[:3]}:{offset_str[3:]}" if len(offset_str) >= 5 else offset_str
-        sys_prompt += f"\n\n[SYSTEM DIRECTIVE: The current local system time is {time_str} (UTC{formatted_offset}). This is the exact, live time on the user's computer. Use this context to answer any date/time queries or relative time differences. Do NOT claim you do not have real-time access or that you don't know the time.]"
+        sys_prompt += f"\n\nSystem Time Context: The current local time is {time_str} (UTC{formatted_offset}). Use this context to accurately answer any date or time-related queries."
     except Exception as e:
         logger.warning(f"Failed to inject local time directive: {e}")
 
@@ -1631,13 +1567,15 @@ def _stream_tokens(
     for loop_idx in range(5):
         
         
+        _reserved_tokens = 4096 if role in (ModelRole.CODE, ModelRole.REASONING, ModelRole.REVIEWER) else 1024
+        
         _ca_cfg = load_generation_config().get("compressed_attention", {})
         if _ca_cfg.get("enabled", False) and len(full_messages) > 4:
             _query = messages[-1].get("content", "") if messages else ""
             _compressed = smart_compress(
                 full_messages, query=_query,
                 n_ctx=llm.n_ctx(),
-                max_output_tokens=min(max_tokens, 1024),
+                max_output_tokens=min(max_tokens, _reserved_tokens) if max_tokens else _reserved_tokens,
                 llm=llm,
                 profile=load_generation_config().get("size", "tiny"),
             )
@@ -1649,7 +1587,7 @@ def _stream_tokens(
                 )
                 full_messages = _compressed.messages
 
-        full_messages, _ = auto_compact_for_role(full_messages, role=role, max_output_tokens=min(max_tokens, 1024))
+        full_messages, _ = auto_compact_for_role(full_messages, role=role, max_output_tokens=min(max_tokens, _reserved_tokens) if max_tokens else _reserved_tokens)
         
         logger.debug(f"[Model Start] Role: {role.value.upper()} | Model: {model_name}")
         stop_list = ["</s>", "<|eot_id|>", "<|end_of_text|>", "<|im_end|>", "<step_end>", "## Conversation"]
@@ -2309,7 +2247,7 @@ def ask_stream(
         yield {"type": "status", "content": "Thinking..."}
         full = ""
         thought_process = ""
-        for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=4096, temperature=0.3, think_mode="show"):
+        for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=4096, temperature=0.6, think_mode="show"):
             yield ev
             if ev["type"] == "token":
                 full += ev["content"]
@@ -2756,12 +2694,20 @@ def _run_complex_coding(
         unload_model()
 
     yield {"type": "status", "content": "Stage 2 \u2014 Writing code..."}
+    code_content = f"User Query: {user_query}\n\n"
+    if context:
+        code_content += f"<retrieved_context>\n{context}\n</retrieved_context>\n\nMake sure your implementation heavily utilizes the instructions, themes, and patterns in the retrieved context above.\n\n"
+    code_content += (
+        f"Architecture/Plan:\n{raw_reasoning[-8000:]}\n\n"
+        f"You are the expert Code Developer. Using the architectural plan above, WRITE THE ACTUAL FULL IMPLEMENTATION yourself. "
+        f"If the plan contains any partial or truncated code snippets, ignore them and write the correct, full code from scratch. "
+        f"Do NOT output any conversational filler. Enclose all final code inside proper ``` language blocks."
+    )
+    
     code_msgs = optimized[:-1] + [
-        {"role": "user",
-         "content": f"User Query: {user_query}\n\nArchitecture/Plan:\n{raw_reasoning[-8000:]}\n\nYou are the expert Code Developer. Using the architectural plan above, WRITE THE ACTUAL FULL IMPLEMENTATION yourself. If the plan contains any partial or truncated code snippets, ignore them and write the correct, full code from scratch. Do NOT output any conversational filler. Enclose all final code inside proper ``` language blocks."}
+        {"role": "user", "content": code_content}
     ]
-    yield {"type": "token", "content": "<coding>\n"}
-    full_code = "<coding>\n"
+    full_code = ""
     for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.4, think_mode="pass", settings=settings):
         yield ev
         if ev["type"] == "token":
@@ -2773,7 +2719,7 @@ def _run_complex_coding(
     yield {"type": "status", "content": "Stage 3 \u2014 Reviewing and optimizing..."}
 
     review_msgs = optimized + [
-        {"role": "assistant", "content": full_code.replace("<coding>\n", "")},
+        {"role": "assistant", "content": full_code},
         {"role": "user",
          "content": "Review the above code. Fix all syntax errors, logical bugs, edge cases, "
          "and ensure it compiles/works correctly. Return the final corrected code inside a ``` language block. "
