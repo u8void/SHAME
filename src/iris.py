@@ -273,7 +273,8 @@ TRIAGE_SYSTEM_PROMPT = (
     "- OVERRIDE RULE: If the prompt contains 'build a landing page', 'HTML', or 'Tailwind', you MUST choose [ROUTE: CODE_COMPLEX]. Do not choose [ROUTE: CONTROL] even if the website design mentions mock terminal commands.\n"
     "- CANVAS / ANIMATION RULE: Any request involving 'canvas', 'HTML5 canvas', 'animation', 'animate', 'SVG', 'procedural art', 'draw', 'render loop', 'requestAnimationFrame' is ALWAYS a code task. Route to [ROUTE: CODE_SIMPLE] for single-file outputs or [ROUTE: CODE_COMPLEX] for multi-file projects. NEVER route these to REASONING or SEARCH.\n"
     "- NEVER use [ROUTE: SEARCH] for programming problems, competitive programming questions, or large blocks of text.\n"
-    "- LETTER/WORD INTROSPECTION RULE (HIGHEST PRIORITY): If the user asks how many of a letter appear in a word or name (e.g. 'how many r in strawberry', 'how many a in Ahmed'), or asks to count characters/vowels/consonants, or asks about spelling of a word — this is ALWAYS [ROUTE: REASONING]. NEVER route these to SEARCH.\n\n"
+    "- LETTER/WORD INTROSPECTION RULE (HIGHEST PRIORITY): If the user asks how many of a letter appear in a word or name (e.g. 'how many r in strawberry', 'how many a in Ahmed'), or asks to count characters/vowels/consonants, or asks about spelling of a word — this is ALWAYS [ROUTE: REASONING]. NEVER route these to SEARCH.\n"
+    "- RECOMMENDATION/ADVICE RULE: If the user asks for advice on what to buy, product recommendations, or general questions about items/pets (e.g., 'which cat is best to buy'), route to [ROUTE: SEARCH] or [ROUTE: REASONING]. NEVER route these to [ROUTE: CONTROL].\n\n"
     "EXAMPLES:\n"
     "User: what is the capital of France → [ROUTE: SEARCH: capital of France]\n"
     "User: how many r in strawberry → [ROUTE: REASONING]\n"
@@ -323,11 +324,12 @@ CODE_SYSTEM_PROMPT = (
     "If you are writing or modifying code, you MUST wrap all code inside standard markdown triple backticks (```language ... ```). "
     "CRITICAL: If you write a code block, the very first line inside the code block MUST be a comment containing ONLY the intended filename (e.g. // main.cpp or # app.py). "
     "Do NOT include explanatory comments inside the code block other than the filename. "
-    "ANTI-POLLUTION RULE (ABSOLUTE): Previous conversation messages may contain LaTeX or math notation from prior turns "
-    "(e.g. \\boxed{}, $...$, $$...$$, _{...}, ^{...}). You MUST NEVER use this syntax inside code. "
-    "All identifiers, function names, and variable names must be plain ASCII (letters, digits, underscores only). "
-    "For example, NEVER write `def convert$_{temps}$(x)` — write `def convert_temps(x)` instead. "
-    "Do NOT use LaTeX or MathJax formatting (like $...$ or _{...}) for variable names or identifiers inside code blocks. Code must be syntactically valid plain text. "
+    "NO LATEX OR MATHJAX ALLOWED IN CODE (CRITICAL FATAL ERROR IF VIOLATED): "
+    "You are writing literal programming code. You MUST NOT use ANY mathematical typography, LaTeX, MathJax, or subscript/superscript syntax inside your code. "
+    "NEVER use `$_{...}$`, `_{...}`, `$^{...}$`, or `^{...}` for variable names or math (e.g., `temp$_{celsius}$` is strictly forbidden). "
+    "NEVER use `$` or `$$` for anything inside the code. "
+    "ALWAYS use plain ASCII alphanumeric characters and regular underscores for variable names (e.g., `temp_celsius`). "
+    "If you output a single `$` or `_{` inside your code block, the system will crash. Write PLAIN TEXT code only. "
     "WEB DESIGN RULE: If the user asks for a website or web app, you MUST prioritize extreme visual excellence. "
     "Do NOT output generic or basic UI. You must use modern, premium aesthetics (e.g., highly polished dark modes, vibrant curated colors, glassmorphism, fluid typography, smooth CSS micro-animations, hover effects, and Tailwind CSS if appropriate). "
     "Always rely heavily on your deep knowledge of modern UI/UX design to deliver a 'WOW' factor. Write complete, realistic copy — never 'Lorem Ipsum'. "
@@ -1300,6 +1302,8 @@ def classify_task(
     if len(triage_query) > 1500:
         triage_query = triage_query[:1000] + "\n\n...[content truncated for routing]...\n\n" + triage_query[-500:]
     
+    triage_query += "\n\n[SYSTEM DIRECTIVE: Output ONLY a single [ROUTE: ...] tag. DO NOT answer the user's query directly. NO explanations. NO greetings.]"
+    
     triage_messages.append({"role": "user", "content": triage_query})
 
     llm = load_model(ModelRole.TRIAGE)
@@ -1440,32 +1444,43 @@ def _quality_guard(text: str) -> str:
             if not text.endswith(('.', '!', '?')):
                 text += '.'
 
+    DETAILS_TAG = '<details style="border: 1px solid rgba(128, 128, 128, 0.2); border-radius: 8px; padding: 12px; margin-bottom: 16px; background: rgba(128, 128, 128, 0.05);">'
+    SUMMARY_TAG = '<summary style="cursor: pointer; font-weight: 600; color: #888; outline: none; user-select: none;">Thought Process</summary>'
+
     for open_tag, close_tag in [("<think>", "</think>"), ("<thought>", "</thought>"), ("<|thought_start|>", "<|thought_end|>")]:
         if open_tag in text:
             if close_tag in text:
-                text = text.replace(close_tag, "")
-
-            # Try to find common transition phrases to cleanly split thought from final answer
-            transition_match = re.search(r'\n(?:\*\*?(?:Final Answer|Conclusion|Summary)\*\*?:?|I will present this information|Here is the|Here are the|To summarize|In conclusion|Final Answer|Based on the|Given the|Therefore,|In summary|However, since I need a final answer)[ \n]', text, re.IGNORECASE)
-            
-            if transition_match:
-                thought = text[:transition_match.start()].strip()
-                actual = text[transition_match.start():].strip()
-                text = f"{thought}\n{close_tag}\n\n{actual}"
+                parts = text.split(close_tag, 1)
+                thought = parts[0].replace(open_tag, "").strip()
+                actual = parts[1].strip()
+                if actual:
+                    text = f"{DETAILS_TAG}\n{SUMMARY_TAG}\n\n{thought}\n</details>\n\n{actual}"
+                else:
+                    text = f"{DETAILS_TAG}\n{SUMMARY_TAG}\n\n{thought}\n</details>"
             else:
-                if "\n\n" in text:
-                    parts = text.rsplit("\n\n", 1)
+                # Try to find common transition phrases to cleanly split thought from final answer
+                transition_match = re.search(r'\n(?:\*\*?(?:Final Answer|Conclusion|Summary)\*\*?:?|I will present this information|Here is the|Here are the|To summarize|In conclusion|Final Answer|Based on the|Given the|Therefore,|In summary|However, since I need a final answer)[ \n]', text, re.IGNORECASE)
+                
+                if transition_match:
+                    thought = text[:transition_match.start()].strip()
+                    thought = thought.replace(open_tag, "").strip()
+                    actual = text[transition_match.start():].strip()
+                    text = f"{DETAILS_TAG}\n{SUMMARY_TAG}\n\n{thought}\n</details>\n\n{actual}"
                 else:
-                    parts = text.rsplit("\n", 1)
-
-                if len(parts) > 1 and parts[1].strip():
-                    thought = parts[0].strip()
-                    actual = parts[1].strip()
-                    text = f"{thought}\n{close_tag}\n\n{actual}"
-                else:
-                    text += f"\n{close_tag}"
-
+                    if "\n\n" in text:
+                        parts = text.rsplit("\n\n", 1)
+                    else:
+                        parts = text.rsplit("\n", 1)
+                    if len(parts) > 1 and parts[1].strip():
+                        thought = parts[0].strip()
+                        thought = thought.replace(open_tag, "").strip()
+                        actual = parts[1].strip()
+                        text = f"{DETAILS_TAG}\n{SUMMARY_TAG}\n\n{thought}\n</details>\n\n{actual}"
+                    else:
+                        thought = text.replace(open_tag, "").strip()
+                        text = f"{DETAILS_TAG}\n{SUMMARY_TAG}\n\n{thought}\n</details>"
     return text
+
 
 
 
@@ -1528,9 +1543,11 @@ def _stream_tokens(
             content = re.sub(r'^System Instructions:\n.*?\n\nUser Query:\n', '', content, flags=re.DOTALL).strip()
             if target_role == ModelRole.CODE:
                 # Strip LaTeX/math from history when feeding CODE agent (prevents syntax pollution)
-                content = re.sub(r'\\boxed\{[^}]*\}', '', content)
+                content = re.sub(r'\\(?:boxed|frac|sqrt|text|mathrm|left|right)\{[^}]*\}', '', content)
                 content = re.sub(r'\$\$[\s\S]*?\$\$', '', content)
-                content = re.sub(r'\$[^$\n]+\$', '', content)
+                content = re.sub(r'\$([^$\n]*)\$', r'\1', content)
+                content = re.sub(r'_\{([^}]+)\}', r'_\1', content)
+                content = re.sub(r'\^\{([^}]+)\}', '', content)
             elif target_role in (ModelRole.REASONING, ModelRole.GENERAL, ModelRole.MATH):
                 # Compress long code blocks from history to avoid CODE-mode bleed into text agents
                 def _compress_code(m):
@@ -2062,9 +2079,10 @@ def ask_stream(
 
         if force_role == ModelRole.CODE:
             lang = _detect_language(full) or "python"
-            err = check_syntax(full, lang)
-            if err:
-                yield {"type": "syntax_error", "content": f"Syntax error in {lang}: {err}"}
+            if isinstance(settings, dict) and settings.get("code_review"):
+                err = check_syntax(full, lang)
+                if err:
+                    yield {"type": "syntax_error", "content": f"Syntax error in {lang}: {err}"}
             full, hw = _apply_and_yield_harness(full, lang)
             for w in hw:
                 yield w
@@ -2418,28 +2436,29 @@ def ask_stream(
             unload_model()
 
         lang = _detect_language(full)
-        err = check_syntax(full, lang)
-        if err:
-            yield {"type": "syntax_error", "content": f"Syntax error in {lang or 'code'}: {err}"}
-            yield {"type": "status", "content": "Auto-correcting syntax..."}
+        if isinstance(settings, dict) and settings.get("code_review"):
+            err = check_syntax(full, lang)
+            if err:
+                yield {"type": "syntax_error", "content": f"Syntax error in {lang or 'code'}: {err}"}
+                yield {"type": "status", "content": "Auto-correcting syntax..."}
 
-            correction_msgs = optimized + [
-                {"role": "assistant", "content": full},
-                {"role": "user",
-                 "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code."}
-            ]
-            corrected = ""
-            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings):
-                yield ev
-                if ev["type"] == "token":
-                    corrected += ev["content"]
-            if not _keep_loaded:
-                unload_model()
+                correction_msgs = optimized + [
+                    {"role": "assistant", "content": full},
+                    {"role": "user",
+                     "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code."}
+                ]
+                corrected = ""
+                for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings):
+                    yield ev
+                    if ev["type"] == "token":
+                        corrected += ev["content"]
+                if not _keep_loaded:
+                    unload_model()
 
-            second_err = check_syntax(corrected, lang)
-            if second_err:
-                yield {"type": "token", "content": "\n\n> \u26a0\ufe0f Auto-correction attempted but some errors may remain."}
-            full = full + "\n\n---\n### \ud83d\udd27 Syntax Auto-Correction\n\n" + corrected
+                second_err = check_syntax(corrected, lang)
+                if second_err:
+                    yield {"type": "token", "content": "\n\n> \u26a0\ufe0f Auto-correction attempted but some errors may remain."}
+                full = full + "\n\n---\n### \ud83d\udd27 Syntax Auto-Correction\n\n" + corrected
 
         lang = _detect_language(full) or "python"
         full, hw = _apply_and_yield_harness(full, lang)
@@ -2593,9 +2612,10 @@ def _run_continuation(
         unload_model()
 
     lang = _detect_language(reviewed)
-    err = check_syntax(reviewed, lang)
-    if err:
-        yield {"type": "syntax_error", "content": f"Syntax error in {lang or 'code'}: {err}"}
+    if isinstance(settings, dict) and settings.get("code_review"):
+        err = check_syntax(reviewed, lang)
+        if err:
+            yield {"type": "syntax_error", "content": f"Syntax error in {lang or 'code'}: {err}"}
 
     rev_lang = _detect_language(reviewed) or "python"
     reviewed, hwc2 = _apply_and_yield_harness(reviewed, rev_lang)
@@ -2773,28 +2793,29 @@ def _run_complex_coding(
         final_output = full_code
 
     lang = _detect_language(final_output)
-    err = check_syntax(final_output, lang)
-    if err:
-        yield {"type": "syntax_error", "content": f"Syntax error in {lang or 'code'}: {err}"}
-        yield {"type": "status", "content": "Auto-correcting syntax..."}
+    if isinstance(settings, dict) and settings.get("code_review"):
+        err = check_syntax(final_output, lang)
+        if err:
+            yield {"type": "syntax_error", "content": f"Syntax error in {lang or 'code'}: {err}"}
+            yield {"type": "status", "content": "Auto-correcting syntax..."}
 
-        correction_msgs = optimized + [
-            {"role": "assistant", "content": final_output},
-            {"role": "user",
-             "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code inside a ```python``` block."}
-        ]
-        corrected = ""
-        for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
-            yield ev
-            if ev["type"] == "token":
-                corrected += ev["content"]
-        if not _keep_loaded:
-            unload_model()
+            correction_msgs = review_msgs + [
+                {"role": "assistant", "content": final_output},
+                {"role": "user",
+                 "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code inside a ```python``` block."}
+            ]
+            corrected = ""
+            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
+                yield ev
+                if ev["type"] == "token":
+                    corrected += ev["content"]
+            if not _keep_loaded:
+                unload_model()
 
-        second_err = check_syntax(corrected, lang)
-        if second_err:
-            yield {"type": "token", "content": "\n\n> \u26a0\ufe0f Auto-correction attempted but some errors may remain."}
-        final_output = final_output + "\n\n---\n### \ud83d\udd27 Syntax Auto-Correction\n\n" + corrected
+            second_err = check_syntax(corrected, lang)
+            if second_err:
+                yield {"type": "token", "content": "\n\n> \u26a0\ufe0f Auto-correction attempted but some errors may remain."}
+            final_output = final_output + "\n\n---\n### \ud83d\udd27 Syntax Auto-Correction\n\n" + corrected
 
     
     yield {"type": "status", "content": "Verifying complex code in sandbox..."}
