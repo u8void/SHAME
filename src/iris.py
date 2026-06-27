@@ -369,7 +369,8 @@ MATH_SYSTEM_PROMPT = (
     "ANTI-POLLUTION RULE: If your solution requires writing code (like Python or C++), "
     "DO NOT use LaTeX or MathJax formatting (like $...$ or _{...}) inside the code block. "
     "Variable names and function names inside code must be plain ASCII identifiers only. "
-    "LaTeX notation (\\boxed{}, $...$) is ONLY for the mathematical explanation text outside code blocks."
+    "LaTeX notation (\\boxed{}, $...$) is ONLY for the mathematical explanation text outside code blocks. "
+    "IMPORTANT: For display math blocks, you MUST use $$ ... $$ and NEVER use \\[ ... \\]."
 )
 
 REASONING_SYSTEM_PROMPT = (
@@ -1079,14 +1080,14 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
         "system info", "wifi", "bluetooth", "take note", "screenshot", "record", "screen record",
         "check memory", "check battery", "empty trash", "type text", "press key",
         "dark mode", "night mode", "wallpaper", "notification", "alert", "notify",
-        "message", "text", "whatsapp", "telegram", "quiz", "autopilot", "login", "browser",
+        "message", "send text", "whatsapp", "telegram", "quiz", "autopilot", "login", "browser",
         "maximize", "minimize", "fullscreen", "switch tab", "close window",
         "delete file", "delete folder", "create file", "create folder", "move file", "copy file",
         "rename", "unzip", "extract", "compress", "zip file", "download file",
         "git pull", "git push", "git commit", "docker run", "docker ps", "npm install", "pip install",
         "apt update", "apt install", "winget install", "brew install",
         "vpn connect", "vpn disconnect", "speed test", "flush dns",
-        "type", "press", "say", "do not disturb", "dnd", "read clipboard", "write clipboard",
+        "type out", "press", "say", "do not disturb", "dnd", "read clipboard", "write clipboard",
         "open settings", "system settings", "control panel",
     }
     for kw in control_keywords:
@@ -1160,7 +1161,7 @@ def _fallback_classify(query: str) -> Optional[TaskType]:
         "derivative", "derivatives", "integral", "integrals", "integrate", "integration", "calculus",
         "algebra", "geometry", "trigonometry", "matrix", "matrices", "vector",
         "vectors", "theorem", "proof", "prove", "probability", "statistics",
-        "combinatorics",
+        "combinatorics", "calculate", "solve", "area", "volume",
     }
     for kw in math_keywords:
         if re.search(rf"\b{re.escape(kw)}\b", q):
@@ -1404,6 +1405,9 @@ def _quality_guard(text: str) -> str:
 
     text = re.sub(r'```[\s\S]*?```', _scrub_latex_in_code, text)
 
+    # Convert display math \[ ... \] to $$ ... $$ for proper markdown rendering
+    text = text.replace('\\[', '$$').replace('\\]', '$$')
+
     text = re.sub(
         r"\\boxed{((?:[^{}]|{[^{}]*})*)}",
         r'<span style="border: 2px solid #4CAF50; padding: 2px 6px; border-radius: 4px; font-weight: bold; background-color: rgba(76, 175, 80, 0.1);">\1</span>',
@@ -1438,21 +1442,25 @@ def _quality_guard(text: str) -> str:
 
     for open_tag, close_tag in [("<think>", "</think>"), ("<thought>", "</thought>"), ("<|thought_start|>", "<|thought_end|>")]:
         if open_tag in text:
-            has_close = close_tag in text
-            is_at_end = text.strip().endswith(close_tag)
+            if close_tag in text:
+                text = text.replace(close_tag, "")
 
-            if not has_close or is_at_end:
-                if has_close:
-                    text = text.replace(close_tag, "")
-
+            # Try to find common transition phrases to cleanly split thought from final answer
+            transition_match = re.search(r'\n(?:\*\*?(?:Final Answer|Conclusion|Summary)\*\*?:?|I will present this information|Here is the|Here are the|To summarize|In conclusion|Final Answer|Based on the|Given the|Therefore,|In summary|However, since I need a final answer)[ \n]', text, re.IGNORECASE)
+            
+            if transition_match:
+                thought = text[:transition_match.start()].strip()
+                actual = text[transition_match.start():].strip()
+                text = f"{thought}\n{close_tag}\n\n{actual}"
+            else:
                 if "\n\n" in text:
                     parts = text.rsplit("\n\n", 1)
                 else:
                     parts = text.rsplit("\n", 1)
 
                 if len(parts) > 1 and parts[1].strip():
-                    thought = parts[0]
-                    actual = parts[1]
+                    thought = parts[0].strip()
+                    actual = parts[1].strip()
                     text = f"{thought}\n{close_tag}\n\n{actual}"
                 else:
                     text += f"\n{close_tag}"
@@ -1668,15 +1676,39 @@ def _stream_tokens(
 
             # Repetition Guard: Detect infinite loop collapse on local quantized models
             if token_count % 10 == 0 and len(loop_content) > 200:
-                recent = loop_content[-800:]
+                recent = loop_content[-1000:]
                 n = len(recent)
                 is_repetition = False
+                
+                # 1. Exact long string repetition
                 for l in range(150, n // 2 + 1):
                     suffix = recent[-l:]
                     if suffix in recent[:-l]:
-                        logger.warning(f"[Repetition Guard] Detected repetition loop of length {l}. Stopping generation early.")
+                        logger.warning(f"[Repetition Guard] Detected exact repetition loop of length {l}. Stopping generation early.")
                         is_repetition = True
                         break
+                
+                # 2. Semantic N-gram looping (frequent phrases like 'Wait but according to...')
+                if not is_repetition and len(recent) > 300:
+                    words = recent.replace("\n", " ").split()
+                    if len(words) > 30:
+                        for i in range(len(words) - 8):
+                            ngram = " ".join(words[i:i+8]).lower()
+                            # Only check meaningful n-grams
+                            if len(ngram) > 25 and recent.lower().count(ngram) >= 3:
+                                logger.warning(f"[Repetition Guard] Detected semantic loop '{ngram}'. Stopping generation early.")
+                                is_repetition = True
+                                break
+                                
+                # 3. Deliberation loop (frequent phrases like 'Wait but', 'Alternatively,')
+                if not is_repetition and len(recent) > 500:
+                    deliberation_phrases = ["wait but", "alternatively,", "hmm.", "on the other hand", "wait,"]
+                    for phrase in deliberation_phrases:
+                        if recent.lower().count(phrase) >= 5:
+                            logger.warning(f"[Repetition Guard] Detected deliberation loop ('{phrase}'). Stopping generation early.")
+                            is_repetition = True
+                            break
+
                 if is_repetition:
                     finish_reason = "stop"
                     break
@@ -2028,17 +2060,7 @@ def ask_stream(
         if not _keep_loaded:
             unload_model()
 
-        if force_role == ModelRole.MATH:
-            full, mw = _apply_math_harness(full)
-            for w in mw:
-                yield w
-            
-            _, math_report = apply_smart_harness_math(full)
-            if math_report.final_answer_extracted:
-                yield {"type": "status", "content": f"Answer: {math_report.final_answer_extracted}"}
-            if not math_report.self_consistent:
-                yield {"type": "harness_warning", "content": "Self-consistency check FAILED — steps may not lead to final answer"}
-        elif force_role == ModelRole.CODE:
+        if force_role == ModelRole.CODE:
             lang = _detect_language(full) or "python"
             err = check_syntax(full, lang)
             if err:
@@ -2058,7 +2080,7 @@ def ask_stream(
                 yield {"type": "status", "content": "Reviewing code..."}
                 _rmsgs = optimized + [
                     {"role": "assistant", "content": full},
-                    {"role": "user", "content": "Review your previous code. If there are issues, write a new response explaining the fixes and providing the corrected code. If there are no issues, just output 'No issues found.'"}
+                    {"role": "user", "content": "Review your previous code. If there are issues, write a new response explaining the fixes and providing the corrected code. YOU MUST OUTPUT THE ENTIRE COMPLETE FILE WITH ALL ORIGINAL CONTENT INCLUDED (e.g., if it was an HTML file containing HTML/CSS/JS, output the full HTML file). Never output just a snippet. If there are no issues, just output 'No issues found.'"}
                 ]
                 _rev = ""
                 for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
@@ -2305,17 +2327,29 @@ def ask_stream(
                 thought_process += ev["content"]
         if not _keep_loaded:
             unload_model()
-        cleaned = _quality_guard(full)
+            
+        combined = ""
+        if thought_process:
+            combined += f"<think>\n{thought_process.strip()}"
+            if full:
+                combined += f"\n</think>\n{full}"
+        else:
+            combined = full
+            
+        cleaned = _quality_guard(combined)
 
         # --- Output Completeness Validation ---
         _visible = cleaned.strip()
+        # Remove think block for visible length check
+        _visible_no_think = re.sub(r'<think>[\s\S]*?</think>', '', _visible).strip()
+        
         _EVASION_PHRASES = re.compile(
             r'^(the final answer is[:\s]*|\[?routing complete\]?\.?|done\.?|answer[:\s]*|result[:\s]*)$',
             re.IGNORECASE
         )
         _is_collapsed = (
-            len(_visible) < 5
-            or _EVASION_PHRASES.match(_visible.strip())
+            len(_visible_no_think) < 5
+            or _EVASION_PHRASES.match(_visible_no_think)
         ) and len(thought_process.strip()) < 50  # Don't flag if model correctly used think tags
         if _is_collapsed:
             logger.warning(f"[Completeness] Evasion-loophole detected. Visible output too thin ({len(_visible)} chars). Attempting recovery.")
@@ -2353,16 +2387,11 @@ def ask_stream(
                     retry_full += ev["content"]
             cleaned = _quality_guard(retry_full)
 
-        if full and cleaned and cleaned != full:
+        if combined and cleaned and cleaned != combined:
             yield {"type": "clear"}
             yield {"type": "token", "content": cleaned}
             
-        final_content = ""
-        if thought_process:
-            final_content += f"<think>\n{thought_process.strip()}\n</think>\n"
-        if cleaned:
-            final_content += cleaned
-        yield {"type": "raw_response", "content": final_content}
+        yield {"type": "raw_response", "content": cleaned}
 
 
     elif task_type == TaskType.MATH:
@@ -2375,23 +2404,7 @@ def ask_stream(
         if not _keep_loaded:
             unload_model()
 
-        full, mw = _apply_math_harness(full)
-        for w in mw:
-            yield w
 
-        
-        _, math_report = apply_smart_harness_math(full)
-        if math_report.final_answer_extracted:
-            yield {"type": "status", "content": f"Answer: {math_report.final_answer_extracted}"}
-        if not math_report.numerical_match and math_report.expected_value is not None:
-            yield {"type": "harness_warning", "content": f"Numerical mismatch: computed={math_report.computed_value}, expected={math_report.expected_value}"}
-        if not math_report.self_consistent:
-            yield {"type": "harness_warning", "content": "Self-consistency check FAILED — steps may not lead to final answer"}
-
-        lang = _detect_language(full)
-        err = check_syntax(full, lang)
-        if err:
-            yield {"type": "syntax_error", "content": f"Syntax check in {lang or 'code'}: {err}"}
         yield {"type": "raw_response", "content": full}
 
     elif task_type == TaskType.CODING_SIMPLE:
@@ -2453,7 +2466,7 @@ def ask_stream(
                 yield {"type": "status", "content": "Reviewing code quality..."}
                 _rmsgs = optimized + [
                     {"role": "assistant", "content": full},
-                    {"role": "user", "content": "Review this code for correctness, edge cases, performance, and best practices. Fix issues inside a code block with filename comment, or say 'No issues found.'"}
+                    {"role": "user", "content": "Review this code for correctness, edge cases, performance, and best practices. Fix issues inside a code block with filename comment. YOU MUST OUTPUT THE ENTIRE COMPLETE FILE WITH ALL ORIGINAL CONTENT INCLUDED (e.g., if it was an HTML file containing HTML/CSS/JS, output the full HTML file). Never output just a snippet. If there are no issues, just output 'No issues found.'"}
                 ]
                 _rev = ""
                 for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
@@ -2802,7 +2815,7 @@ def _run_complex_coding(
         yield {"type": "status", "content": "Reviewing final code quality..."}
         _rmsgs = optimized + [
             {"role": "assistant", "content": final_output},
-            {"role": "user", "content": "Final review pass. Fix remaining issues inside a code block with filename, or say 'No issues found.'"}
+            {"role": "user", "content": "Final review pass. Fix remaining issues inside a code block with filename. YOU MUST OUTPUT THE ENTIRE COMPLETE FILE WITH ALL ORIGINAL CONTENT INCLUDED (e.g., if it was an HTML file containing HTML/CSS/JS, output the full HTML file). Never output just a snippet. If there are no issues, just output 'No issues found.'"}
         ]
         _rev = ""
         for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=REVIEWER_SYSTEM_PROMPT):
@@ -3016,7 +3029,19 @@ def solve_math(user_text: str) -> Optional[str]:
         return None
 
     text = user_text.strip().rstrip('?').strip()
-    text = re.sub(r'^(solve|calculate|what is|compute)\s+', '', text, flags=re.IGNORECASE).strip()
+    has_math_prefix = bool(re.search(r'^(solve|calculate|what is|compute|evaluate)\s+', text, flags=re.IGNORECASE))
+    text = re.sub(r'^(solve|calculate|what is|compute|evaluate)\s+', '', text, flags=re.IGNORECASE).strip()
+    
+    # Fast-path interceptor should ONLY handle pure math.
+    # Dynamically check if English words are valid SymPy objects or explicit function calls.
+    words = re.findall(r'[a-zA-Z]{2,}', text)
+    if words:
+        import sympy
+        for w in words:
+            if not (hasattr(sympy, w) or hasattr(sympy, w.capitalize()) or hasattr(sympy, w.lower())):
+                # Allow it if it looks like an explicit function call, e.g., generic f(x) or arccos(x)
+                if not re.search(rf'\b{re.escape(w)}\s*\(', text):
+                    return None
 
     def normalise(expr: str) -> str:
         # Normalize Unicode math symbols BEFORE anything else
@@ -3064,7 +3089,12 @@ def solve_math(user_text: str) -> Optional[str]:
         try:
             expr = parse_expr(normalized, transformations=transformations)
             if has_variables:
+                # Require explicit math symbols or a math command if variables are present
+                has_operators = bool(re.search(r'[\+\-\*\/\^\(\)\=\²\³\×\✕\✖\÷\⁄\−\–\—]', user_text))
+                if not (has_math_prefix or has_operators):
+                    return None
                 simplified = simplify(expr)
+                # If simplify doesn't actually change anything meaningful, maybe we shouldn't just echo it
                 return str(simplified)
             result = expr.evalf()
             if result.is_integer:
