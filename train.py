@@ -30,6 +30,9 @@ from src.iris import (
     load_math_qa,
     load_code_feedback,
     load_oasst1_dataset,
+    load_magicoder_dataset,
+    load_open_code_reasoning,
+    load_self_oss_instruct,
 )
 
 SYSTEM_PROMPT = "You are Iris, an intelligent and helpful AI assistant trained to assist the user with their tasks."
@@ -128,6 +131,7 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=1, help="Batch size")
     parser.add_argument("--accum-steps", type=int, default=8, help="Gradient accumulation steps")
     parser.add_argument("--max-seq-length", type=int, default=4096, help="Maximum sequence length")
+    parser.add_argument("--max-length", type=int, default=None, help="Alias for max-seq-length")
     parser.add_argument("--device", choices=["cuda", "mps", "cpu"], default=None)
 
     parser.add_argument("--max-pairs", type=int, default=5000)
@@ -164,6 +168,9 @@ LOADER_FUNCTIONS = {
     "MBZUAI-Paris/Egyptian-SFT-Mixture": load_mbzuai_egyptian_mixture,
     "islamic-datasets/Istilah_Maliki_Dataset": load_hf_maliki_dataset,
     "OpenAssistant/oasst1": load_oasst1_dataset,
+    "ise-uiuc/Magicoder-OSS-Instruct-75K": load_magicoder_dataset,
+    "nvidia/OpenCodeReasoning": load_open_code_reasoning,
+    "bigcode/self-oss-instruct-sc2-exec-filter-50k": load_self_oss_instruct,
 }
 
 def load_generic_hf_dataset(path: str, limit: int = None) -> List[Tuple[str, str]]:
@@ -251,8 +258,8 @@ def load_generic_hf_dataset(path: str, limit: int = None) -> List[Tuple[str, str
                                 pairs.append((u, b))
                                 break
         else:
-            query_cols = ["question", "input", "query", "text", "prompt", "instruction"]
-            response_cols = ["answer", "output", "response", "target", "completion"]
+            query_cols = ["question", "input", "query", "text", "prompt", "instruction", "problem"]
+            response_cols = ["answer", "output", "response", "target", "completion", "solution"]
             q_col = next((c for c in query_cols if c in features), None)
             r_col = next((c for c in response_cols if c in features), None)
             if q_col and r_col:
@@ -562,6 +569,16 @@ def run_torch_path(args, device_type: str, role: str):
     print(f"  Iris AI — Torch Training Path ({device_type.upper()})")
     print("="*60)
 
+    if device_type == "cuda":
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        try:
+            free_vram, total_vram = torch.cuda.mem_get_info()
+            print(f"[MEMORY] Before model load - CUDA VRAM: Free {free_vram / (1024**3):.2f} GiB / Total {total_vram / (1024**3):.2f} GiB")
+        except Exception:
+            pass
+
     from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, Trainer, TrainingArguments, DataCollatorForSeq2Seq
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
 
@@ -626,7 +643,17 @@ def run_torch_path(args, device_type: str, role: str):
         )
         model = AutoModelForCausalLM.from_pretrained(args.model, quantization_config=bnb_config, device_map="auto")
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
-        lora_r = 16
+        
+        # Dynamically set rank to 8 if total VRAM is less than 8GB to save memory
+        try:
+            total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            if total_vram_gb < 8.0:
+                lora_r = 8
+                print(f"[MEMORY] Low GPU VRAM detected ({total_vram_gb:.2f} GiB). Setting LoRA rank to {lora_r} to prevent OOM.")
+            else:
+                lora_r = 16
+        except Exception:
+            lora_r = 8
     else:
         model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.bfloat16).to(device)
         lora_r = 8
@@ -669,6 +696,16 @@ def run_torch_path(args, device_type: str, role: str):
         eval_dataset=eval_dataset if len(eval_dataset) > 0 else None,
         data_collator=data_collator,
     )
+
+    if device_type == "cuda":
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        try:
+            free_vram, total_vram = torch.cuda.mem_get_info()
+            print(f"[MEMORY] Before trainer.train() - CUDA VRAM: Free {free_vram / (1024**3):.2f} GiB / Total {total_vram / (1024**3):.2f} GiB")
+        except Exception:
+            pass
 
     print("\n[INFO] Starting HF Trainer...")
     resume_checkpoint = False
@@ -834,8 +871,36 @@ def ensure_training_subdirs():
 def main():
     args = parse_args()
 
+    if args.max_length is not None:
+        args.max_seq_length = args.max_length
+
     
     apply_size_config(args.size)
+
+    if SIZE_CONFIG:
+        if "max_seq_length" in SIZE_CONFIG:
+            explicit_len = any(arg.startswith("--max-seq-length") or arg.startswith("--max-length") for arg in sys.argv)
+            if not explicit_len:
+                print(f"[SIZE] Applying max_seq_length={SIZE_CONFIG['max_seq_length']} from size configuration '{args.size}'")
+                args.max_seq_length = SIZE_CONFIG["max_seq_length"]
+        if "num_layers" in SIZE_CONFIG:
+            explicit_layers = any(arg.startswith("--num-layers") for arg in sys.argv)
+            if not explicit_layers:
+                args.num_layers = SIZE_CONFIG["num_layers"]
+
+    # Proactive VRAM capping for low-end GPUs (< 8GB VRAM)
+    if torch is not None and torch.cuda.is_available():
+        try:
+            total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            if total_vram_gb < 8.0:
+                old_val = args.max_seq_length
+                # Cap sequence length to 256 on < 8GB GPUs unless explicitly overridden in command line
+                explicit_len = any(arg.startswith("--max-seq-length") or arg.startswith("--max-length") for arg in sys.argv)
+                if not explicit_len:
+                    args.max_seq_length = min(old_val, 256)
+                    print(f"[MEMORY] Low GPU VRAM detected ({total_vram_gb:.2f} GiB). Auto-capping max_seq_length from {old_val} to {args.max_seq_length} to prevent OOM.")
+        except Exception as e:
+            print(f"[WARNING] Could not check GPU VRAM: {e}")
 
     roles_to_train = resolve_roles(args.role)
     if not roles_to_train:

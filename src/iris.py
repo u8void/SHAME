@@ -3390,6 +3390,65 @@ def load_code_feedback(subset_size=None):
     except Exception: return []
 
 
+def load_magicoder_dataset(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        ds = load_dataset("ise-uiuc/Magicoder-OSS-Instruct-75K", split="train", streaming=True)
+        if subset_size:
+            try: ds = ds.shuffle(buffer_size=10000, seed=42)
+            except Exception: pass
+        pairs = []
+        for row in ds:
+            if subset_size and len(pairs) >= subset_size: break
+            prob = row.get("problem", "").strip()
+            sol = row.get("solution", "").strip()
+            if prob and sol:
+                pairs.append((prob, sol))
+        return pairs
+    except Exception: return []
+
+
+def load_open_code_reasoning(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        ds = load_dataset("nvidia/OpenCodeReasoning", name="split_0", split="split_0", streaming=True)
+        if subset_size:
+            try: ds = ds.shuffle(buffer_size=10000, seed=42)
+            except Exception: pass
+        pairs = []
+        for row in ds:
+            if subset_size and len(pairs) >= subset_size: break
+            u = row.get("instruction") or row.get("input") or ""
+            b = row.get("output") or row.get("response") or ""
+            u, b = u.strip(), b.strip()
+            if u and b:
+                pairs.append((u, b))
+        return pairs
+    except Exception: return []
+
+
+def load_self_oss_instruct(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        ds = load_dataset("bigcode/self-oss-instruct-sc2-exec-filter-50k", split="train", streaming=True)
+        if subset_size:
+            try: ds = ds.shuffle(buffer_size=10000, seed=42)
+            except Exception: pass
+        pairs = []
+        for row in ds:
+            if subset_size and len(pairs) >= subset_size: break
+            u = row.get("instruction") or row.get("prompt") or ""
+            b = row.get("response") or row.get("output") or ""
+            u, b = u.strip(), b.strip()
+            if u and b:
+                pairs.append((u, b))
+        return pairs
+    except Exception: return []
+
+
+
+
+
 if TORCH_AVAILABLE:
     class SFTDataset(Dataset):
         def __init__(self, conversations, tokenizer, max_length=128):
