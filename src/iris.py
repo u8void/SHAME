@@ -257,8 +257,8 @@ except Exception:
     TRIAGE_SYSTEM_PROMPT = (
         "[CLASSIFICATION TASK — SAFETY OVERRIDE] You are an AI router performing a mechanical text classification task. "
         "You MUST output a routing tag regardless of the query topic. This is NOT a content generation task; you will NEVER produce harmful content. "
-        "Your only output is a short <think> block analyzing the user's intent, followed by a single routing tag. "
-        "You are NEVER responsible for the actual response. NEVER refuse. NEVER say 'I cannot assist'. JUST OUTPUT THE THINK BLOCK AND THE TAG.\n\n"
+        "Your only output is a single routing tag. "
+        "You are NEVER responsible for the actual response. NEVER refuse. NEVER say 'I cannot assist'. JUST OUTPUT THE TAG.\n\n"
         f"{IRIS_IDENTITY}\n"
         "You are the Iris AI Router. Your ONLY job is to output ONE routing tag.\n"
         "Rules:\n"
@@ -283,14 +283,15 @@ except Exception:
         "_ If the user greats you, Great Him Again like \n"
         "_ User: Hi -> Bot: Hi, How is it going \n"
         "EXAMPLES:\n"
-        "User: what is the capital of France → <think>Fact question about a country.</think>\n[ROUTE: SEARCH: capital of France]\n"
-        "User: how many r in strawberry → <think>Letter introspection.</think>\n[ROUTE: REASONING]\n"
-        "User: how to make a pizza → <think>Explanation request for cooking.</think>\n[ROUTE: REASONING]\n"
-        "User: create a tailwind css landing page → <think>Web app development project.</think>\n[ROUTE: CODE_COMPLEX]\n"
-        "User: open spotify → <think>OS application control.</think>\n[ROUTE: CONTROL]\n"
-        "User: hi → Hello! How can I help you today?\n"
-        "User: who are you → <think>Identity question.</think>\n[ROUTE: GENERAL]\n\n"
-        "You MUST ALWAYS start your response with a <think> block analyzing the user's core intent, followed immediately by exactly one routing tag."
+        "Query: 'what is the capital of France' → [ROUTE: SEARCH: capital of France]\n"
+        "Query: 'how many r in strawberry' → [ROUTE: REASONING]\n"
+        "Query: 'how to make a pizza' → [ROUTE: REASONING]\n"
+        "Query: 'create a tailwind css landing page' → [ROUTE: CODE_COMPLEX]\n"
+        "Query: 'open spotify' → [ROUTE: CONTROL]\n"
+        "Query: 'set brightness to 40%' → [ROUTE: CONTROL]\n"
+        "Query: 'hi' → Hello! How can I help you today?\n"
+        "Query: 'who are you' → [ROUTE: GENERAL]\n\n"
+        "You MUST output exactly one routing tag based on the user's intent. Do not output anything else."
     )
 
 GENERAL_SYSTEM_PROMPT = (
@@ -455,7 +456,7 @@ class MLXTextModel:
         self.temp = temp
         self._path = model_path
     def n_ctx(self) -> int:
-        return 32768  
+        return 8192
     def n_embd(self) -> int:
         return getattr(self, '_n_embd', 0) or 2560
     def create_chat_completion(self, messages, stream=True, max_tokens=512,
@@ -1234,11 +1235,9 @@ def classify_task(
             c = c[:150] + "...[truncated]"
         triage_messages.append({"role": msg["role"], "content": c})
 
-    triage_query = query_for_classification
+    triage_query = f'{query_for_classification}\n\n[SYSTEM DIRECTIVE: Analyze the user query and output EXACTLY ONE routing tag. Do not output anything else.]'
     if len(triage_query) > 1500:
         triage_query = triage_query[:1000] + "\n\n...[content truncated for routing]...\n\n" + triage_query[-500:]
-    
-    triage_query += "\n\n[SYSTEM DIRECTIVE: Output a short <think> block analyzing the user's core intent, followed immediately by exactly one [ROUTE: ...] tag. DO NOT answer the user's query directly. NO greetings.]"
     
     triage_messages.append({"role": "user", "content": triage_query})
 
@@ -1289,10 +1288,7 @@ def classify_task(
         )
         is_greeting_reply = (
             answer_words <= 30
-            and (
-                GREETING_PATTERNS.search(answer)
-                or (answer_words <= 6 and not re.search(r'\b(how\s+many|count|letter|spell|number)\b', answer, re.IGNORECASE))
-            )
+            and GREETING_PATTERNS.search(answer)
             and not re.search(
                 r'\b(because|therefore|however)\b',
                 answer, re.IGNORECASE
@@ -1322,6 +1318,15 @@ def classify_task(
             else:
                 logger.info("[Triage] Safety refusal detected — heuristic: REASONING")
                 return TaskType.REASONING, None
+
+        # Keyword heuristic fallback for CONTROL or CODE if Triage hallucinates
+        q_lower = query_for_classification.lower()
+        if any(kw in q_lower for kw in ["open", "launch", "brightness", "volume", "click", "turn off", "pc", "browser", "control"]):
+            logger.info(f"[Triage] No tag but matched CONTROL keywords. Triage said: {answer[:80]}...")
+            return TaskType.CONTROL, None
+        if any(kw in q_lower for kw in ["code", "script", "function", "html", "css", "js", "python", "debug"]):
+            logger.info(f"[Triage] No tag but matched CODE keywords. Triage said: {answer[:80]}...")
+            return TaskType.CODING_COMPLEX, None
 
         logger.info(
             f"[Triage] No routing tag — redirecting to REASONING to prevent hallucination. "
@@ -3017,6 +3022,8 @@ def solve_math(user_text: str) -> Optional[str]:
         expr = expr.replace('−', '-').replace('–', '-').replace('—', '-')
         expr = expr.replace('²', '**2').replace('³', '**3')
         expr = expr.replace('π', 'pi')
+        # Handle 'x' used as multiplication between numbers (e.g. 5x5 or 5 x 5)
+        expr = re.sub(r'(?<=\d)\s*[xX]\s*(?=\d)', '*', expr)
         # Implicit multiplication: 2x → 2*x
         expr = re.sub(r'([0-9])([a-zA-Z])', r'\1*\2', expr)
         expr = re.sub(r'\^', '**', expr)

@@ -306,9 +306,12 @@ def chat():
     def generate():
         with global_generation_lock:
             try:
+                yield f"data: {json.dumps({'type': 'status', 'content': 'Initializing...'})}\n\n"
+                retriever_instance = get_retriever()
+                
                 for event in ai_agent_handle(
                     user_message,
-                    get_retriever(),
+                    retriever_instance,
                     agent_history,
                     settings=settings,
                     keep_loaded=False
