@@ -14,12 +14,12 @@
   },
   "gguf": {
     "triage": "iris_001.gguf",
-    "router": "iris_004.gguf",
-    "control": "iris_004.gguf",
+    "router": "iris_002.gguf",
+    "control": "iris_002.gguf",
     "math": "iris_003.gguf",
     "code": "iris_004.gguf",
-    "reasoning": "iris_004.gguf",
-    "general": "iris_004.gguf",
+    "reasoning": "iris_005.gguf",
+    "general": "iris_005.gguf",
     "vision": "iris_006.gguf"
   },
   "clip": "iris_007.gguf",
