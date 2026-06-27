@@ -1684,11 +1684,13 @@ window.downloadCode = (btn, ext) => {
 
         overlay.classList.add('visible');
         requestAnimationFrame(() => panel.classList.add('open'));
+        document.body.classList.add('code-viewer-open');
     }
 
     function closeViewer() {
         panel.classList.remove('open');
         overlay.classList.remove('visible');
+        document.body.classList.remove('code-viewer-open');
         currentCardEl = null;
     }
 
