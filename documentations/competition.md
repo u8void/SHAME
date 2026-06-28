@@ -22,7 +22,7 @@ GPQA          40% ──── 51% ───── 61% ───── 65% ─�
 | Tier | Total Params | Active Peak | Storage | RAM | Hardware Cost | Rivals |
 |------|:-----------:|:-----------:|:-------:|:---:|:------------:|--------|
 | **Tiny** | 14B | 4B | ~10 GB | 4 GB | $0 (Raspberry Pi) | Gemini 1.5 Flash-8B, Llama 3.1 8B, Qwen 2.5 7B |
-| **Small** | 36B | 7B | ~25 GB | 8 GB | $0 (any laptop) | Llama-3.1-8B, Qwen3-8B, Gemma-3-12B, Phi-3.5-mini |
+| **Small** | 36B | 7B | ~25 GB | 8 GB | $0 (any laptop) | Llama-3.1-8B, Qwen3-8B, Gemma-3-12B, Phi-3-medium (14B) |
 | **Medium** | 53B | 14B | ~37 GB | 16 GB | $0 (M1 Air) | Mistral-Small-3.1-24B, Gemma-3-12B, Qwen3-14B, Phi-4-14B |
 | **Large** | 112B | 32B | ~78 GB | **24 GB** | $1K (M4 Mac Mini) | Llama-3.3-70B, Qwen3-32B, Gemma-3-27B, Qwen2.5-72B |
 | **Max** | 264B | 72B | ~185 GB | **48 GB** | $3K (M3 Max 48GB) | Llama-3.1-405B, DeepSeek-R1, Qwen3-235B-A22B, Mixtral-8x22B |
@@ -152,15 +152,15 @@ The 3B/4B models (code, reasoning, general) are the heart of this tier. The 1.7B
 
 #### Benchmarks vs Comparable Models
 
-| Benchmark | Iris Small (Harnessed) | Llama-3.1-8B | Qwen3-8B | Gemma-3-12B | Phi-3.5-mini (3.8B) |
-|-----------|:----------------------:|:------------:|:--------:|:-----------:|:-------------------:|
-| MMLU | **89.2%** | 73.0% | 82.0% | 74.0% | 69.0% |
-| HumanEval | **90.4%** | 72.6% | 87.0% | 85.4% | 59.0% |
-| MATH-500 | **94.7%** | 34.4% | 64.0% | 47.0% | 26.0% |
-| AIME 2024 | **57.5%** | 5.0% | 18.0% | 8.0% | 4.0% |
-| GPQA Diamond | **51.1%** | 30.4% | 36.0% | 24.3% | 20.0% |
-| LiveCodeBench | **39.6%** | 8.5% | 22.0% | 15.0% | 6.0% |
-| SWE-Bench Lite | **12.0%** | 1.5% | 4.0% | 3.0% | 1.0% |
+| Benchmark | Iris Small (Harnessed) | Llama-3.1-8B | Qwen3-8B | Gemma-3-12B | Phi-3-medium (14B) |
+|-----------|:----------------------:|:------------:|:--------:|:-----------:|:------------------:|
+| MMLU | **89.2%** | 73.0% | 82.0% | 74.0% | 78.0% |
+| HumanEval | **90.4%** | 72.6% | 87.0% | 85.4% | 62.0% |
+| MATH-500 | **94.7%** | 34.4% | 64.0% | 47.0% | 58.0% |
+| AIME 2024 | **57.5%** | 5.0% | 18.0% | 8.0% | 20.0% |
+| GPQA Diamond | **51.1%** | 30.4% | 36.0% | 24.3% | 35.0% |
+| LiveCodeBench | **39.6%** | 8.5% | 22.0% | 15.0% | 25.0% |
+| SWE-Bench Lite | **12.0%** | 1.5% | 4.0% | 3.0% | 5.0% |
 
 #### Honest Assessment
 Iris Small is a **powerful 7B-class orchestration system that significantly outperforms individual 8B monolithic models**. Powered by specialized code, math, and reasoning cores (all in the 7B range), it leaves single-model competitors behind on every benchmark while fitting comfortably in 8 GB RAM.
