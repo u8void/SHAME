@@ -247,7 +247,7 @@ def chat():
             agent_history = []  
 
     agent_history = []
-    for msg in frontend_messages[:-1][-6:]:
+    for msg in frontend_messages[:-1]:
         role = "assistant" if msg.get("role") == "bot" else "user"
         agent_history.append({"role": role, "content": msg.get("content", "")})
 
@@ -309,6 +309,9 @@ def chat():
                 yield f"data: {json.dumps({'type': 'status', 'content': 'Initializing...'})}\n\n"
                 retriever_instance = get_retriever()
                 
+                final_response = ""
+                assigned_role = None
+
                 for event in ai_agent_handle(
                     user_message,
                     retriever_instance,
@@ -316,7 +319,43 @@ def chat():
                     settings=settings,
                     keep_loaded=False
                 ):
+                    if event.get("type") == "raw_response":
+                        final_response = event.get("content", "")
+                    elif event.get("type") == "status":
+                        status_text = event.get("content", "")
+                        if status_text.startswith("Task: "):
+                            assigned_role = status_text.split("Task: ")[1].strip().lower()
                     yield f"data: {json.dumps(event)}\n\n"
+                    
+                # Post-pipeline HCA compaction
+                from src.iris_engine import ModelRole
+                from src.context_compactor import auto_compact_for_role
+                
+                # Determine role enum
+                target_role = ModelRole.GENERAL
+                if assigned_role:
+                    for r in ModelRole:
+                        if r.value.lower() == assigned_role:
+                            target_role = r
+                            break
+                            
+                full_history = list(agent_history)
+                full_history.append({"role": "user", "content": user_message})
+                if final_response:
+                    full_history.append({"role": "assistant", "content": final_response})
+                    
+                yield f"data: {json.dumps({'type': 'status', 'content': 'Compacting Context (HCA)...'})}\n\n"
+                compacted, info = auto_compact_for_role(full_history, role=target_role, max_output_tokens=4096)
+                logger.info(f"[HCA Post-Pipeline] {info}")
+                
+                if "compacted=" in info:
+                    # Convert to frontend format (bot instead of assistant)
+                    frontend_compacted = []
+                    for m in compacted:
+                        role = "bot" if m["role"] == "assistant" else m["role"]
+                        frontend_compacted.append({"role": role, "content": m["content"]})
+                    yield f"data: {json.dumps({'type': 'compact_history', 'messages': frontend_compacted})}\n\n"
+                    
             except Exception as e:
                 err_msg = str(e)
                 yield f"data: {json.dumps({'type': 'token', 'content': f'\\n\\n> [ERROR] **Iris Error:** {err_msg}'})}\n\n"

@@ -506,14 +506,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
     # 2. History & Compaction
     optimized = [{"role": "user", "content": final_query}]
     if history:
-        from src.iris_engine import load_generation_config
-        from src.context_compactor import auto_compact_for_role
-        cfg = load_generation_config()
-        profile = str(cfg.get("compacting_profile", "medium")).lower()
-        num_history = 2 if profile == "aggressive" else (10 if profile == "low" else 5)
-        recent = history[-num_history:]
-        optimized = [{"role": m["role"], "content": m["content"]} for m in recent] + optimized
-        optimized, _ = auto_compact_for_role(optimized, role=ModelRole.CODE, max_output_tokens=4096)
+        optimized = [{"role": m["role"], "content": m["content"]} for m in history] + optimized
         
     if is_complex:
         yield from _run_complex_coding(user_query, history, optimized, context, retriever, settings)

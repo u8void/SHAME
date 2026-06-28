@@ -17,7 +17,7 @@ try:
 except ImportError:
     torch = None
 
-from src.iris import (
+from src.iris_datasets import (
     load_blended_skill_talk,
     load_daily_dialog,
     load_markdown_files,

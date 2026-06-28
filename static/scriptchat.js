@@ -1210,6 +1210,9 @@ window.downloadCode = (btn, ext) => {
                             showTypingIndicator();
                         } else if (event.type === "raw_response") {
                             rawResponseText = event.content;
+                        } else if (event.type === "compact_history") {
+                            chat.messages = event.messages;
+                            savePersist();
                         } else if (event.type === "text" || event.type === "error") {
                             if (!firstTokenReceived) {
                                 firstTokenReceived = true;

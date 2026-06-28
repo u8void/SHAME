@@ -956,41 +956,6 @@ def _quality_guard(text: str) -> str:
             if not text.endswith(('.', '!', '?')):
                 text += '.'
 
-    DETAILS_TAG = '<details style="border: 1px solid rgba(128, 128, 128, 0.2); border-radius: 8px; padding: 12px; margin-bottom: 16px; background: rgba(128, 128, 128, 0.05);">'
-    SUMMARY_TAG = '<summary style="cursor: pointer; font-weight: 600; color: #888; outline: none; user-select: none;">Thought Process</summary>'
-
-    for open_tag, close_tag in [("<think>", "</think>"), ("<thought>", "</thought>"), ("<|thought_start|>", "<|thought_end|>")]:
-        if open_tag in text:
-            if close_tag in text:
-                parts = text.split(close_tag, 1)
-                thought = parts[0].replace(open_tag, "").strip()
-                actual = parts[1].strip()
-                if actual:
-                    text = f"{DETAILS_TAG}\n{SUMMARY_TAG}\n\n{thought}\n</details>\n\n{actual}"
-                else:
-                    text = f"{DETAILS_TAG}\n{SUMMARY_TAG}\n\n{thought}\n</details>"
-            else:
-                # Try to find common transition phrases to cleanly split thought from final answer
-                transition_match = re.search(r'\n(?:\*\*?(?:Final Answer|Conclusion|Summary)\*\*?:?|I will present this information|Here is the|Here are the|To summarize|In conclusion|Final Answer|Based on the|Given the|Therefore,|In summary|However, since I need a final answer)[ \n]', text, re.IGNORECASE)
-                
-                if transition_match:
-                    thought = text[:transition_match.start()].strip()
-                    thought = thought.replace(open_tag, "").strip()
-                    actual = text[transition_match.start():].strip()
-                    text = f"{DETAILS_TAG}\n{SUMMARY_TAG}\n\n{thought}\n</details>\n\n{actual}"
-                else:
-                    if "\n\n" in text:
-                        parts = text.rsplit("\n\n", 1)
-                    else:
-                        parts = text.rsplit("\n", 1)
-                    if len(parts) > 1 and parts[1].strip():
-                        thought = parts[0].strip()
-                        thought = thought.replace(open_tag, "").strip()
-                        actual = parts[1].strip()
-                        text = f"{DETAILS_TAG}\n{SUMMARY_TAG}\n\n{thought}\n</details>\n\n{actual}"
-                    else:
-                        thought = text.replace(open_tag, "").strip()
-                        text = f"{DETAILS_TAG}\n{SUMMARY_TAG}\n\n{thought}\n</details>"
     return text
 
 
