@@ -711,9 +711,7 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
                 start = _time.time()
                 tmp = dest_path + ".part"
                 urllib.request.urlretrieve(url, tmp)
-                if os.path.exists(dest_path):
-                    os.remove(dest_path)
-                os.rename(tmp, dest_path)
+                os.replace(tmp, dest_path)
                 elapsed = _time.time() - start
                 size_mb = os.path.getsize(dest_path) / (1024 * 1024)
                 if not quiet:
@@ -790,11 +788,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
         
         if not os.path.exists(path) or not _is_gguf_valid(path, expected_url):
             if os.path.exists(path):
-                logger.warning(f"[Iris] Model file {filename} at {path} is corrupted, incomplete, or invalid. Deleting and re-downloading...")
-                try:
-                    os.remove(path)
-                except Exception as e:
-                    logger.error(f"[Iris] Failed to remove invalid model file: {e}")
+                logger.warning(f"[Iris] Model file {filename} at {path} is corrupted, incomplete, or invalid. We will attempt to overwrite it by re-downloading...")
             
             logger.info(f"[Iris] Downloading missing/invalid model {filename}...")
             download_success = download_gguf(filename)
@@ -953,17 +947,11 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
             )
         except Exception as e:
             logger.error(f"[Iris] Failed to load model from file: {path}. Error: {e}", exc_info=True)
-            try:
-                if os.path.exists(path):
-                    logger.warning(f"[Iris] Deleting potentially corrupted model file: {path}")
-                    os.remove(path)
-            except Exception as del_err:
-                logger.error(f"[Iris] Failed to delete corrupted model file: {del_err}")
-                
             raise RuntimeError(
                 f"Failed to load model from file: {path}. "
-                f"This usually indicates the file is corrupted/incomplete or you ran out of memory (RAM/VRAM). "
-                f"The corrupted file has been deleted. Please try again to trigger a clean re-download."
+                f"This usually indicates that you ran out of memory (RAM/VRAM) to load this model, "
+                f"or the downloaded file is incomplete. If you suspect the file is corrupted, "
+                f"please delete {path} manually and try again."
             )
         
         if draft_model is not None:
