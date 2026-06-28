@@ -31,6 +31,7 @@
         n_ctx_allocation  : document.getElementById('cs_n_ctx_allocation'),
         compacting_profile: document.getElementById('cs_compacting_profile'),
         code_review       : document.getElementById('cs_code_review'),
+        keep_triage_loaded: document.getElementById('cs_keep_triage_loaded'),
     };
 
     const saveChatSettingsBtn = document.getElementById('saveChatSettingsBtn');
@@ -67,6 +68,9 @@
 
         if (csFields.code_review) {
             csFields.code_review.checked = s.code_review === true;
+        }
+        if (csFields.keep_triage_loaded) {
+            csFields.keep_triage_loaded.checked = s.keep_triage_loaded === true;
         }
 
         settingsPanel.classList.add('open');
@@ -146,6 +150,7 @@
         s.top_k              = parseInt(csFields.top_k?.value) || 40;
         s.repetition_penalty = parseFloat(csFields.repetition_penalty?.value) || 1.3;
         s.code_review        = csFields.code_review?.checked || false;
+        s.keep_triage_loaded = csFields.keep_triage_loaded?.checked || false;
 
         const n_ctx_map = ['auto','4096','8192','16384','32768'];
         s.n_ctx_allocation = n_ctx_map[parseInt(csFields.n_ctx_allocation?.value) || 0] || 'auto';
@@ -162,6 +167,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 code_review: s.code_review,
+                keep_triage_loaded: s.keep_triage_loaded,
                 n_ctx_allocation: s.n_ctx_allocation,
                 compacting_profile: s.compacting_profile
             })

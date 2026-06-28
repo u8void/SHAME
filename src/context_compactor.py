@@ -3,7 +3,7 @@
 import re
 from typing import List, Dict, Optional, Tuple
 from enum import Enum
-import src.iris as iris_module
+import src.iris_engine as iris_module
 
 
 class CompactionLevel(str, Enum):

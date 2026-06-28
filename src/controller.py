@@ -132,7 +132,7 @@ try:
     
     
     def _iris_native_oi_llm(*args, **kwargs):
-        from src.iris import _model_pool, load_model, ModelRole
+        from src.iris_engine import _model_pool, load_model, ModelRole
         
         
         
@@ -535,13 +535,11 @@ def web_search(query: str, max_results: int = 5) -> str:
 
 CLIPBOARD_AVAILABLE = True
 try:
-    from src.iris import (
-        BookRetriever,
-        analyze_image,
-        ask_stream,
-        get_device,
-        solve_math,
-    )
+    from src.iris import ask_stream
+    from src.iris_rag import BookRetriever
+    from src.iris_vision import analyze_image
+    from src.iris_math import solve_math
+    from src.iris_engine import get_hardware_profile as get_device
 
     IRIS_AVAILABLE = True
 except ImportError:
@@ -1179,7 +1177,7 @@ def _prime_oi_with_3b():
     
     if not OI_AVAILABLE:
         return
-    from src.iris import ModelRole, load_model, _model_pool
+    from src.iris_engine import ModelRole, load_model, _model_pool
     
     try:
         load_model(ModelRole.CODE)

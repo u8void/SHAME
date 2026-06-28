@@ -512,7 +512,16 @@ function renderChatList(query = '') {
 
         work = work.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
             const id = `@@@CODE_${blocks.length}@@@`;
-            const detectedLang = (lang || '').trim().replace(/@@@[A-Z0-9_]+@@@/gi, '') || 'code';
+            let detectedLang = (lang || '').trim().replace(/@@@[A-Z0-9_]+@@@/gi, '');
+            
+            // Recover swallowed code if the model forgot a newline (e.g. ```html<div...)
+            let extraCode = "";
+            const tagIndex = detectedLang.search(/[<{\[]/);
+            if (tagIndex !== -1 && tagIndex < 20) {
+                extraCode = detectedLang.substring(tagIndex);
+                detectedLang = detectedLang.substring(0, tagIndex).trim();
+            }
+            detectedLang = detectedLang || 'code';
             
             // Find all thought placeholders inside the code content and move them outside
             const thoughtRegex = /@@@THOUGHT_\d+@@@/g;
@@ -522,7 +531,7 @@ function renderChatList(query = '') {
                 extractedThoughts += "\n" + matchThought[0] + "\n";
             }
             
-            const cleanContent = codeContent.replace(/@@@THOUGHT_\d+@@@/g, '').trim();
+            let cleanContent = (extraCode + (extraCode && !codeContent.startsWith('\n') ? '\n' : '') + codeContent).replace(/@@@THOUGHT_\d+@@@/g, '').trim();
             const isCmdOrShort = isCommandOrShortBlock(detectedLang, cleanContent);
             const isFinished = match.endsWith('```');
             

@@ -41,9 +41,9 @@ from src.logger import get_logger
 
 logger = get_logger("app")
 
-from src.iris import ask_stream, solve_math, BookRetriever, analyze_image
-
-
+from src.iris_math import solve_math
+from src.iris_rag import BookRetriever
+from src.iris_vision import analyze_image
 global_generation_lock = threading.Lock()
 
 parser = argparse.ArgumentParser(description="Run the Iris AI Flask App")
@@ -94,7 +94,7 @@ def _shutdown_cleanup():
     
     if not PREVIEW_MODE:
         try:
-            from src.iris import _force_unload_all_models
+            from src.iris_engine import _force_unload_all_models
             logger.info("[Shutdown] Freeing all loaded models from memory...")
             _force_unload_all_models()
             logger.info("[Shutdown] All models freed.")
@@ -526,7 +526,7 @@ def generate_title():
 
     with global_generation_lock:
         try:
-            from src.iris import load_model, ModelRole, _keep_loaded, unload_model
+            from src.iris_engine import load_model, ModelRole, _keep_loaded, unload_model
             import re
             
             llm = load_model(ModelRole.TRIAGE)
@@ -748,13 +748,7 @@ def save_settings():
 
 @app.route("/model_status", methods=["GET"])
 def model_status():
-    from src.iris import _model_pool, load_generation_config, ModelRole, DEFAULT_MODEL_FILES
-
-    active_role = None
-    active_file = None
-    if _model_pool:
-        active_role = next(reversed(_model_pool))
-    from src.iris import get_active_role, load_generation_config, ModelRole, DEFAULT_MODEL_FILES
+    from src.iris_engine import get_active_role, load_generation_config, ModelRole, DEFAULT_MODEL_FILES
 
     active_role = None
     active_file = None
@@ -794,7 +788,7 @@ def unload_models_endpoint():
     if PREVIEW_MODE:
         return jsonify({"status": "preview_mode", "message": "No models loaded in preview mode."})
     try:
-        from src.iris import _force_unload_all_models
+        from src.iris_engine import _force_unload_all_models
         _force_unload_all_models()
         logger.info("[API] All models unloaded from memory on request.")
         return jsonify({"status": "success", "message": "All models freed from memory."})
