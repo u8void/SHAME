@@ -1,5 +1,4 @@
 {
-  "_description": "Iris AI \u2014 Medium (53B total params). 4B\u201314B models. Fits 16 GB RAM. Beats Qwen3-14B, Llama-4-Scout, Gemma-3-12B at same RAM.",
   "models": {
     "triage": "Qwen/Qwen3-4B",
     "router": "Qwen/Qwen3-4B",

@@ -1,5 +1,4 @@
 {
-  "_description": "Iris AI \u2014 Small (36B total params). 3B\u20138B models. Fits 8 GB RAM. Beats Mistral-7B, Llama-3-8B, Qwen3-8B at same RAM.",
   "models": {
     "triage": "Qwen/Qwen3-4B",
     "router": "Qwen/Qwen3-4B",

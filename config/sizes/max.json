@@ -1,5 +1,4 @@
 {
-  "_description": "Iris AI \u2014 Max (264B total params). 32B\u201372B models. Fits 48 GB RAM. Beats DeepSeek-R1 671B (Q2 quant), Llama-4-Scout 109B at same RAM.",
   "models": {
     "triage": "Qwen/Qwen3-32B",
     "router": "Qwen/Qwen3-Coder-32B",
