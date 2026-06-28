@@ -99,8 +99,9 @@ def run_mmlu_benchmark(csv_path: str):
         print("[MMLU] No questions loaded. Skipping.")
         return
 
+    size_label = f"Iris {get_size_name().capitalize()}"
     print(f"\n{'='*50}")
-    print(f" [MMLU] Evaluating Iris Tiny  ({len(items_with_subject)} questions)")
+    print(f" [MMLU] Evaluating {size_label}  ({len(items_with_subject)} questions)")
     print(f"{'='*50}")
     passed_count = 0
 
@@ -118,7 +119,7 @@ def run_mmlu_benchmark(csv_path: str):
 
         append_to_csv(csv_path, {
             "Benchmark":    f"MMLU-{subject}",
-            "Role":         "Iris Tiny",
+            "Role":         size_label,
             "Prompt":       item["question"][:200],
             "Expected":     correct_letter,
             "Model_Answer": model_letter,
@@ -127,7 +128,7 @@ def run_mmlu_benchmark(csv_path: str):
         }, FIELDNAMES)
 
     pct = (passed_count / len(items_with_subject)) * 100 if items_with_subject else 0
-    print(f"\n  [MMLU][Iris Tiny] Score: {passed_count}/{len(items_with_subject)} ({pct:.1f}%)\n")
+    print(f"\n  [MMLU][{size_label}] Score: {passed_count}/{len(items_with_subject)} ({pct:.1f}%)\n")
 
     
     try:
