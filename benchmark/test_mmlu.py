@@ -34,10 +34,10 @@ def _format_question(item: dict) -> tuple[str, str]:
 
     choices_text = "\n".join(f"  {CHOICE_LABELS[i]}. {choices[i]}" for i in range(len(choices)))
     prompt = (
-        f"Answer the following multiple-choice question. "
-        f"Briefly reason through each option (2-3 sentences max), then write EXACTLY: 'Answer: X' "
+        f"Answer the following multiple-choice question.\n"
+        f"Reason through the options carefully. After your reasoning, write EXACTLY: 'Answer: X' "
         f"where X is the correct letter (A, B, C, or D). Do not write anything after 'Answer: X'.\n\n"
-        f"Question: {q}\n\n{choices_text}\n\nReasoning:"
+        f"Question: {q}\n\n{choices_text}"
     )
     correct_letter = CHOICE_LABELS[answer]
     return prompt, correct_letter

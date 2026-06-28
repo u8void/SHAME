@@ -420,6 +420,10 @@ def _get_max_pool_size() -> int:
         _gcfg = _lgc()
     except Exception:
         _gcfg = {}
+        
+    if "max_pool_size" in _gcfg:
+        return _gcfg["max_pool_size"]
+        
     _n_gpu = _gcfg.get("n_gpu_layers", -1)
     # On GPU mode, check VRAM to decide pool size
     if _n_gpu != 0:
@@ -894,12 +898,11 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
                 _mlx_dir = os.path.join(os.path.dirname(_HERE), "mlx_data", os.path.splitext(filename)[0])
                 if os.path.isdir(_mlx_dir):
                     _mlx_temp = cfg.get("temperature", 0.7)
+                    if len(_model_pool) >= _MAX_MODELS_IN_POOL:
+                        oldest = next(iter(_model_pool))
+                        _unload_locked(oldest)
                     _mlx_llm = _get_mlx_model(_mlx_dir, _mlx_temp)
                     if _mlx_llm is not None:
-                        
-                        if len(_model_pool) >= _MAX_MODELS_IN_POOL:
-                            oldest = next(iter(_model_pool))
-                            _unload_locked(oldest)
                             
                         _model_pool[role.value] = _mlx_llm
                         _model_paths[role.value] = path
@@ -925,6 +928,10 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
         _flash_attn = hw.flash_attn  
 
         _main_gpu = cfg.get("main_gpu", 0)
+
+        if len(_model_pool) >= _MAX_MODELS_IN_POOL:
+            oldest = next(iter(_model_pool))
+            _unload_locked(oldest)
 
         logger.info(f"[Iris] Instantiating Llama: model={path}, n_gpu_layers={n_gpu_layers}, n_threads={n_threads}, main_gpu={_main_gpu}")
         try:
@@ -956,11 +963,6 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
         
         if draft_model is not None:
             _new_llm.draft_model = draft_model
-        
-        
-        if len(_model_pool) >= _MAX_MODELS_IN_POOL:
-            oldest = next(iter(_model_pool))
-            _unload_locked(oldest)
             
         _model_pool[role.value] = _new_llm
         _model_paths[role.value] = path
@@ -2047,7 +2049,7 @@ def ask_stream(
                         yield w
                     full = full + "\n\n" + _rev
 
-        cleaned = _quality_guard(full)
+        cleaned = full if force_role == ModelRole.MATH else _quality_guard(full)
         if cleaned != full:
             yield {"type": "clear"}
             yield {"type": "token", "content": cleaned}

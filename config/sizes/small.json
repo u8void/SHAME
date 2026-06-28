@@ -14,7 +14,7 @@
   "gguf": {
     "triage": "iris_001.gguf",
     "router": "iris_001.gguf",
-    "control": "iris_004.gguf",
+    "control": "iris_002.gguf",
     "math": "iris_003.gguf",
     "code": "iris_004.gguf",
     "reasoning": "iris_005.gguf",
@@ -22,6 +22,7 @@
     "vision": "iris_006.gguf"
   },
   "clip": "iris_007.gguf",
+  "max_pool_size": 1,
   "max_seq_length": 512,
   "num_layers": 8,
   "context_length": 8192,

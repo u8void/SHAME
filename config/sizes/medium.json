@@ -22,6 +22,7 @@
     "vision": "iris_006.gguf"
   },
   "clip": "iris_007.gguf",
+  "max_pool_size": 1,
   "max_seq_length": 512,
   "num_layers": 16,
   "context_length": 8192,
