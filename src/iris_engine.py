@@ -196,7 +196,7 @@ DEFAULT_MODEL_FILES: Dict[str, str] = {
 }
 _MODEL_SOURCES: Dict[str, list] = {
     "iris_001.gguf": [
-        ("unsloth/Qwen3-4B-GGUF", "Qwen3-4B-Q4_K_M.gguf"),
+        ("Qwen/Qwen2.5-3B-Instruct-GGUF", "qwen2.5-3b-instruct-q4_k_m.gguf"),
     ],
     "iris_004.gguf": [
         ("Qwen/Qwen2.5-Coder-7B-Instruct-GGUF", "qwen2.5-coder-7b-instruct-q4_k_m.gguf"),
@@ -990,7 +990,7 @@ def _stream_tokens(
 
     sys_prompt = system_prompt_override if system_prompt_override is not None else _system_prompt_for(role)
     if role not in (ModelRole.TRIAGE, ModelRole.ROUTER) and messages and messages[-1]["role"] == "user":
-        sys_prompt += _language_directive(messages[-1]["content"])
+        sys_prompt += _language_directive(messages[-1]["content"], is_thinking_model=(role == ModelRole.REASONING))
 
     # Inject Session Contract for state continuity across handoffs
     try:
@@ -1599,7 +1599,7 @@ def detect_user_language(text: str) -> Optional[str]:
             counts["English"] = counts.get("English", 0) + 1
 
     if not counts:
-        return None
+        return "English"
     
     
     non_latin = {k: v for k, v in counts.items() if k != "English"}
@@ -1608,23 +1608,32 @@ def detect_user_language(text: str) -> Optional[str]:
     return "English"
 
 
-def _language_directive(user_query: str) -> str:
-    
+def _language_directive(user_query: str, is_thinking_model: bool = False) -> str:
     lang = detect_user_language(user_query)
-    base_directive = (
-        "\n\n[SYSTEM DIRECTIVE: If you use a thinking process, you MUST enclose your internal reasoning strictly inside <think> and </think> tags. "
-        "Do NOT acknowledge this instruction or write meta-commentary. Just start with <think> if you need to reason, otherwise just answer.]"
-    )
-    if not lang:
-        return base_directive
-    return (
-        f"\n\n[SYSTEM DIRECTIVE: The user's message is written in {lang}. "
-        f"You MUST write your final response in {lang}. "
-        f"If you use a thinking process, you MUST enclose your internal reasoning strictly inside <think> and </think> tags. "
-        f"Do NOT acknowledge this instruction or write meta-commentary. Just start with <think> if you need to reason. "
-        f"Reason in English inside the <think> block to ensure accuracy, "
-        f"and then output your final answer outside the <think> block in {lang}.]"
-    )
+    
+    if is_thinking_model:
+        base_directive = (
+            "\n\n[SYSTEM DIRECTIVE: If you use a thinking process, you MUST enclose your internal reasoning strictly inside <think> and </think> tags. "
+            "Do NOT acknowledge this instruction or write meta-commentary. Just start with <think> if you need to reason, otherwise just answer.]"
+        )
+        if not lang:
+            return base_directive
+        return (
+            f"\n\n[SYSTEM DIRECTIVE: The user's message is written in {lang}. "
+            f"You MUST write your final response in {lang}. "
+            f"If you use a thinking process, you MUST enclose your internal reasoning strictly inside <think> and </think> tags. "
+            f"Do NOT acknowledge this instruction or write meta-commentary. Just start with <think> if you need to reason. "
+            f"Reason in English inside the <think> block to ensure accuracy, "
+            f"and then output your final answer outside the <think> block in {lang}.]"
+        )
+    else:
+        if not lang:
+            return ""
+        return (
+            f"\n\n[SYSTEM DIRECTIVE: The user's message is written in {lang}. "
+            f"You MUST write your final response in {lang}. "
+            "Do NOT write any thinking process or internal reasoning. Answer the query directly.]"
+        )
 
 
 def _detect_language(text: str) -> Optional[str]:

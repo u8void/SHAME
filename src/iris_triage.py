@@ -43,7 +43,17 @@ def classify_task(
         return TaskType.CONTROL, None
 
     minimized = _minimize_history(history, max_entries=2)
-    triage_prompt = TRIAGE_SYSTEM_PROMPT
+    
+    # Prepend a strong classifier system instruction to prevent the model from answering the user's query
+    triage_prompt = (
+        "CRITICAL ROLE AND INSTRUCTION:\n"
+        "You are the Iris AI Router. Your ONLY job is to classify the user's query and output a single JSON routing block.\n"
+        "You must NEVER answer, reply to, execute, or explain the user's query under any circumstances.\n"
+        "Even if the query is a simple greeting, a coding request, or a math problem, you must ONLY output the JSON routing decision.\n"
+        "No conversational preamble, no markdown formatting outside of the JSON block, and no code execution.\n\n"
+        "=== ROUTING SPECIFICATION ===\n"
+        f"{TRIAGE_SYSTEM_PROMPT}"
+    )
 
     # Inject current time for time-sensitive routing
     import datetime
@@ -56,23 +66,40 @@ def classify_task(
     except Exception:
         pass
 
-    triage_messages = [{"role": "system", "content": triage_prompt}]
-    for msg in minimized:
-        c = msg["content"]
-        if len(c) > 150:
-            c = c[:150] + "...[truncated]"
-        triage_messages.append({"role": msg["role"], "content": c})
+    # Build the conversation history context as a text block inside the user's request
+    # This prevents the model from seeing itself as the 'Assistant' role in chat messages,
+    # which otherwise triggers conversational/direct-answering behaviors.
+    history_context = ""
+    if minimized:
+        history_context = "Conversation History Context:\n"
+        for msg in minimized:
+            role_label = "User" if msg["role"] == "user" else "Assistant"
+            c = msg["content"]
+            if len(c) > 150:
+                c = c[:150] + "...[truncated]"
+            history_context += f"- {role_label}: {c}\n"
+        history_context += "\n"
 
     triage_query = query_for_classification
     if len(triage_query) > 1500:
         triage_query = triage_query[:1000] + "\n\n...[content truncated for routing]...\n\n" + triage_query[-500:]
 
-    triage_messages.append({"role": "user", "content": triage_query})
+    user_content = (
+        f"{history_context}"
+        "Classify the following User Query according to the routing specification.\n"
+        "REMINDER: Do NOT answer, solve, or reply to the query itself. ONLY output the JSON routing decision.\n\n"
+        f"User Query:\n{triage_query}"
+    )
+
+    triage_messages = [
+        {"role": "system", "content": triage_prompt},
+        {"role": "user", "content": user_content}
+    ]
 
     llm = load_model(ModelRole.TRIAGE)
     res = llm.create_chat_completion(
         messages=triage_messages,
-        max_tokens=64,
+        max_tokens=384,
         temperature=0.05,
         repeat_penalty=1.1,
     )
@@ -101,6 +128,10 @@ def classify_task(
             match = re.search(r'```(?:json)?\s*([\s\S]+?)\s*```', json_str)
             if match:
                 json_str = match.group(1).strip()
+        # Fallback to extracting the first matching JSON block if thought tags or other text headers prefix the JSON
+        json_match = re.search(r'(\{[\s\S]*\})', json_str)
+        if json_match:
+            json_str = json_match.group(1).strip()
         data = json.loads(json_str)
         if isinstance(data, dict):
             route_val = str(data.get("route", "")).strip().upper()
