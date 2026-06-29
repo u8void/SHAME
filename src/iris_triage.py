@@ -115,8 +115,10 @@ def classify_task(
     llm = load_model(ModelRole.TRIAGE)
     res = llm.create_chat_completion(
         messages=triage_messages,
-        max_tokens=1024,
+        max_tokens=512,
         temperature=0.1,
+        repeat_penalty=1.15,
+        presence_penalty=0.1,
     )
     answer = res["choices"][0]["message"]["content"].strip()
     cfg = load_generation_config()
