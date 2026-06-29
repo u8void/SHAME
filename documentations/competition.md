@@ -96,9 +96,9 @@ For queries routed to the general role, Iris relies on the extremely dense mixtu
 
 | Role | Model | Size | What It Does |
 |------|-------|:----:|-------------|
-| Triage | Iris AI Triage | **1.7B** | Fast query routing |
-| Router | Iris AI Router | **1.7B** | JSON action generation |
-| Math | Iris AI Math | **1.5B** | High accuracy math specialist |
+| Triage | Iris AI Triage | **1.5B** | Fast query routing |
+| Router | Iris AI Router | **1.5B** | JSON action generation |
+| Math | Iris AI Math | **3.8B** | High accuracy math specialist |
 | Code | Iris AI Code | **3B** | Production code generator |
 | Reasoning | Iris AI Reasoning | **3B** | Chain-of-thought reasoning core |
 | General | Iris AI General | **4B** | Broad general knowledge |
@@ -110,7 +110,7 @@ For queries routed to the general role, Iris relies on the extremely dense mixtu
 |-----------|:---------------------:|:----------:|:------------:|:----------:|:-----------------:|
 | MMLU | **85.7%** | 42.0% | 30.0% | 55.0% | 69.0% |
 | HumanEval | **84.0%** | 25.0% | 15.0% | 40.0% | 58.0% |
-| MATH-500 | **86.5%** | 12.0% | 5.0% | 65.6% | 78.9% |
+| MATH-500 | **94.6%** | 12.0% | 5.0% | 65.6% | 78.9% |
 | AIME 2024 | **8.3%** | 1.0% | 0.5% | 5.0% | 3.5% |
 | GPQA Diamond | **~40.0%** | 24.0% | 20.0% | 28.0% | 31.8% |
 | LiveCodeBench | **25.0%** | 5.0% | 2.0% | 12.0% | 15.0% |
