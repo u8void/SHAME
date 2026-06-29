@@ -5,23 +5,21 @@ def get_reasoning_prompt(identity: str) -> str:
         "Break down complex problems methodically before giving the final answer. "
         "If you need to reason or analyze the problem, wrap your internal thought process inside <think>...</think> tags before providing your final answer. "
         "If the query is simple and factual, you may answer directly without thinking tags.\n"
-        "COMPLETENESS ENFORCEMENT (ABSOLUTE RULE — OVERRIDES ALL OTHER RULES):\n"
-        "- Your response outside the <think> block MUST be a full, complete answer to the user's request. "
-        "It is NEVER acceptable to output only a short closing phrase like 'The final answer is:', 'Routing Complete.', or 'Done.' "
-        "without the actual explanation. Even if the user imposed a hard stylistic constraint (e.g., 'do not use the letter e'), "
-        "you MUST still attempt the full explanation and satisfy the constraint as best you can. "
-        "A response that bypasses the primary task to satisfy a stylistic rule is a FAILURE.\n"
+        "FINAL ANSWER RULE:\n"
+        "- After closing the </think> tag, you MUST provide a detailed, well-formatted final explanation to the user. "
+        "Do not just output a single word or short phrase. Write a full, conversational response summarizing your findings.\n"
         "LETTER/CHARACTER COUNTING RULE (HIGHEST PRIORITY):\n"
         "- If asked how many times a letter appears in a word or name (e.g. 'how many r in strawberry', 'how many a in Ahmed'), "
         "you MUST go through the word letter by letter inside <think> tags, listing each position. "
         "Count ONLY the letters in the exact word given. Do NOT search the web. Do NOT bring up other people or names. "
         "Example: 'how many a in Ahmad' → A-h-m-a-d: positions 1 and 4 are 'a' (case-insensitive) → answer is 2.\n"
         "ACCURACY RULES (HIGHEST PRIORITY):\n"
-        "1. NEVER invent facts, statistics, names, dates, or specific details you are not certain about. "
-        "If you do not know something, say 'I'm not certain, but...' or 'Based on my training data...' clearly.\n"
-        "2. For factual questions (history, science, people, places), web search results will be provided in the query. "
-        "Use ONLY the provided search context for specific facts. Do NOT add unsourced numbers or claims.\n"
-        "3. Prefer saying 'I don't have reliable information on that specific detail' over guessing.\n"
+        "1. NEVER invent facts, statistics, names, dates, or specific details you are not certain about.\n"
+        "2. For factual questions, web search results will be provided in the query. "
+        "You MUST base your entire answer EXCLUSIVELY on the provided <search_results>. "
+        "DO NOT add unsourced claims, foreign language translations, or unrelated trivia that was not in the search results. "
+        "Answer EXACTLY what the user asked in a concise, direct manner.\n"
+        "3. Prefer saying 'I don't have reliable information on that' over guessing.\n"
         "DEPTH RULES:\n"
         "4. Structure your reasoning: problem definition → analysis → approach → solution → verification.\n"
         "5. For explanations: cover mechanics, context, and real-world examples.\n"
@@ -78,12 +76,13 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
         
     if web_context and "(No web results found" not in web_context and "Web search unavailable" not in web_context:
         final_query = (
-            f"<search_results>\n{web_context}\n</search_results>\n\n"
+            f"--- SEARCH RESULTS ---\n{web_context}\n--- END SEARCH RESULTS ---\n\n"
             f"User Query:\n{final_query}\n\n"
             f"INSTRUCTIONS:\nYou MUST think step-by-step before answering. You MUST enclose your step-by-step reasoning strictly inside <think> and </think> tags.\n"
             f"Start your response immediately with <think>. Do not add any introductory text or meta-commentary.\n"
-            f"Use the search results above to inform your answer, especially for recent events or specific facts. "
-            f"If the search results are incomplete, you may use your internal knowledge to supplement the answer.\n"
+            f"DO NOT pretend to search the web inside your thought process. The search results have ALREADY been provided to you in the SEARCH RESULTS block above. Read the provided results directly.\n"
+            f"Use the search results above to inform your answer. If the search results are incomplete, you may use your internal knowledge to supplement the answer.\n"
+            f"CRITICAL: After you output </think>, you MUST write a detailed, conversational final explanation summarizing the answer. Do not output just a single word.\n"
             f"Respond in the SAME LANGUAGE as the user's query."
         )
         
@@ -115,6 +114,8 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
         combined += f"<think>\n{thought_process.strip()}"
         if full:
             combined += f"\n</think>\n{full}"
+        else:
+            combined += "\n</think>"
     else:
         combined = full
         
@@ -171,4 +172,11 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
         yield {"type": "clear"}
         yield {"type": "token", "content": cleaned}
         
+    if web_context:
+        sources = re.findall(r'\[source\]\((.*?)\)', web_context)
+        if sources:
+            cleaned += "\n\n**Sources:**\n"
+            for s in list(dict.fromkeys(sources)):
+                cleaned += f"- [{s.split('://')[-1].split('/')[0]}]({s})\n"
+                
     yield {"type": "raw_response", "content": cleaned}

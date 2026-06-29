@@ -14,6 +14,21 @@ def get_general_prompt(identity: str) -> str:
     )
 
 def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -> Generator[Dict[str, str], None, None]:
+    import logging
+    logger = logging.getLogger('iris')
+
+    web_context = ""
+    yield {"type": "status", "content": f"Searching the web for '{user_query}'..."}
+    try:
+        from src.web_search import WebSearch
+        ws = WebSearch()
+        web_context = ws.search_to_context(user_query, max_results=3)
+        if not web_context:
+            yield {"type": "status", "content": "Web search returned no results."}
+    except Exception as e:
+        logger.warning(f"Web search failed: {e}")
+        yield {"type": "status", "content": "Web search unavailable."}
+
     yield {"type": "status", "content": "Thinking..."}
     
     # 1. RAG
@@ -37,6 +52,14 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
             f"{final_query}"
         )
         
+    if web_context and "(No web results found" not in web_context and "Web search unavailable" not in web_context:
+        final_query = (
+            f"<search_results>\n{web_context}\n</search_results>\n\n"
+            f"User Query:\n{final_query}\n\n"
+            f"INSTRUCTIONS: Use the search results above to inform your answer, especially for recent events or specific facts. "
+            f"If the search results are incomplete, you may use your internal knowledge to supplement the answer."
+        )
+
     final_query += _language_directive(user_query)
     
     # 2. History & Compaction
