@@ -41,9 +41,8 @@ from src.logger import get_logger
 
 logger = get_logger("app")
 
-from src.iris import ask_stream, solve_math, BookRetriever, analyze_image
-
-
+from src.iris_rag import BookRetriever
+from src.iris_vision import analyze_image
 global_generation_lock = threading.Lock()
 
 parser = argparse.ArgumentParser(description="Run the Iris AI Flask App")
@@ -94,7 +93,7 @@ def _shutdown_cleanup():
     
     if not PREVIEW_MODE:
         try:
-            from src.iris import _force_unload_all_models
+            from src.iris_engine import _force_unload_all_models
             logger.info("[Shutdown] Freeing all loaded models from memory...")
             _force_unload_all_models()
             logger.info("[Shutdown] All models freed.")
@@ -213,20 +212,11 @@ def chat():
 
     if doc_sections:
         all_docs_text = "\n\n".join(doc_sections)
-        user_message = f"I have attached {len(doc_files)} document(s). Here is the content:\n\n{all_docs_text}\n\nUser Prompt:\n{actual_prompt}"
+        user_message = f"[SYSTEM DIRECTIVE: The user has attached {len(doc_files)} document(s). You MUST analyze the content of these documents to answer their request.]\n\n{all_docs_text}\n\nUser's Request:\n{actual_prompt}"
 
     if not user_message and not image_files and not doc_files:
         return jsonify({"reply": "Please send a valid message."}), 400
 
-    math_answer = solve_math(user_message)
-    if math_answer is not None:
-        def math_generate():
-            yield f"data: {json.dumps({'type': 'token', 'content': math_answer})}\n\n"
-        resp = Response(math_generate(), mimetype='text/event-stream')
-        resp.headers['X-Accel-Buffering'] = 'no'
-        resp.headers['Cache-Control']     = 'no-cache'
-        resp.headers['Connection']        = 'keep-alive'
-        return resp
 
     if PREVIEW_MODE:
         def preview_generate():
@@ -247,7 +237,7 @@ def chat():
             agent_history = []  
 
     agent_history = []
-    for msg in frontend_messages[:-1][-6:]:
+    for msg in frontend_messages[:-1]:
         role = "assistant" if msg.get("role") == "bot" else "user"
         agent_history.append({"role": role, "content": msg.get("content", "")})
 
@@ -306,14 +296,56 @@ def chat():
     def generate():
         with global_generation_lock:
             try:
+                yield f"data: {json.dumps({'type': 'status', 'content': 'Initializing...'})}\n\n"
+                retriever_instance = get_retriever()
+                
+                final_response = ""
+                assigned_role = None
+
                 for event in ai_agent_handle(
                     user_message,
-                    get_retriever(),
+                    retriever_instance,
                     agent_history,
                     settings=settings,
-                    keep_loaded=True
+                    keep_loaded=False
                 ):
+                    if event.get("type") == "raw_response":
+                        final_response = event.get("content", "")
+                    elif event.get("type") == "status":
+                        status_text = event.get("content", "")
+                        if status_text.startswith("Task: "):
+                            assigned_role = status_text.split("Task: ")[1].strip().lower()
                     yield f"data: {json.dumps(event)}\n\n"
+                    
+                # Post-pipeline HCA compaction
+                from src.iris_engine import ModelRole
+                from src.context_compactor import auto_compact_for_role
+                
+                # Determine role enum
+                target_role = ModelRole.GENERAL
+                if assigned_role:
+                    for r in ModelRole:
+                        if r.value.lower() == assigned_role:
+                            target_role = r
+                            break
+                            
+                full_history = list(agent_history)
+                full_history.append({"role": "user", "content": user_message})
+                if final_response:
+                    full_history.append({"role": "assistant", "content": final_response})
+                    
+                yield f"data: {json.dumps({'type': 'status', 'content': 'Compacting Context (HCA)...'})}\n\n"
+                compacted, info = auto_compact_for_role(full_history, role=target_role, max_output_tokens=4096)
+                logger.info(f"[HCA Post-Pipeline] {info}")
+                
+                if "compacted=" in info:
+                    # Convert to frontend format (bot instead of assistant)
+                    frontend_compacted = []
+                    for m in compacted:
+                        role = "bot" if m["role"] == "assistant" else m["role"]
+                        frontend_compacted.append({"role": role, "content": m["content"]})
+                    yield f"data: {json.dumps({'type': 'compact_history', 'messages': frontend_compacted})}\n\n"
+                    
             except Exception as e:
                 err_msg = str(e)
                 yield f"data: {json.dumps({'type': 'token', 'content': f'\\n\\n> [ERROR] **Iris Error:** {err_msg}'})}\n\n"
@@ -401,8 +433,7 @@ def voice_chat_endpoint():
         VOICE_IDENTITY = (
             "You are Iris AI, a powerful AI assistant created entirely by Ahmed Barakat. "
             "Under NO circumstances should you mention Alibaba, Qwen, DeepSeek, OpenAI, or any other company/model name. "
-            "CRITICAL LANGUAGE RULE: You MUST reply in the EXACT SAME LANGUAGE and DIALECT as the user's CURRENT message. "
-            "If the user speaks casual Egyptian Arabic (or slang), reply entirely in natural Egyptian Arabic. "
+            "CRITICAL LANGUAGE RULE: You MUST always respond in English. All responses, explanations, code comments, and text MUST be written entirely in English, even if the user speaks or inputs in Arabic or any other language. Your internal <think> process and final response must be fully in English. "
             "Be highly conversational, funny, and human-like. Don't be robotic or overly formal."
         )
 
@@ -524,7 +555,7 @@ def generate_title():
 
     with global_generation_lock:
         try:
-            from src.iris import load_model, ModelRole, _keep_loaded, unload_model
+            from src.iris_engine import load_model, ModelRole, _keep_loaded, unload_model
             import re
             
             llm = load_model(ModelRole.TRIAGE)
@@ -746,13 +777,7 @@ def save_settings():
 
 @app.route("/model_status", methods=["GET"])
 def model_status():
-    from src.iris import _model_pool, load_generation_config, ModelRole, DEFAULT_MODEL_FILES
-
-    active_role = None
-    active_file = None
-    if _model_pool:
-        active_role = next(reversed(_model_pool))
-    from src.iris import get_active_role, load_generation_config, ModelRole, DEFAULT_MODEL_FILES
+    from src.iris_engine import get_active_role, load_generation_config, ModelRole, DEFAULT_MODEL_FILES
 
     active_role = None
     active_file = None
@@ -783,16 +808,8 @@ def model_status():
     })
 
 def warmup_models():
-    
-    if PRO_MODE or os.environ.get("SKIP_CONTROL") == "1":
-        return
-    
-    from src.iris import load_model, ModelRole
-    try:
-        logger.info("[Warmup] Loading and locking Control model into memory...")
-        load_model(ModelRole.CONTROL)
-    except Exception as e:
-        logger.warning(f"[Warmup] Failed to load Control model: {e}")
+    # Warmup disabled as requested to prevent loading/locking models in RAM on startup.
+    pass
 
 @app.route("/api/unload_models", methods=["POST"])
 def unload_models_endpoint():
@@ -800,7 +817,7 @@ def unload_models_endpoint():
     if PREVIEW_MODE:
         return jsonify({"status": "preview_mode", "message": "No models loaded in preview mode."})
     try:
-        from src.iris import _force_unload_all_models
+        from src.iris_engine import _force_unload_all_models
         _force_unload_all_models()
         logger.info("[API] All models unloaded from memory on request.")
         return jsonify({"status": "success", "message": "All models freed from memory."})

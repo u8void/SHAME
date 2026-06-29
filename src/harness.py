@@ -230,7 +230,7 @@ def clean_whitespace(text: str, language: str='') -> Tuple[str, List[str]]:
 
 def normalize_header(text: str, language: str='python') -> Tuple[str, List[str]]:
     warnings: List[str] = []
-    if language.lower() not in ('python', 'py', 'bash', 'sh'):
+    if language.lower() not in ('python', 'py', 'bash', 'sh') or '```' in text:
         return (text, warnings)
     lines = text.split('\n')
     has_shebang = lines[0].strip().startswith('#!') if lines else False

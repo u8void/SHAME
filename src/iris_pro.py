@@ -45,7 +45,7 @@ IRIS_IDENTITY = (
     "Never use filler phrases like 'Certainly' or 'I can help with that'. Answer immediately and directly. "
     "Never mention underlying model names (e.g., MiMo, Xiaomi, DeepSeek) or your pipeline architecture. Identify only as Iris AI. "
     "For complex problems, think step-by-step, verify your logic internally, and ensure all edge cases are handled before finalizing your answer. "
-    "CRITICAL LANGUAGE RULE: You MUST always respond in the EXACT SAME LANGUAGE as the user's input. If the user speaks Arabic, you MUST reply entirely in Arabic. This includes your internal <think> process: if the user speaks Arabic, your <think> block MUST ALSO be in Arabic to prevent cross-lingual hallucinations and degradation of depth."
+    "CRITICAL LANGUAGE RULE: You MUST always respond in English. All responses, explanations, code comments, and text MUST be written entirely in English, even if the user speaks or inputs in Arabic or any other language. Your internal <think> process and final response must be fully in English."
 )
 
 def verify_code_syntax(code: str, lang: str) -> str | None:
@@ -575,6 +575,26 @@ def optimize_messages(history_messages: list[dict[str, str]] | None, user_query:
 def fallback_classify(query: str) -> TaskType | None:
     q = query.lower()
     
+    # Check if the query is a simple date/time/clock query to prevent routing to SEARCH or REASONING
+    time_patterns = [
+        r"\bwhat\s+(?:is\s+)?(?:the\s+)?(?:current\s+)?time\b",
+        r"\bwhat\s+time\s+is\s+it\b",
+        r"\bwhat's\s+the\s+time\b",
+        r"\bcurrent\s+time\b",
+        r"\bcurrent\s+date\b",
+        r"\bwhat\s+is\s+today's\s+date\b",
+        r"\btoday's\s+date\b",
+        r"\bwhat\s+(?:is\s+)?(?:the\s+)?date\s+today\b",
+        r"\bwhat\s+day\s+is\s+it\b",
+        r"\bwhat\s+day\s+of\s+the\s+week\b",
+        r"\btell\s+me\s+the\s+time\b",
+        r"\btime\s+now\b",
+        r"\btime\s+in\s+[a-zA-Z]+",
+        r"\bdate\s+in\s+[a-zA-Z]+",
+    ]
+    if any(re.search(pat, q) for pat in time_patterns):
+        return TaskType.GENERAL
+    
     analysis_keywords = {"analyze", "analyse", "explain", "summarize", "what does this", "how does this", "walkthrough", "break down", "what is this", "what's this"}
     for kw in analysis_keywords:
         if re.search(rf"\b{re.escape(kw)}\b", q):
@@ -651,6 +671,18 @@ def is_continuation_query(query: str, history: list[dict[str, str]] | None) -> b
                 has_code = True
                 break
     return has_code
+
+
+def _get_system_time_directive() -> str:
+    import datetime
+    try:
+        now = datetime.datetime.now().astimezone()
+        time_str = now.strftime("%A, %B %d, %Y, %H:%M:%S %Z")
+        offset_str = now.strftime("%z")
+        formatted_offset = f"{offset_str[:3]}:{offset_str[3:]}" if len(offset_str) >= 5 else offset_str
+        return f"\n\n[SYSTEM DIRECTIVE: The current local system time is {time_str} (UTC{formatted_offset}). This is the exact, live time on the user's computer. Use this context to answer any date/time queries or relative time differences. Do NOT claim you do not have real-time access or that you don't know the time.]"
+    except Exception:
+        return ""
 
 
 async def ask_stream(
@@ -858,7 +890,7 @@ async def ask_stream(
                         "CRITICAL: If the query mentions writing a complete game (e.g. Pong), building compilers, operating system bootloaders, or complex hardware simulation, output [TASK_TYPE: coding_complex]."
                     )
                     triage_messages = [
-                        {"role": "system", "content": triage_prompt},
+                        {"role": "system", "content": triage_prompt + _get_system_time_directive()},
                         *minimized_history
                     ]
 
@@ -951,7 +983,7 @@ async def ask_stream(
                 selected_model = TASK_TO_MODEL[task_type].value
                 log.info("Starting general response with %s...", selected_model)
                 general_messages = [
-                    {"role": "system", "content": GENERAL_SYSTEM_PROMPT},
+                    {"role": "system", "content": GENERAL_SYSTEM_PROMPT + _get_system_time_directive()},
                     *messages
                 ]
                 try:
@@ -1002,7 +1034,7 @@ async def ask_stream(
                 t0 = time.perf_counter()
                 log.info("Starting math solver with %s...", Model.MATH.value)
                 math_messages = [
-                    {"role": "system", "content": MATH_SYSTEM_PROMPT},
+                    {"role": "system", "content": MATH_SYSTEM_PROMPT + _get_system_time_directive()},
                     *messages
                 ]
                 try:
@@ -1053,7 +1085,7 @@ async def ask_stream(
                 t0 = time.perf_counter()
                 log.info("Starting deep reasoning with %s...", Model.REASONING.value)
                 reasoning_messages = [
-                    {"role": "system", "content": REASONING_SYSTEM_PROMPT},
+                    {"role": "system", "content": REASONING_SYSTEM_PROMPT + _get_system_time_directive()},
                     *messages
                 ]
                 try:
@@ -1119,7 +1151,7 @@ async def ask_stream(
                 t0 = time.perf_counter()
                 log.info("Starting simple coding response with %s...", Model.CODE_SIMPLE.value)
                 code_messages = [
-                    {"role": "system", "content": CODE_SYSTEM_PROMPT},
+                    {"role": "system", "content": CODE_SYSTEM_PROMPT + _get_system_time_directive()},
                     *messages
                 ]
                 try:
@@ -1234,7 +1266,7 @@ async def ask_stream(
                     )
 
                 code_messages = [
-                    {"role": "system", "content": code_sys_prompt},
+                    {"role": "system", "content": code_sys_prompt + _get_system_time_directive()},
                     *messages[:-1],
                     {"role": "user", "content": f"User Query: {user_query}\n\nArchitecture/Plan:\n{raw_reasoning[-MAX_STAGE_INPUT_CHARS:]}"}
                 ]

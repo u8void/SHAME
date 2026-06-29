@@ -34,10 +34,10 @@ def _format_question(item: dict) -> tuple[str, str]:
 
     choices_text = "\n".join(f"  {CHOICE_LABELS[i]}. {choices[i]}" for i in range(len(choices)))
     prompt = (
-        f"Answer the following multiple-choice question. "
-        f"Briefly reason through each option (2-3 sentences max), then write EXACTLY: 'Answer: X' "
+        f"Answer the following multiple-choice question.\n"
+        f"Reason through the options carefully. After your reasoning, write EXACTLY: 'Answer: X' "
         f"where X is the correct letter (A, B, C, or D). Do not write anything after 'Answer: X'.\n\n"
-        f"Question: {q}\n\n{choices_text}\n\nReasoning:"
+        f"Question: {q}\n\n{choices_text}"
     )
     correct_letter = CHOICE_LABELS[answer]
     return prompt, correct_letter
@@ -99,8 +99,9 @@ def run_mmlu_benchmark(csv_path: str):
         print("[MMLU] No questions loaded. Skipping.")
         return
 
+    size_label = f"Iris {get_size_name().capitalize()}"
     print(f"\n{'='*50}")
-    print(f" [MMLU] Evaluating Iris Tiny  ({len(items_with_subject)} questions)")
+    print(f" [MMLU] Evaluating {size_label}  ({len(items_with_subject)} questions)")
     print(f"{'='*50}")
     passed_count = 0
 
@@ -118,7 +119,7 @@ def run_mmlu_benchmark(csv_path: str):
 
         append_to_csv(csv_path, {
             "Benchmark":    f"MMLU-{subject}",
-            "Role":         "Iris Tiny",
+            "Role":         size_label,
             "Prompt":       item["question"][:200],
             "Expected":     correct_letter,
             "Model_Answer": model_letter,
@@ -127,7 +128,7 @@ def run_mmlu_benchmark(csv_path: str):
         }, FIELDNAMES)
 
     pct = (passed_count / len(items_with_subject)) * 100 if items_with_subject else 0
-    print(f"\n  [MMLU][Iris Tiny] Score: {passed_count}/{len(items_with_subject)} ({pct:.1f}%)\n")
+    print(f"\n  [MMLU][{size_label}] Score: {passed_count}/{len(items_with_subject)} ({pct:.1f}%)\n")
 
     
     try:

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,28 +12,43 @@
     <style>
     </style>
 </head>
+
 <body>
     <aside class="sidebar" id="sidebar">
         <div class="header-row">
             <button class="icon-btn" id="toggleBtn" aria-label="Toggle sidebar">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                </svg>
             </button>
             <div class="brand-wrapper">
-                <img src="{{ url_for('static', filename='iris_logo.png') }}" alt="Iris AI" class="iris-logo" onerror="this.style.display='none'">
-                <span class="iris-name nav-text">Iris AI</span>
+                <img src="{{ url_for('static', filename='logo-dark.png') }}" alt="" class="iris-logo-text dark-only">
+                <img src="{{ url_for('static', filename='logo-light.png') }}" alt="" class="iris-logo-text light-only">
             </div>
             <button class="icon-btn nav-text search-btn" id="searchToggleBtn" aria-label="Search chats">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
             </button>
         </div>
 
         <div class="sidebar-content">
             <div class="nav-item" id="newChatBtn" aria-label="New chat">
-                <svg class="main-icon pen-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                <svg class="main-icon pen-icon" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                </svg>
                 <span class="nav-text">New chat</span>
             </div>
             <div class="nav-item" id="voiceChatBtn" aria-label="Voice chat">
-                <svg class="main-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <svg class="main-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
                     <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
                     <line x1="12" x2="12" y1="19" y2="22"></line>
@@ -43,10 +59,19 @@
 
         <div class="search-bar-container" id="searchBarContainer">
             <div class="search-bar-inner">
-                <svg class="search-bar-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                <input type="text" id="searchInput" class="search-bar-input" placeholder="Search chats..." autocomplete="off" spellcheck="false" dir="auto">
+                <svg class="search-bar-icon" width="15" height="15" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input type="text" id="searchInput" class="search-bar-input" placeholder="Search chats..."
+                    autocomplete="off" spellcheck="false" dir="auto">
                 <button class="search-clear-btn" id="searchClearBtn" aria-label="Clear search">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                        stroke-linecap="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
                 </button>
             </div>
         </div>
@@ -59,7 +84,13 @@
 
         <div class="sidebar-footer">
             <div class="nav-item" id="settingsBtn" aria-label="Settings">
-                <svg class="main-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <svg class="main-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path
+                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                    </path>
+                </svg>
                 <span class="nav-text">Settings</span>
             </div>
         </div>
@@ -68,11 +99,16 @@
     <main class="main-content" id="mainContent">
         <div class="mobile-header" id="mobileHeader">
             <button class="icon-btn" id="mobileToggleBtn" aria-label="Toggle sidebar">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                </svg>
             </button>
             <div style="display: flex; align-items: center; gap: 8px;">
-                <img src="{{ url_for('static', filename='iris_logo.png') }}" alt="Iris AI" class="iris-logo" onerror="this.style.display='none'">
-                <span class="iris-name" style="font-size: 18px;">Iris AI</span>
+                <img src="{{ url_for('static', filename='logo-dark.png') }}" alt="" class="iris-logo-text dark-only">
+                <img src="{{ url_for('static', filename='logo-light.png') }}" alt="" class="iris-logo-text light-only">
             </div>
             <div style="width: 24px;"></div> <!-- Spacer to balance flex layout -->
         </div>
@@ -87,37 +123,48 @@
 
             <div class="input-area" id="inputArea">
                 <div id="inputDragOverlay" class="input-drag-overlay">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path
+                            d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48">
+                        </path>
                     </svg>
                     <span>Drop files here</span>
                 </div>
                 <div id="imagePreviewContainer" class="image-preview-container"></div>
                 <div class="input-wrapper">
                     <label for="imageInput" class="action-btn" title="Add file or image">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path
+                                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48">
+                            </path>
+                        </svg>
                     </label>
                     <input type="file" id="imageInput" style="display:none;" multiple>
-                    
-                    <textarea id="chatInput" placeholder="Ask anything" autocomplete="off" rows="1" dir="auto"></textarea>
-                    
+
+                    <textarea id="chatInput" placeholder="Ask anything" autocomplete="off" rows="1"
+                        dir="auto"></textarea>
+
                     <button class="action-btn" id="dictationBtn" aria-label="Dictate" title="Dictate">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
                             <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
                             <line x1="12" x2="12" y1="19" y2="22"></line>
                         </svg>
                     </button>
-                    
+
                     {% if pro_mode %}
                     <select id="proModeSelector" class="pro-mode-select">
                         <option value="smart">Smart</option>
                         <option value="fast">Fast</option>
                     </select>
                     {% endif %}
-                    
+
                     <button class="send-btn" id="sendBtn" aria-label="Send message">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                             <line x1="22" y1="2" x2="11" y2="13"></line>
                             <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                         </svg>
@@ -137,7 +184,11 @@
         <div class="settings-header">
             <h2 class="settings-title">Settings</h2>
             <button class="icon-btn" id="closeSettingsBtn" aria-label="Close settings">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
             </button>
         </div>
 
@@ -148,7 +199,24 @@
 
         <!-- CHAT SETTINGS TAB -->
         <div class="settings-tab-content active" id="stab-content-chat">
-            <p class="settings-section-label">Generation</p>
+            <p class="settings-section-label">Appearance</p>
+
+            <div class="settings-field">
+                <label for="themeToggle">
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Theme Mode</span>
+                        <div class="theme-switch-wrapper">
+                            <label class="theme-switch" for="themeToggle">
+                                <input type="checkbox" id="themeToggle" />
+                                <div class="slider round"></div>
+                            </label>
+                        </div>
+                    </div>
+                    <span class="field-hint">Switch between AMOLED dark mode and Light mode.</span>
+                </label>
+            </div>
+
+            <p class="settings-section-label" style="margin-top: 20px;">Generation</p>
 
             <div class="settings-field">
                 <label for="cs_max_new_tokens">
@@ -158,7 +226,8 @@
                     </div>
                     <span class="field-hint">Number of tokens the model generates per reply.</span>
                 </label>
-                <input type="range" id="cs_max_new_tokens" value="40" min="1" max="4096" oninput="document.getElementById('val_max_new_tokens').innerText = this.value">
+                <input type="range" id="cs_max_new_tokens" value="40" min="1" max="4096"
+                    oninput="document.getElementById('val_max_new_tokens').innerText = this.value">
             </div>
 
             <div class="settings-field">
@@ -169,7 +238,8 @@
                     </div>
                     <span class="field-hint">Higher = more creative. Lower = more predictable.</span>
                 </label>
-                <input type="range" id="cs_temperature" value="0.6" step="0.05" min="0.01" max="2" oninput="document.getElementById('val_temperature').innerText = this.value">
+                <input type="range" id="cs_temperature" value="0.6" step="0.05" min="0.01" max="2"
+                    oninput="document.getElementById('val_temperature').innerText = this.value">
             </div>
 
             <div class="settings-field">
@@ -180,7 +250,8 @@
                     </div>
                     <span class="field-hint">Nucleus sampling threshold.</span>
                 </label>
-                <input type="range" id="cs_top_p" value="0.9" step="0.05" min="0" max="1" oninput="document.getElementById('val_top_p').innerText = this.value">
+                <input type="range" id="cs_top_p" value="0.9" step="0.05" min="0" max="1"
+                    oninput="document.getElementById('val_top_p').innerText = this.value">
             </div>
 
             <div class="settings-field">
@@ -191,7 +262,8 @@
                     </div>
                     <span class="field-hint">Limits vocabulary to the top K likely tokens.</span>
                 </label>
-                <input type="range" id="cs_top_k" value="40" min="1" max="200" oninput="document.getElementById('val_top_k').innerText = this.value">
+                <input type="range" id="cs_top_k" value="40" min="1" max="200"
+                    oninput="document.getElementById('val_top_k').innerText = this.value">
             </div>
 
             <div class="settings-field">
@@ -202,7 +274,8 @@
                     </div>
                     <span class="field-hint">Penalizes repeating words. 1.05–1.3 works well.</span>
                 </label>
-                <input type="range" id="cs_repetition_penalty" value="1.3" step="0.05" min="1" max="2" oninput="document.getElementById('val_repetition_penalty').innerText = this.value">
+                <input type="range" id="cs_repetition_penalty" value="1.3" step="0.05" min="1" max="2"
+                    oninput="document.getElementById('val_repetition_penalty').innerText = this.value">
             </div>
 
             <p class="settings-section-label" style="margin-top:20px">Memory &amp; Context</p>
@@ -215,34 +288,55 @@
                     </div>
                     <span class="field-hint">Maximum context size. Auto dynamically scales to your RAM.</span>
                 </label>
-                <input type="range" id="cs_n_ctx_allocation" value="0" min="0" max="4" step="1" oninput="const vals=['Auto','4096','8192','16384','32768']; document.getElementById('val_n_ctx_allocation').innerText = vals[this.value]">
+                <input type="range" id="cs_n_ctx_allocation" value="0" min="0" max="4" step="1"
+                    oninput="const vals=['Auto','4096','8192','16384','32768']; document.getElementById('val_n_ctx_allocation').innerText = vals[this.value]">
             </div>
 
             <div class="settings-field">
                 <label for="cs_compacting_profile">
                     <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
                         <span>Compacting Profile</span>
-                        <span id="val_compacting_profile" style="color:var(--iris-purple); font-weight:bold;">Medium</span>
+                        <span id="val_compacting_profile"
+                            style="color:var(--iris-purple); font-weight:bold;">Medium</span>
                     </div>
                     <span class="field-hint">How aggressively to forget older messages when context fills up.</span>
                 </label>
-                <input type="range" id="cs_compacting_profile" value="1" min="0" max="2" step="1" oninput="const vals=['Low','Medium','Aggressive']; document.getElementById('val_compacting_profile').innerText = vals[this.value]">
+                <input type="range" id="cs_compacting_profile" value="1" min="0" max="2" step="1"
+                    oninput="const vals=['Low','Medium','Aggressive']; document.getElementById('val_compacting_profile').innerText = vals[this.value]">
             </div>
 
             <p class="settings-section-label" style="margin-top:20px">Code Quality</p>
-            <div class="settings-field" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding:12px 0; gap: 16px;">
-                <label for="cs_code_review" style="margin:0; cursor:pointer; flex: 1; display: flex; flex-direction: column; gap: 4px;">
-                    <span style="color:#e8e8e8;">Code Review</span>
-                    <span class="field-hint">When enabled, automatically reviews written code and suggests improvements.</span>
+            <div class="settings-field"
+                style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding:12px 0; gap: 16px;">
+                <label for="cs_code_review"
+                    style="margin:0; cursor:pointer; flex: 1; display: flex; flex-direction: column; gap: 4px;">
+                    <span id="review" style="color: var(--text-primary);">Code Review</span>
+                    <span class="field-hint">When enabled, automatically reviews written code and suggests
+                        improvements.</span>
                 </label>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <label class="toggle-label" style="margin:0;">
-                        <input type="checkbox" id="cs_code_review" onchange="document.getElementById('val_code_review').innerText = this.checked ? 'On' : 'Off'">
+                        <input type="checkbox" id="cs_code_review"
+                            onchange="document.getElementById('val_code_review').innerText = this.checked ? 'On' : 'Off'">
                         <div class="toggle-track"></div>
                     </label>
                 </div>
             </div>
 
+            <div class="settings-field"
+                style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding:12px 0; gap: 16px;">
+                <label for="cs_keep_triage_loaded"
+                    style="margin:0; cursor:pointer; flex: 1; display: flex; flex-direction: column; gap: 4px;">
+                    <span id="keep_triage" style="color: var(--text-primary);">Keep Triage Loaded</span>
+                    <span class="field-hint">When enabled, keeps the routing model in memory for faster responses, at the cost of using memory constantly.</span>
+                </label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <label class="toggle-label" style="margin:0;">
+                        <input type="checkbox" id="cs_keep_triage_loaded">
+                        <div class="toggle-track"></div>
+                    </label>
+                </div>
+            </div>
             <button class="settings-save-btn" id="saveChatSettingsBtn">Save Global Settings</button>
         </div>
 
@@ -264,7 +358,8 @@
             </div>
 
             <p class="settings-section-label" style="margin-top:20px">Overrides</p>
-            <span class="field-hint" style="display:block; margin-bottom: 15px;">These override the global generation settings. Leave as "Global" to inherit from the main config.</span>
+            <span class="field-hint" style="display:block; margin-bottom: 15px;">These override the global generation
+                settings. Leave as "Global" to inherit from the main config.</span>
 
             <div class="settings-field">
                 <label for="ms_temperature">
@@ -273,7 +368,8 @@
                         <span id="val_ms_temperature" style="color:var(--iris-purple); font-weight:bold;">Global</span>
                     </div>
                 </label>
-                <input type="range" id="ms_temperature" value="-0.01" step="0.01" min="-0.01" max="2" oninput="document.getElementById('val_ms_temperature').innerText = this.value < 0 ? 'Global' : this.value">
+                <input type="range" id="ms_temperature" value="-0.01" step="0.01" min="-0.01" max="2"
+                    oninput="document.getElementById('val_ms_temperature').innerText = this.value < 0 ? 'Global' : this.value">
             </div>
 
             <div class="settings-field">
@@ -283,7 +379,8 @@
                         <span id="val_ms_top_p" style="color:var(--iris-purple); font-weight:bold;">Global</span>
                     </div>
                 </label>
-                <input type="range" id="ms_top_p" value="-0.05" step="0.05" min="-0.05" max="1" oninput="document.getElementById('val_ms_top_p').innerText = this.value < 0 ? 'Global' : this.value">
+                <input type="range" id="ms_top_p" value="-0.05" step="0.05" min="-0.05" max="1"
+                    oninput="document.getElementById('val_ms_top_p').innerText = this.value < 0 ? 'Global' : this.value">
             </div>
 
             <div class="settings-field">
@@ -293,40 +390,48 @@
                         <span id="val_ms_top_k" style="color:var(--iris-purple); font-weight:bold;">Global</span>
                     </div>
                 </label>
-                <input type="range" id="ms_top_k" value="0" min="0" max="200" oninput="document.getElementById('val_ms_top_k').innerText = this.value == 0 ? 'Global' : this.value">
+                <input type="range" id="ms_top_k" value="0" min="0" max="200"
+                    oninput="document.getElementById('val_ms_top_k').innerText = this.value == 0 ? 'Global' : this.value">
             </div>
 
             <div class="settings-field">
                 <label for="ms_repetition_penalty">
                     <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
                         <span>Repetition Penalty</span>
-                        <span id="val_ms_repetition_penalty" style="color:var(--iris-purple); font-weight:bold;">Global</span>
+                        <span id="val_ms_repetition_penalty"
+                            style="color:var(--iris-purple); font-weight:bold;">Global</span>
                     </div>
                 </label>
-                <input type="range" id="ms_repetition_penalty" value="0.95" step="0.05" min="0.95" max="2" oninput="document.getElementById('val_ms_repetition_penalty').innerText = this.value < 1.0 ? 'Global' : this.value">
+                <input type="range" id="ms_repetition_penalty" value="0.95" step="0.05" min="0.95" max="2"
+                    oninput="document.getElementById('val_ms_repetition_penalty').innerText = this.value < 1.0 ? 'Global' : this.value">
             </div>
 
             <div class="settings-field">
                 <label for="ms_frequency_penalty">
                     <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
                         <span>Frequency Penalty</span>
-                        <span id="val_ms_frequency_penalty" style="color:var(--iris-purple); font-weight:bold;">Global</span>
+                        <span id="val_ms_frequency_penalty"
+                            style="color:var(--iris-purple); font-weight:bold;">Global</span>
                     </div>
                 </label>
-                <input type="range" id="ms_frequency_penalty" value="-0.05" step="0.05" min="-0.05" max="2" oninput="document.getElementById('val_ms_frequency_penalty').innerText = this.value < 0 ? 'Global' : this.value">
+                <input type="range" id="ms_frequency_penalty" value="-0.05" step="0.05" min="-0.05" max="2"
+                    oninput="document.getElementById('val_ms_frequency_penalty').innerText = this.value < 0 ? 'Global' : this.value">
             </div>
 
             <div class="settings-field">
                 <label for="ms_presence_penalty">
                     <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
                         <span>Presence Penalty</span>
-                        <span id="val_ms_presence_penalty" style="color:var(--iris-purple); font-weight:bold;">Global</span>
+                        <span id="val_ms_presence_penalty"
+                            style="color:var(--iris-purple); font-weight:bold;">Global</span>
                     </div>
                 </label>
-                <input type="range" id="ms_presence_penalty" value="-0.05" step="0.05" min="-0.05" max="2" oninput="document.getElementById('val_ms_presence_penalty').innerText = this.value < 0 ? 'Global' : this.value">
+                <input type="range" id="ms_presence_penalty" value="-0.05" step="0.05" min="-0.05" max="2"
+                    oninput="document.getElementById('val_ms_presence_penalty').innerText = this.value < 0 ? 'Global' : this.value">
             </div>
 
-            <button class="settings-save-btn" id="saveModelSettingsBtn" style="margin-top: 20px;">Save Model Settings</button>
+            <button class="settings-save-btn" id="saveModelSettingsBtn" style="margin-top: 20px;">Save Model
+                Settings</button>
         </div>
 
     </aside>
@@ -334,21 +439,23 @@
     <div id="voiceModal" class="voice-modal">
         <div class="voice-modal-content">
             <h2 id="voiceStatusText">Connecting...</h2>
-            
+
             <div class="voice-visualizer-container">
                 <div id="voiceOrb" class="voice-orb"></div>
             </div>
-            
+
             <div id="voiceTranscription" class="voice-transcription"></div>
-            
+
             <div class="voice-toolbar">
                 <button id="voiceMuteBtn" class="voice-tool-btn" aria-label="Mute microphone">
-                    <svg id="icon-mic-on" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg id="icon-mic-on" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
                         <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
                         <line x1="12" x2="12" y1="19" y2="22"></line>
                     </svg>
-                    <svg id="icon-mic-off" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+                    <svg id="icon-mic-off" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
                         <line x1="1" y1="1" x2="23" y2="23"></line>
                         <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
                         <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
@@ -356,8 +463,11 @@
                     </svg>
                 </button>
                 <button id="closeVoiceBtn" class="voice-tool-btn hangup-btn" aria-label="End call">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-7-7 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"></path>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path
+                            d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-7-7 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91">
+                        </path>
                         <line x1="23" y1="1" x2="1" y2="23"></line>
                     </svg>
                 </button>
@@ -375,4 +485,5 @@
     <script src="/static/voice.js?v=15"></script>
     <script src="{{ url_for('static', filename='settings.js') }}?v=15"></script>
 </body>
+
 </html>

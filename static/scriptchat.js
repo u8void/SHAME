@@ -512,7 +512,16 @@ function renderChatList(query = '') {
 
         work = work.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
             const id = `@@@CODE_${blocks.length}@@@`;
-            const detectedLang = (lang || '').trim().replace(/@@@[A-Z0-9_]+@@@/gi, '') || 'code';
+            let detectedLang = (lang || '').trim().replace(/@@@[A-Z0-9_]+@@@/gi, '');
+            
+            // Recover swallowed code if the model forgot a newline (e.g. ```html<div...)
+            let extraCode = "";
+            const tagIndex = detectedLang.search(/[<{\[]/);
+            if (tagIndex !== -1 && tagIndex < 20) {
+                extraCode = detectedLang.substring(tagIndex);
+                detectedLang = detectedLang.substring(0, tagIndex).trim();
+            }
+            detectedLang = detectedLang || 'code';
             
             // Find all thought placeholders inside the code content and move them outside
             const thoughtRegex = /@@@THOUGHT_\d+@@@/g;
@@ -522,7 +531,7 @@ function renderChatList(query = '') {
                 extractedThoughts += "\n" + matchThought[0] + "\n";
             }
             
-            const cleanContent = codeContent.replace(/@@@THOUGHT_\d+@@@/g, '').trim();
+            let cleanContent = (extraCode + (extraCode && !codeContent.startsWith('\n') ? '\n' : '') + codeContent).replace(/@@@THOUGHT_\d+@@@/g, '').trim();
             const isCmdOrShort = isCommandOrShortBlock(detectedLang, cleanContent);
             const isFinished = match.endsWith('```');
             
@@ -1201,6 +1210,9 @@ window.downloadCode = (btn, ext) => {
                             showTypingIndicator();
                         } else if (event.type === "raw_response") {
                             rawResponseText = event.content;
+                        } else if (event.type === "compact_history") {
+                            chat.messages = event.messages;
+                            savePersist();
                         } else if (event.type === "text" || event.type === "error") {
                             if (!firstTokenReceived) {
                                 firstTokenReceived = true;
@@ -1684,11 +1696,13 @@ window.downloadCode = (btn, ext) => {
 
         overlay.classList.add('visible');
         requestAnimationFrame(() => panel.classList.add('open'));
+        document.body.classList.add('code-viewer-open');
     }
 
     function closeViewer() {
         panel.classList.remove('open');
         overlay.classList.remove('visible');
+        document.body.classList.remove('code-viewer-open');
         currentCardEl = null;
     }
 
