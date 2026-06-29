@@ -1337,7 +1337,30 @@ def _quality_guard(text: str) -> str:
     return text or "I'm Iris AI."
 
 
-
+def _has_repetition_loop(text: str) -> bool:
+    if len(text) < 50:
+        return False
+    
+    # Check the last 300 characters
+    suffix = text[-300:]
+    
+    # 1. Non-whitespace character repeating 15+ times
+    if re.search(r'([^\s])\1{14}', suffix):
+        return True
+        
+    # 2. 2-5 character pattern repeating 8+ times (must contain non-whitespace and >1 unique character)
+    for match in re.finditer(r'(.{2,5}?)\1{7}', suffix):
+        pattern = match.group(1)
+        if pattern.strip() and len(set(pattern.strip())) > 1:
+            return True
+            
+    # 3. 6-30 character pattern repeating 4+ times (must contain non-whitespace and >1 unique character)
+    for match in re.finditer(r'(.{6,30}?)\1{3}', suffix):
+        pattern = match.group(1)
+        if pattern.strip() and len(set(pattern.strip())) > 1:
+            return True
+            
+    return False
 
 
 def _stream_tokens(
@@ -1531,6 +1554,10 @@ def _stream_tokens(
                 loop_content += token
                 if "finish_reason" in choice and choice["finish_reason"]:
                     finish_reason = choice["finish_reason"]
+                if _has_repetition_loop(loop_content):
+                    logger.warning(f"[Repetition Guard] Infinite loop detected in model generation for role '{role.value}'. Stopping stream.")
+                    finish_reason = "stop"
+                    break
                 continue
 
             buffer += token
@@ -1732,6 +1759,11 @@ def _stream_tokens(
 
             if "finish_reason" in choice and choice["finish_reason"]:
                 finish_reason = choice["finish_reason"]
+
+            if _has_repetition_loop(loop_content):
+                logger.warning(f"[Repetition Guard] Infinite loop detected in model generation for role '{role.value}'. Stopping stream.")
+                finish_reason = "stop"
+                break
 
         logger.debug(f"[Model Finish] Role: {role.value.upper()} | Model: {model_name} | Tokens consumed: {token_count} | Status: {finish_reason}")
 

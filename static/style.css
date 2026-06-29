@@ -465,6 +465,7 @@ body.chat-active .center-panel {
 .message {
     display: flex;
     max-width: 75%;
+    min-width: 0;
     opacity: 0;
     transform: translateY(8px);
     animation: messageIn 0.3s var(--ease-out-expo) forwards;
@@ -492,6 +493,9 @@ body.chat-active .center-panel {
     line-height: 1.6;
     color: #e8e8e8;
     word-wrap: break-word;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    min-width: 0;
 }
 
 .user-message .message-content {
