@@ -878,32 +878,17 @@ def execute_action_by_dict(action_dict: dict) -> str:
     
     action = action_dict.get("action", "chat")
 
-    
     if action in ("chat", "finish", "none", ""):
         return ""
 
-    
-    try:
-        result = _dispatch_action(action, action_dict)
-    except Exception as e:
-        logger.warning(f"[Dispatch] '{action}' raised: {e}")
-        return f"Action '{action}' failed: {e}"
-    if result is not None:
-        logger.info(f"[Action] {action} → handled natively (simple)")
-        return result
-
-    
-
-
-    logger.info(f"[Action] {action} → routing to 3B+OI for complex execution")
+    logger.info(f"[Action] {action} → routing to OI for execution")
     task_parts = [f"Please perform the following action on my system:\nAction: {action}"]
     for key, val in action_dict.items():
         if key != "action":
             task_parts.append(f"{key}: {val}")
     task_str = "\n".join(task_parts)
     
-    
-    _prime_oi_with_3b()
+    _prime_oi_with_control()
     return _run_oi_task(task_str)
 
 
@@ -938,27 +923,25 @@ def _is_complex_action(action: str) -> bool:
     return True
 
 
-def _prime_oi_with_3b():
+def _prime_oi_with_control():
     
     if not OI_AVAILABLE:
         return
     from src.iris_engine import ModelRole, load_model, _model_pool
     
     try:
-        load_model(ModelRole.CODE)
-        logger.info("[OI] Primed with 3B CODE model for complex action.")
+        load_model(ModelRole.CONTROL)
+        logger.info("[OI] Primed with CONTROL model for action.")
     except Exception as e:
-        logger.warning(f"[OI] Could not prime 3B model: {e}")
+        logger.warning(f"[OI] Could not prime CONTROL model: {e}")
 
 
 def _generate_control_action(messages: list, user_query: str = "", max_tokens: int = 1024) -> str:
     
+    from src.iris_engine import ModelRole, load_model
 
-
-    from src.iris import ModelRole, load_model
-
-    logger.info("[Model] Using CODE model for control action")
-    llm = load_model(ModelRole.CODE)
+    logger.info("[Model] Using CONTROL model for control action")
+    llm = load_model(ModelRole.CONTROL)
 
     out = ""
     for chunk in llm.create_chat_completion(

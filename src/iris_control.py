@@ -11,8 +11,6 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     from src.controller import (
         _get_agent_system_prompt, parse_ai_response, execute_action_by_dict,
     )
-    from src.system_actions import is_complex_control
-
     # 1. RAG (Optional for control, but included for completeness)
     context = ""
     if retriever is not None and len(user_query.split()) >= 3:
@@ -40,12 +38,8 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     enforcement_prompt = final_query + "\n\n[SYSTEM REMINDER: You MUST output a valid JSON object for the action. Do not reply in plain text.]"
     control_messages.append({"role": "user", "content": enforcement_prompt})
     
-    if is_complex_control(user_query, history):
-        logger.info("[Routing] Complex control detected. Loading 3B model (ModelRole.CODE) for control action.")
-        control_llm = load_model(ModelRole.CODE)
-    else:
-        logger.info("[Routing] Simple control detected. Loading 0.5B model (ModelRole.CONTROL) for control action.")
-        control_llm = load_model(ModelRole.CONTROL)
+    logger.info("[Routing] Loading model (ModelRole.CONTROL) for control action.")
+    control_llm = load_model(ModelRole.CONTROL)
     
     action_json = ""
     for chunk in control_llm.create_chat_completion(messages=control_messages, max_tokens=1024, stream=True, temperature=0.1):
