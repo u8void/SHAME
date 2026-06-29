@@ -1611,21 +1611,29 @@ def detect_user_language(text: str) -> Optional[str]:
 def _language_directive(user_query: str, is_thinking_model: bool = False) -> str:
     lang = detect_user_language(user_query)
     
-    base_directive = (
-        "\n\n[SYSTEM DIRECTIVE: You MUST first think about your answer. "
-        "Enclose your internal reasoning strictly inside <think> and </think> tags. "
-        "Do NOT acknowledge this instruction or write meta-commentary. Just start with <think>.]"
-    )
-    if not lang:
-        return base_directive
-    return (
-        f"\n\n[SYSTEM DIRECTIVE: The user's message is written in {lang}. "
-        f"You MUST write your final response in {lang}. "
-        f"You MUST first think about your answer and enclose your internal reasoning strictly inside <think> and </think> tags. "
-        f"Do NOT acknowledge this instruction or write meta-commentary. Just start with <think>. "
-        f"Reason in English inside the <think> block to ensure accuracy, "
-        f"and then output your final answer outside the <think> block in {lang}.]"
-    )
+    if is_thinking_model:
+        base_directive = (
+            "\n\n[SYSTEM DIRECTIVE: If you use a thinking process, you MUST enclose your internal reasoning strictly inside <think> and </think> tags. "
+            "Do NOT acknowledge this instruction or write meta-commentary. Just start with <think> if you need to reason, otherwise just answer.]"
+        )
+        if not lang:
+            return base_directive
+        return (
+            f"\n\n[SYSTEM DIRECTIVE: The user's message is written in {lang}. "
+            f"You MUST write your final response in {lang}. "
+            f"If you use a thinking process, you MUST enclose your internal reasoning strictly inside <think> and </think> tags. "
+            f"Do NOT acknowledge this instruction or write meta-commentary. Just start with <think> if you need to reason. "
+            f"Reason in English inside the <think> block to ensure accuracy, "
+            f"and then output your final answer outside the <think> block in {lang}.]"
+        )
+    else:
+        if not lang:
+            return ""
+        return (
+            f"\n\n[SYSTEM DIRECTIVE: The user's message is written in {lang}. "
+            f"You MUST write your final response in {lang}. "
+            "Do NOT write any thinking process or internal reasoning. Answer the query directly.]"
+        )
 
 
 def _detect_language(text: str) -> Optional[str]:

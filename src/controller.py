@@ -4,13 +4,6 @@ import os
 import platform
 import sys
 
-if platform.system() == "Linux":
-    import subprocess
-    try:
-        subprocess.run(["xhost", "+local:"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
-
 
 def _ensure_open_interpreter():
     try:
@@ -114,18 +107,13 @@ try:
         "You are Iris, an AI PC assistant. "
         "Write and execute ONLY Python code to fulfill the user's request. NEVER write raw Bash or Shell commands.\n"
         "CRITICAL RULES:\n"
-        "1. NEVER use 'sudo' or administrative privileges. DO NOT attempt to run `pip install` or install packages. All required packages (like `pyautogui`) are already installed.\n"
-        "2. ALWAYS `import` the modules you need (e.g., `import pyautogui`, `import time`, `import subprocess`, `import shutil`) at the start of your code. If you get a NameError, you forgot to import the module.\n"
-        "3. ALWAYS double-check your Python string syntax. If you write a string containing an apostrophe, wrap it in double quotes (e.g., `\"I'm\"`) or escape the apostrophe (e.g., `'I\'m'`) to prevent SyntaxError.\n"
-        "4. ALWAYS launch desktop/GUI applications or files using non-blocking, fully-detached background processes so they DO NOT block the execution flow.\n"
-        "   Before launching, ALWAYS verify if the executable is available on the system path using `shutil.which`. If it does not exist, YOU MUST fall back to opening its web interface or searching the web for it using Python's built-in `webbrowser` module (e.g., `webbrowser.open('https://web.whatsapp.com')` or `webbrowser.open('https://www.google.com/search?q=...')`).\n"
+        "1. NEVER use 'sudo' or administrative privileges.\n"
+        "2. ALWAYS launch desktop/GUI applications or files using non-blocking, fully-detached background processes so they DO NOT block the execution flow.\n"
+        "   Before launching, ALWAYS verify if the executable is available on the system path using `shutil.which`. If it does not exist (for example, 'whatsapp' or 'spotify' is not installed), fall back to opening its web interface in the default browser using Python's built-in `webbrowser` module (e.g., `webbrowser.open('https://web.whatsapp.com')`).\n"
         "   When launching an executable, redirect stdout/stderr to subprocess.DEVNULL and set start_new_session=True. Example: import subprocess, shutil, webbrowser; cmd = 'gnome-control-center'; subprocess.Popen([cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True) if shutil.which(cmd) else webbrowser.open('https://example.com')\n"
-        "   IMPORTANT: GUI applications generally DO NOT accept contact names or complex actions as command-line arguments (e.g., running `whatsapp 'Ahmed'` will just open WhatsApp and ignore the name). To send a message or interact inside an app, you MUST automate the UI using `src.gui_agent.perform_gui_action` which uses Vision AI to reliably click and type.\n"
-        "5. NEVER wait for GUI applications to exit, NEVER call .wait(), and NEVER write monitoring loops (e.g., polling with .poll() or using time.sleep) to check if the process is still running. Once you start a background process, return immediately.\n"
-        "   EXCEPTION: If the task specifically requires GUI automation (like sending a message), you MAY use `time.sleep(1.5)` to wait for the app to load visually, and then use `perform_gui_action` to perform the interaction. Example: `from src.gui_agent import perform_gui_action; print(perform_gui_action('click search bar, type Ahmed Barakat, press enter, type hi, press enter'))`.\n"
-        "6. To close/kill an application, write Python code to terminate its processes. Keep in mind that some launcher commands differ from the running process names: 'google-chrome' runs as 'chrome', 'libreoffice' runs as 'soffice' or 'soffice.bin', and 'gnome-terminal' runs as 'gnome-terminal-server'. Be careful to terminate the correct process names, and avoid matching substring patterns that might terminate this agent workspace (e.g., do not kill 'chrome-sandbox' or 'antigravity').\n"
-        "7. If asked to find or open something, ALWAYS prioritize finding it locally on the device first (apps, files). If it is NOT found locally, use the `webbrowser` module to search the web. Do not try to install missing applications using package managers unless explicitly asked.\n"
-        "8. If your code fails or does not achieve the expected result, you may examine the error and RETRY up to 3 times. After 3 failed attempts, state that the task failed and finish your turn."
+        "3. NEVER wait for GUI applications to exit, NEVER call .wait(), and NEVER write monitoring loops (e.g., polling with .poll() or using time.sleep) to check if the process is still running. Once you start the process with Popen, the task is complete. Return immediately.\n"
+        "4. To close/kill an application, write Python code to terminate its processes. Keep in mind that some launcher commands differ from the running process names: 'google-chrome' runs as 'chrome', 'libreoffice' runs as 'soffice' or 'soffice.bin', and 'gnome-terminal' runs as 'gnome-terminal-server'. Be careful to terminate the correct process names, and avoid matching substring patterns that might terminate this agent workspace (e.g., do not kill 'chrome-sandbox' or 'antigravity').\n"
+        "5. NEVER use the webbrowser module or python requests to perform a web search or look up information. If you are asked to perform a system action like installing a package or changing a setting, write the python script to do exactly that (e.g. using subprocess). Do not search the web for how to do it."
     )
 
     OI_AVAILABLE = True
@@ -634,7 +622,22 @@ def handle_run_code(code: str) -> str:
             pass
 
 
-
+def parse_ai_response(text: str) -> dict | None:
+    
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group())
+    except json.JSONDecodeError:
+        # Fallback: fix unquoted words (like max, on, off) produced by tiny models
+        raw = match.group()
+        fixed_json = re.sub(r'(:\s*)([a-zA-Z_][a-zA-Z0-9_]*)(\s*[,}])', r'\1"\2"\3', raw)
+        fixed_json = fixed_json.replace('"True"', 'true').replace('"False"', 'false')
+        try:
+            return json.loads(fixed_json)
+        except json.JSONDecodeError:
+            return None
 
 
 def ai_agent_handle(user_input: str, retriever=None, history=None, **kwargs):
@@ -695,10 +698,108 @@ def ai_agent_handle_pro(user_input: str, retriever=None, history=None, **kwargs)
         yield item
 
 
+def _handle_check_storage(action_dict: dict) -> str:
+    
+    import shutil
+    path = action_dict.get("path", "/")
+    if platform.system() == "Windows":
+        path = "C:\\"
+    try:
+        total, used, free = shutil.disk_usage(path)
+        if total == 0:
+            return f"Disk Usage for {path}: Unable to determine (total space is 0)"
+        total_gb = total / (1024**3)
+        used_gb = used / (1024**3)
+        free_gb = free / (1024**3)
+        percent = (used / total) * 100
+        return (
+            f"Disk Usage for {path}:\n"
+            f"  Total: {total_gb:.1f} GB\n"
+            f"  Used:  {used_gb:.1f} GB ({percent:.1f}%)\n"
+            f"  Free:  {free_gb:.1f} GB"
+        )
+    except Exception as e:
+        return f"Failed to check disk usage: {e}"
 
 
+def _dispatch_action(action: str, d: dict) -> str:
+    
+    g = d.get  
 
+    def clean_url(url_val):
+        if not url_val:
+            return ""
+        
+        m = re.match(r'^\[.*?\]\((.*?)\)$', str(url_val).strip())
+        if m:
+            return m.group(1).strip()
+        return str(url_val).strip()
 
+    
+    if action == "open_website":
+        return handle_website_from_url(clean_url(g("url", "")))
+    if action == "web_search":
+        return web_search(g("query", ""))
+    if action == "youtube_video":
+        return handle_youtube_video_from_query(g("query") or g("name", ""))
+    if action == "youtube_channel":
+        return handle_youtube_channel_from_name(g("name") or g("query", ""))
+    if action == "spotify_song":
+        return handle_spotify_song(g("query") or g("name", ""))
+    if action in ("browser_task", "browser_login", "browser_autopilot"):
+        try:
+            from src.browser_agent import (
+                browser_autopilot,
+                browser_login,
+                browser_task,
+            )
+        except Exception as e:
+            return f"Browser automation unavailable: {e}"
+        url_clean = clean_url(g("url", ""))
+        if action == "browser_login":
+            return browser_login(url_clean, g("username", ""), g("password", ""))
+        if action == "browser_task":
+            return browser_task(url_clean, g("task", ""))
+        return browser_autopilot(
+            url_clean, g("task", ""), resume_path=g("resume_path")
+        )
+
+    
+    if action == "gui_action":
+        try:
+            from src.gui_agent import perform_gui_action
+            return perform_gui_action(g("task", ""))
+        except Exception as e:
+            return f"GUI automation unavailable: {e}"
+
+    if action == "parse_resume":
+        try:
+            from src.browser_agent import parse_resume
+
+            return str(parse_resume(g("path", "")))
+        except Exception as e:
+            return f"Resume parsing unavailable: {e}"
+
+    
+
+    if action == "analyze_image":
+        try:
+            from src.iris import analyze_image
+
+            return analyze_image(
+                g("image_path", ""), g("prompt", "Describe this image in detail.")
+            )
+        except Exception as e:
+            return f"Vision unavailable: {e}"
+    if action == "search_image_web":
+        return handle_search_image_web(g("image_path", ""))
+
+    if action == "send_email":
+        return handle_email_from_parts(
+            g("to", ""), g("subject", ""), g("body", ""), load_config()
+        )
+
+    return None
 
 def _pct(val) -> int:
     val_str = str(val).lower().replace("%", "").strip()
@@ -740,6 +841,88 @@ _RISKY_CMD_RE = re.compile(
 )
 
 
+def is_risky_action(action_dict: dict) -> bool:
+    
+    action = action_dict.get("action", "")
+    if action in _RISKY_ACTIONS:
+        return True
+    if action in ("run_command", "open_terminal"):
+        return bool(_RISKY_CMD_RE.search(str(action_dict.get("command", ""))))
+    return False
+
+
+def _confirm_risky(action_dict: dict) -> bool:
+    
+    if not IS_INTERACTIVE:
+        return False
+    action = action_dict.get("action", "")
+    detail = json.dumps(
+        {k: v for k, v in action_dict.items() if k != "action"}, ensure_ascii=False
+    )
+    if RICH_AVAILABLE:
+        console.print(
+            f"  [bold red]⚠ Confirm risky action[/bold red]: "
+            f"[bold magenta]{action}[/bold magenta] {detail}"
+        )
+        ans = (
+            Prompt.ask("  [bold]Proceed?[/bold]", choices=["y", "n"], default="n")
+            .strip()
+            .lower()
+        )
+    else:
+        ans = input(f"  ⚠ Confirm risky action '{action}' {detail} — proceed? [y/N]: ").strip().lower()
+    return ans == "y"
+
+
+def execute_action_by_dict(action_dict: dict) -> str:
+    
+    action = action_dict.get("action", "chat")
+
+    
+    if action in ("chat", "finish", "none", ""):
+        return ""
+
+    
+    try:
+        result = _dispatch_action(action, action_dict)
+    except Exception as e:
+        logger.warning(f"[Dispatch] '{action}' raised: {e}")
+        return f"Action '{action}' failed: {e}"
+    if result is not None:
+        logger.info(f"[Action] {action} → handled natively (simple)")
+        return result
+
+    
+
+
+    logger.info(f"[Action] {action} → routing to 3B+OI for complex execution")
+    task_parts = [f"Please perform the following action on my system:\nAction: {action}"]
+    for key, val in action_dict.items():
+        if key != "action":
+            task_parts.append(f"{key}: {val}")
+    task_str = "\n".join(task_parts)
+    
+    
+    _prime_oi_with_3b()
+    return _run_oi_task(task_str)
+
+
+_AGENT_LOOP_ADDENDUM = """
+
+# ===============================================================================
+# AGENT LOOP PROTOCOL
+# ===============================================================================
+You operate as a multi-step agent. A single request may need several actions.
+
+- Emit exactly ONE JSON action per turn (optionally preceded by a brief <think>).
+- After each action runs, you receive an `OBSERVATION:` message with the result.
+  Read it, then decide the next action.
+- When the task is fully complete, emit:
+  {"action": "finish", "summary": "<one-line summary of what you accomplished>"}
+- If the task is a single step, do that step, then on the next turn emit finish.
+- If an OBSERVATION shows an error, diagnose it and try a different action.
+- Use the "chat" action only for pure conversation that needs no execution.
+"""
 
 
 
@@ -751,42 +934,178 @@ _RISKY_CMD_RE = re.compile(
 
 
 
+def _is_complex_action(action: str) -> bool:
+    return True
 
 
-
-
-
-
-
-
-
-
-
-
-
-def _prime_oi_with_control():
+def _prime_oi_with_3b():
     
     if not OI_AVAILABLE:
         return
     from src.iris_engine import ModelRole, load_model, _model_pool
     
     try:
-        load_model(ModelRole.CONTROL)
-        logger.info("[OI] Primed with CONTROL model for complex action.")
+        load_model(ModelRole.CODE)
+        logger.info("[OI] Primed with 3B CODE model for complex action.")
     except Exception as e:
-        logger.warning(f"[OI] Could not prime CONTROL model: {e}")
+        logger.warning(f"[OI] Could not prime 3B model: {e}")
 
 
+def _generate_control_action(messages: list, user_query: str = "", max_tokens: int = 1024) -> str:
+    
 
 
+    from src.iris import ModelRole, load_model
+
+    logger.info("[Model] Using CODE model for control action")
+    llm = load_model(ModelRole.CODE)
+
+    out = ""
+    for chunk in llm.create_chat_completion(
+        messages=messages, max_tokens=max_tokens, stream=True, temperature=0.1
+    ):
+        delta = chunk["choices"][0].get("delta", {})
+        if "content" in delta and delta["content"]:
+            out += delta["content"]
+    return out
 
 
+def agentic_control_loop(
+    user_query: str,
+    history: list = None,
+    max_steps: int = 8,
+    settings: dict = None,
+    model_callable=None,
+):
+    
+    history = history or []
+    settings = settings or {}
+    auto_confirm = bool(settings.get("auto_confirm", False))
+    gen = model_callable or (lambda msgs: _generate_control_action(msgs, user_query=user_query))
+
+    sys_prompt = _get_agent_system_prompt() + _AGENT_LOOP_ADDENDUM
+    messages = [{"role": "system", "content": sys_prompt}]
+    for m in history[-6:]:
+        if m.get("role") in ("user", "assistant") and m.get("content"):
+            messages.append({"role": m["role"], "content": m["content"]})
+    messages.append({"role": "user", "content": user_query})
+
+    transcript = []  
+    parse_failures = 0
+
+    for step in range(max_steps):
+        yield {"type": "status", "content": f"Planning step {step + 1}…"}
+        try:
+            raw = gen(messages)
+        except Exception as e:
+            logger.error(f"[Agent] generation failed: {e}")
+            yield {"type": "status", "content": "Model generation failed."}
+            break
+
+        action_dict = parse_ai_response(raw)
+        if not action_dict:
+            parse_failures += 1
+            if parse_failures >= 2:
+                fail = "I couldn't translate that into an action I can run."
+                yield {"type": "token", "content": fail}
+                yield {"type": "raw_response", "content": fail}
+                if not settings.get("keep_loaded"):
+                    _unload_control_model()
+                return
+            messages.append({"role": "assistant", "content": raw})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "OBSERVATION: Your reply was not valid JSON. Reply with a single JSON action object.",
+                }
+            )
+            continue
+        parse_failures = 0
+
+        action = action_dict.get("action", "chat")
+        messages.append({"role": "assistant", "content": raw})
+
+        
+        if _is_complex_action(action):
+            yield {"type": "status", "content": f"Complex action '{action}' → 3B+OI"}
+        else:
+            yield {"type": "status", "content": f"Simple action '{action}' → native handler"}
+
+        
+        if action in ("finish", "none"):
+            summary = action_dict.get("summary", "")
+            final = summary or _join_transcript(transcript) or "Done."
+            yield {"type": "token", "content": final}
+            yield {"type": "raw_response", "content": final}
+            if not settings.get("keep_loaded"):
+                _unload_control_model()
+            return
+        if action == "chat":
+            reply = action_dict.get("response", "") or _join_transcript(transcript)
+            yield {"type": "token", "content": reply}
+            yield {"type": "raw_response", "content": reply}
+            if not settings.get("keep_loaded"):
+                _unload_control_model()
+            return
+
+        
+        if is_risky_action(action_dict) and not auto_confirm:
+            if not _confirm_risky(action_dict):
+                obs = f"Action '{action}' was cancelled by the user."
+                transcript.append(obs)
+                yield {"type": "status", "content": obs}
+                messages.append({"role": "user", "content": f"OBSERVATION: {obs}"})
+                continue
+
+        
+        yield {"type": "status", "content": f"Executing: {action}"}
+        result = execute_action_by_dict(action_dict)
+        result = (result or "Done.").strip()
+        transcript.append(f"{action}: {result}")
+        yield {
+            "type": "action_result",
+            "content": f"Action '{action}' Executed.\nResult:\n{result}",
+        }
+        
+        observation_content = f"OBSERVATION: {result[:2000]}"
+        if action == "open_app" and result.startswith("✅"):
+            _original_task_lower = user_query.lower()
+            _gui_followup_keywords = {
+                "whatsapp", "telegram", "message", "send", "text", "chat",
+                "click", "type", "search for", "open the chat", "im iris"
+            }
+            if any(kw in _original_task_lower for kw in _gui_followup_keywords):
+                app_opened = action_dict.get("name", "the app")
+                observation_content = (
+                    f"OBSERVATION: {result}\n"
+                    f"{app_opened} is now open on screen. "
+                    f"The original task is NOT complete yet — you must continue. "
+                    f"Use gui_action with a detailed step-by-step task description to finish: {user_query}"
+                )
+        messages.append({"role": "user", "content": observation_content})
+
+    
+    final = _join_transcript(transcript) or "Reached the step limit."
+    yield {"type": "status", "content": "Step limit reached."}
+    yield {"type": "token", "content": final}
+    yield {"type": "raw_response", "content": final}
+    if not settings.get("keep_loaded"):
+        _unload_control_model()
 
 
+def _join_transcript(transcript: list) -> str:
+    if not transcript:
+        return ""
+    return "Here's what I did:\n" + "\n".join(f"- {t}" for t in transcript)
 
 
+def _unload_control_model():
+    try:
+        from src.iris import unload_model
 
-
+        unload_model()
+    except Exception:
+        pass
 
 
 def _open_url(url: str):

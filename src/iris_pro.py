@@ -695,7 +695,7 @@ async def ask_stream(
     
     img_match = re.match(r'^\[IMAGE_UPLOADED:\s*(.+?)\]\s*(.*)$', user_query, flags=re.DOTALL)
     if img_match:
-        from src.iris_vision import analyze_image
+        from src.iris import analyze_image
         import os
         
         image_path = img_match.group(1).strip()
@@ -945,15 +945,33 @@ async def ask_stream(
                 yield {"type": "status", "content": f"Task categorized as {task_type.value.upper()}..."}
 
             if task_type == TaskType.CONTROL:
-                yield {"type": "status", "content": "Routing task to Open Interpreter..."}
-                from src.controller import _run_oi_task, _prime_oi_with_control
+                yield {"type": "status", "content": "Generating computer command..."}
+                from src.controller import _get_agent_system_prompt, parse_ai_response, execute_action_by_dict
                 
-                _prime_oi_with_control()
+                control_messages = [{"role": "system", "content": _get_agent_system_prompt()}, {"role": "user", "content": user_query}]
                 
+                action_json = ""
                 try:
-                    result = _run_oi_task(user_query)
-                    yield {"type": "action_result", "content": f"Task Executed via Open Interpreter.\nResult:\n{result}"}
-                    messages.append({"role": "system", "content": f"Computer Command Execution Result:\n{result}\n\n"})
+                    async for chunk in client.stream_chat(
+                        model=Model.CODE_SIMPLE.value,
+                        messages=control_messages,
+                        temperature=0.1,
+                        max_tokens=1024,
+                    ):
+                        token = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        if token:
+                            action_json += token
+                            
+                    action_dict = parse_ai_response(action_json)
+                    if action_dict:
+                        action_name = action_dict.get("action", "unknown")
+                        yield {"type": "status", "content": f"Executing: {action_name}"}
+                        result = execute_action_by_dict(action_dict)
+                        yield {"type": "action_result", "content": f"Action '{action_name}' Executed.\nResult:\n{result}"}
+                        messages.append({"role": "system", "content": f"Computer Command Execution Result:\n{result}\n\n"})
+                    else:
+                        yield {"type": "status", "content": "Action failed to parse."}
+                        messages.append({"role": "system", "content": "Computer Command Failed.\n\n"})
                 except Exception as exc:
                     log.exception("Error in Control stage: %s", exc)
                     messages.append({"role": "system", "content": "Computer Command Failed due to exception.\n\n"})
