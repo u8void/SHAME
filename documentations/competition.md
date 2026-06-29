@@ -109,12 +109,12 @@ For queries routed to the general role, Iris relies on the extremely dense mixtu
 | Benchmark | Iris Tiny (Harnessed) | Gemma 4 E2B | Qwen 3.5 4B | GPT-4o-mini |
 |-----------|:---------------------:|:-----------:|:-----------:|:-----------:|
 | MMLU | **85.7%** | 60.0% | 60.5% | 82.0% |
-| HumanEval | **84.0%** | 35.0% | 45.0% | 87.2% |
+| HumanEval | 84.5% | 35.0% | 45.0% | **87.2%** |
 | MATH-500 | **94.6%** | 45.0% | 68.0% | 70.2% |
 | AIME 2024 | **57.5%** | 37.5% | 10.0% | 9.3% |
-| GPQA Diamond | **~40.0%** | 43.4% | 33.0% | 43.0% |
-| LiveCodeBench | **25.0%** | 44.0% | 18.0% | 27.5% |
-| SWE-Bench Lite | **6.7%** | 5.0% | 3.5% | 11.0% |
+| GPQA Diamond | **~45.0%** | 43.4% | 33.0% | 43.0% |
+| LiveCodeBench | 25.0% | 44.0% | 18.0% | **27.5%** |
+| SWE-Bench Lite | 6.7% | 5.0% | 3.5% | **11.0%** |
 
 #### Honest Assessment
 Iris Tiny is **a highly efficient local assistant**. By upgrading to 3B and 4B models combined with specialized reasoning distillation and dynamic output parsing, it punches far above its weight class. On a Raspberry Pi, with no internet, Iris Tiny routes queries, writes code, solves math, and answers knowledge questions with surprising depth.

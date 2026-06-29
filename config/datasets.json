@@ -100,6 +100,10 @@
       {
         "path": "smirki/UI_REASONING_v1.01",
         "max_samples": 8000
+      },
+      {
+        "path": "AlicanKiraz0/Agentic-Chain-of-Thought-Coding-SFT-Dataset",
+        "max_samples": 8000
       }
     ],
     "local_dirs": [

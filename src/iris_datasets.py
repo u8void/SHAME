@@ -311,7 +311,23 @@ def load_self_oss_instruct(subset_size=None):
     except Exception: return []
 
 
-
+def load_agentic_cot_coding_dataset(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        ds = load_dataset("AlicanKiraz0/Agentic-Chain-of-Thought-Coding-SFT-Dataset", split="train", streaming=True)
+        if subset_size:
+            try: ds = ds.shuffle(buffer_size=10000, seed=42)
+            except Exception: pass
+        pairs = []
+        for row in ds:
+            if subset_size and len(pairs) >= subset_size: break
+            u = row.get("user", "")
+            b = row.get("assistant", "")
+            u, b = u.strip(), b.strip()
+            if u and b:
+                pairs.append((u, b))
+        return pairs
+    except Exception: return []
 
 
 if TORCH_AVAILABLE:
