@@ -892,7 +892,7 @@ def execute_action_by_dict(action_dict: dict) -> str:
     task_str = "\n".join(task_parts)
     
     
-    _prime_oi_with_3b()
+    _prime_oi_with_control()
     return _run_oi_task(task_str)
 
 
@@ -927,15 +927,15 @@ def _is_complex_action(action: str) -> bool:
     return True
 
 
-def _prime_oi_with_3b():
+def _prime_oi_with_control():
     
     if not OI_AVAILABLE:
         return
     from src.iris_engine import ModelRole, load_model, _model_pool
     
     try:
-        load_model(ModelRole.CODE)
-        logger.info("[OI] Primed with 3B CODE model for complex action.")
+        load_model(ModelRole.CONTROL)
+        logger.info("[OI] Primed with CONTROL model for complex action.")
     except Exception as e:
         logger.warning(f"[OI] Could not prime 3B model: {e}")
 
@@ -946,8 +946,8 @@ def _generate_control_action(messages: list, user_query: str = "", max_tokens: i
 
     from src.iris import ModelRole, load_model
 
-    logger.info("[Model] Using CODE model for control action")
-    llm = load_model(ModelRole.CODE)
+    logger.info("[Model] Using CONTROL model for control action")
+    llm = load_model(ModelRole.CONTROL)
 
     out = ""
     for chunk in llm.create_chat_completion(

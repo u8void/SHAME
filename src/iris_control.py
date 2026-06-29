@@ -8,7 +8,7 @@ def get_control_prompt(identity: str = "") -> str:
     return "You are the Iris AI Control node."
 
 def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -> Generator[Dict[str, str], None, None]:
-    from src.controller import _oi, OI_AVAILABLE, _prime_oi_with_3b
+    from src.controller import _oi, OI_AVAILABLE, _prime_oi_with_control
 
     if not OI_AVAILABLE:
         err_msg = "Open Interpreter is not available. Please install it with `pip install open-interpreter`."
@@ -18,7 +18,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
 
     # Initialize the Open Interpreter model wrapper
     yield {"type": "status", "content": "Initializing Open Interpreter..."}
-    _prime_oi_with_3b()
+    _prime_oi_with_control()
 
     _oi.messages = []
     

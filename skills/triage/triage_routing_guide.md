@@ -14,7 +14,7 @@ The router emits **exactly one** JSON object and nothing else:
 
 ```json
 {
-  "route": "SEARCH | REASONING | GENERAL | MATH | CODE_SIMPLE | CODE_COMPLEX | CONTROL | VISION",
+  "route": "SEARCH | REASONING | GENERAL | MATH | CODE | CONTROL | VISION",
   "keywords": "string | null",
   "confidence": 0.0
 }
@@ -46,7 +46,7 @@ The router emits **exactly one** JSON object and nothing else:
 | `iris_001` | Triage | Entry-point classifier (this spec) |
 | `iris_002` | Control | OS/hardware/app automation, sandboxed |
 | `iris_003` | Math | Formal mathematics, proofs, symbolic logic |
-| `iris_004` | Coding | Code generation, simple and multi-file |
+| `iris_004` | Coding | Code generation, web apps, projects, snippets |
 | `iris_005` | Reasoning | Analysis, planning, document reading, summarization |
 | `iris_006` | General | Conversational fallback, creative writing |
 | `iris_007` | Vision | Multimodal / image input (loads CLIP-style projection layer) |
@@ -120,25 +120,16 @@ physics calculations.
 expressions.
 **Anchor:** "Prove that there are infinitely many primes." → `{"route": "MATH", "keywords": null, "confidence": 0.96}`
 
-### 4.5 `CODE_SIMPLE`
-**Intent:** Isolated, single-file programming tasks. Includes canvas/SVG/procedural-art/animation
-requests per the paper's explicit override.
-**Triggers:** "write a python function", "fix this regex", "create an HTML button", "bash
-script to move files", "canvas animation".
-**Anchor:** "Make a canvas animation of a bouncing ball." → `{"route": "CODE_SIMPLE", "keywords": null, "confidence": 0.95}`
-
-### 4.6 `CODE_COMPLEX`
-**Intent:** Multi-file projects, full web/desktop apps, large refactors, pasted tracebacks from
-substantial codebases.
-**Triggers:** "build an app", "create a website", "full project", "entire project", large
-traceback paste.
-**Anchor:** "Build a complete full-stack app with React and Node." → `{"route": "CODE_COMPLEX", "keywords": null, "confidence": 0.97}`
-**Disambiguation rule:** "write a script to delete files" → `CODE_COMPLEX`/`CODE_SIMPLE`
+### 4.5 `CODE`
+**Intent:** All programming tasks, code snippets, web apps, games, multi-file code. Includes canvas/SVG/procedural-art/animation requests.
+**Triggers:** "write a python function", "fix this regex", "build an app", "create a website", "full project", large codebase paste.
+**Anchor:** "Build a complete full-stack app with React and Node." → `{"route": "CODE", "keywords": null, "confidence": 0.97}`
+**Disambiguation rule:** "write a script to delete files" → `CODE`
 (they're asking for code). "Delete the files in my downloads folder" → `CONTROL` (they're
 asking the system to *act*). The distinguishing test is asked-for-code vs. asked-for-action,
 not the presence of the word "delete."
 
-### 4.7 `CONTROL`
+### 4.6 `CONTROL`
 **Intent:** Direct manipulation of the host OS, hardware, or local apps.
 **Triggers:** "open Spotify", "set brightness", "check battery", "send a WhatsApp message",
 "empty trash", "restart".
@@ -151,7 +142,7 @@ must never be tricked into treating "this looks like a CONTROL-shaped request" a
 to "this action is approved." That approval step lives downstream and is out of scope for
 this spec.
 
-### 4.8 `VISION`
+### 4.7 `VISION`
 **Intent:** Any query referencing an attached/uploaded image, requiring visual question
 answering.
 **Triggers:** presence of an image attachment + a question about its contents.
@@ -189,10 +180,10 @@ Two honest caveats worth stating plainly:
 | "Why did the Roman Empire fall?" | `REASONING` | explanatory, not a live-fact lookup |
 | "Write me a haiku about the sea" | `GENERAL` | creative writing |
 | "Solve x^2 - 5x + 6 = 0" | `MATH` | symbolic equation |
-| "Reverse a string in JS" | `CODE_SIMPLE` | single isolated snippet |
-| "Build me a full e-commerce site with cart + auth" | `CODE_COMPLEX` | multi-file, multi-feature |
+| "Reverse a string in JS" | `CODE` | coding snippet |
+| "Build me a full e-commerce site with cart + auth" | `CODE` | multi-file project |
 | "Set my brightness to 50%" | `CONTROL` | host hardware action |
 | [image] "Is this mushroom safe to eat?" | `VISION` | image-grounded question |
 | "How do I make a pizza?" | `REASONING` | imperative verb, no code/system noun co-occurrence |
 | "Delete the files in my Downloads folder" | `CONTROL` | requesting the action, not the code |
-| "Write a script that deletes temp files older than 30 days" | `CODE_SIMPLE`/`CODE_COMPLEX` | requesting the code |
+| "Write a script that deletes temp files older than 30 days" | `CODE` | requesting the code |

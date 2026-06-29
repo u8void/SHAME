@@ -170,8 +170,7 @@ class ModelRole(str, Enum):
 
 
 class TaskType(str, Enum):
-    CODING_SIMPLE  = "coding_simple"
-    CODING_COMPLEX = "coding_complex"
+    CODE           = "code"
     MATH           = "math"
     REASONING      = "reasoning"
     GENERAL        = "general"
