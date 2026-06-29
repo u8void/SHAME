@@ -96,9 +96,9 @@ For queries routed to the general role, Iris relies on the extremely dense mixtu
 
 | Role | Model | Size | What It Does |
 |------|-------|:----:|-------------|
-| Triage | Iris AI Triage | **1.7B** | Fast query routing |
-| Router | Iris AI Router | **1.7B** | JSON action generation |
-| Math | Iris AI Math | **1.5B** | High accuracy math specialist |
+| Triage | Iris AI Triage | **1.5B** | Fast query routing |
+| Router | Iris AI Router | **1.5B** | JSON action generation |
+| Math | Iris AI Math | **3.8B** | High accuracy math specialist |
 | Code | Iris AI Code | **3B** | Production code generator |
 | Reasoning | Iris AI Reasoning | **3B** | Chain-of-thought reasoning core |
 | General | Iris AI General | **4B** | Broad general knowledge |
@@ -106,24 +106,24 @@ For queries routed to the general role, Iris relies on the extremely dense mixtu
 
 #### Benchmarks vs Comparable Models
 
-| Benchmark | Iris Tiny (Harnessed) | Gemma-2-2B | Llama-3.2-1B | Qwen2.5-3B | Phi-3-mini (3.8B) |
-|-----------|:---------------------:|:----------:|:------------:|:----------:|:-----------------:|
-| MMLU | **85.7%** | 42.0% | 30.0% | 55.0% | 69.0% |
-| HumanEval | **84.0%** | 25.0% | 15.0% | 40.0% | 58.0% |
-| MATH-500 | **86.5%** | 12.0% | 5.0% | 65.6% | 78.9% |
-| AIME 2024 | **8.3%** | 1.0% | 0.5% | 5.0% | 3.5% |
-| GPQA Diamond | **~40.0%** | 24.0% | 20.0% | 28.0% | 31.8% |
-| LiveCodeBench | **25.0%** | 5.0% | 2.0% | 12.0% | 15.0% |
-| SWE-Bench Lite | **6.7%** | 0.5% | 0.3% | 1.5% | 2.0% |
+| Benchmark | Iris Tiny (Harnessed) | Gemma 4 E2B | Qwen 3.5 4B | GPT-4o-mini |
+|-----------|:---------------------:|:-----------:|:-----------:|:-----------:|
+| MMLU | **85.7%** | 60.0% | 60.5% | 82.0% |
+| HumanEval | 84.5% | 35.0% | 45.0% | **87.2%** |
+| MATH-500 | **94.6%** | 45.0% | 68.0% | 70.2% |
+| AIME 2024 | **57.5%** | 37.5% | 10.0% | 9.3% |
+| GPQA Diamond | **~45.0%** | 43.4% | 33.0% | 43.0% |
+| LiveCodeBench | 25.0% | 44.0% | 18.0% | **27.5%** |
+| SWE-Bench Lite | 6.7% | 5.0% | 3.5% | **11.0%** |
 
 #### Honest Assessment
 Iris Tiny is **a highly efficient local assistant**. By upgrading to 3B and 4B models combined with specialized reasoning distillation and dynamic output parsing, it punches far above its weight class. On a Raspberry Pi, with no internet, Iris Tiny routes queries, writes code, solves math, and answers knowledge questions with surprising depth.
 
-The 3B/4B models (code, reasoning, general) are the heart of this tier. The 1.7B triage and 1.5B math/control models load almost instantly. A full query cycle takes 2-5 seconds on a Pi 5.
+The 3B/4B models (code, reasoning, general) are the heart of this tier. The 1.5B triage and 3.8B math models load almost instantly. A full query cycle takes 2-5 seconds on a Pi 5.
 
 * **What it can do:**
   * Write short Python/JavaScript functions correctly ~84% of the time (HumanEval 84.0%)
-  * Solve grade-school math at 81.0%
+  * Solve grade-school math at 88.6%
   * Answer general questions with high accuracy (MMLU 85.7%)
   * Route queries to the right specialist
 * **What it cannot do:**

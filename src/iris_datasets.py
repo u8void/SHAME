@@ -311,7 +311,57 @@ def load_self_oss_instruct(subset_size=None):
     except Exception: return []
 
 
+def load_agentic_cot_coding_dataset(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        ds = load_dataset("AlicanKiraz0/Agentic-Chain-of-Thought-Coding-SFT-Dataset", split="train", streaming=True)
+        if subset_size:
+            try: ds = ds.shuffle(buffer_size=10000, seed=42)
+            except Exception: pass
+        pairs = []
+        for row in ds:
+            if subset_size and len(pairs) >= subset_size: break
+            u = row.get("user", "")
+            b = row.get("assistant", "")
+            u, b = u.strip(), b.strip()
+            if u and b:
+                pairs.append((u, b))
+        return pairs
+    except Exception: return []
 
+def load_deepmind_code_contests(subset_size=None):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        ds = load_dataset("deepmind/code_contests", split="train", streaming=True)
+        if subset_size:
+            try: ds = ds.shuffle(buffer_size=10000, seed=42)
+            except Exception: pass
+        pairs = []
+        for row in ds:
+            if subset_size and len(pairs) >= subset_size: break
+            desc = row.get("description", "").strip()
+            solutions = row.get("solutions", {})
+            if not desc or not solutions: continue
+            
+            sols = solutions.get("solution", [])
+            langs = solutions.get("language", [])
+            
+            best_sol = None
+            if sols and langs and len(sols) == len(langs):
+                # Try to find a python solution first
+                for i, lang in enumerate(langs):
+                    if lang == 3: # Python 3 (language codes in dataset: 3 is Python 3)
+                        best_sol = sols[i]
+                        break
+                if not best_sol and sols:
+                    best_sol = sols[0]
+            elif sols:
+                best_sol = sols[0]
+                
+            if desc and best_sol:
+                pairs.append((desc, best_sol))
+        return pairs
+    except Exception: return []
 
 
 if TORCH_AVAILABLE:
