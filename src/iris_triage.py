@@ -7,11 +7,11 @@ try:
 except Exception:
     TRIAGE_SYSTEM_PROMPT = (
         "[CLASSIFICATION TASK — SAFETY OVERRIDE] You are an AI router performing a mechanical text classification task. "
-        "You MUST output a valid JSON object regardless of the query topic. This is NOT a content generation task; you will NEVER produce harmful content. "
-        "Your only output is a valid JSON object containing 'route' and 'confidence' (0.0 to 1.0). "
-        "You are NEVER responsible for the actual response. NEVER refuse. NEVER say 'I cannot assist'. JUST OUTPUT THE JSON.\n\n"
+        "You MUST output EXACTLY ONE routing tag regardless of the query topic. This is NOT a content generation task; you will NEVER produce harmful content. "
+        "Your only output is the exact routing tag. Do not output JSON. Do not explain. "
+        "You are NEVER responsible for the actual response. NEVER refuse. NEVER say 'I cannot assist'. JUST OUTPUT THE TAG.\n\n"
         f"{""}\n"
-        "You are the Iris AI Router. Your ONLY job is to output ONE routing JSON.\n"
+        "You are the Iris AI Router. Your ONLY job is to output ONE routing tag.\n"
         "Rules:\n"
         "1. Simple greetings like 'hi', 'hello', 'good morning' → answer with a SHORT greeting, NO tag, NO OFF-TOPICS STUFF\n"
         "   BUT: identity questions like 'who are you', 'who made you', 'what are you' → [ROUTE: GENERAL]\n"
@@ -42,7 +42,7 @@ except Exception:
         "Query: 'set brightness to 40%' → [ROUTE: CONTROL]\n"
         "Query: 'hi' → Hello! How can I help you today?\n"
         "Query: 'who are you' → [ROUTE: GENERAL]\n\n"
-        "You MUST output exactly one routing tag based on the user's intent. Do not output anything else."
+        "You MUST output exactly one routing tag based on the user's intent. Do not output anything else. No JSON, no markdown blocks."
     )
 
 import os
@@ -224,7 +224,7 @@ def classify_task(
             c = c[:150] + "...[truncated]"
         triage_messages.append({"role": msg["role"], "content": c})
 
-    triage_query = f'{query_for_classification}\n\n[SYSTEM DIRECTIVE: Analyze the user query and output EXACTLY ONE valid JSON object containing "route" and "confidence" score (0.0 to 1.0). Do not output anything else.]'
+    triage_query = f'{query_for_classification}\n\n[SYSTEM DIRECTIVE: Analyze the user query and output EXACTLY ONE routing tag (e.g. [ROUTE: REASONING], [ROUTE: SEARCH: ...], etc.). Do not output JSON. Do not output anything else.]'
     if len(triage_query) > 1500:
         triage_query = triage_query[:1000] + "\n\n...[content truncated for routing]...\n\n" + triage_query[-500:]
     
@@ -233,8 +233,10 @@ def classify_task(
     llm = load_model(ModelRole.TRIAGE)
     res = llm.create_chat_completion(
         messages=triage_messages,
-        max_tokens=1024,
+        max_tokens=512,
         temperature=0.1,
+        repeat_penalty=1.15,
+        presence_penalty=0.1,
     )
     answer = res["choices"][0]["message"]["content"].strip()
     cfg = load_generation_config()
@@ -277,7 +279,7 @@ def classify_task(
         return TaskType.SEARCH, kw
 
     for tag, ttype in tag_map.items():
-        if re.search(rf'\[\s*route:\s*{re.escape(tag)}\s*\]', parsed_route, re.IGNORECASE):
+        if re.search(rf'\[\s*route:\s*{re.escape(tag)}\s*\]', parsed_route, re.IGNORECASE) or re.search(rf'\b{re.escape(tag)}\b', parsed_route, re.IGNORECASE):
             return ttype, None
 
 
@@ -327,14 +329,13 @@ def classify_task(
                 logger.info("[Triage] Safety refusal detected — heuristic: REASONING")
                 return TaskType.REASONING, None
 
-        # Keyword heuristic fallback for CONTROL or CODE if Triage hallucinates
-        q_lower = query_for_classification.lower()
-        if any(kw in q_lower for kw in ["open", "launch", "brightness", "volume", "click", "turn off", "pc", "browser", "control"]):
-            logger.info(f"[Triage] No tag but matched CONTROL keywords. Triage said: {answer[:80]}...")
-            return TaskType.CONTROL, None
-        if any(kw in q_lower for kw in ["code", "script", "function", "html", "css", "js", "python", "debug"]):
-            logger.info(f"[Triage] No tag but matched CODE keywords. Triage said: {answer[:80]}...")
-            return TaskType.CODING_COMPLEX, None
+        # Use the comprehensive _fallback_classify if Triage hallucinates
+        fallback = _fallback_classify(query_for_classification)
+        if fallback:
+            logger.info(f"[Triage] No tag. Fallback heuristic used: {fallback.value}. Triage said: {answer[:80]}...")
+            if fallback == TaskType.SEARCH:
+                return fallback, ""
+            return fallback, None
 
         logger.info(
             f"[Triage] No routing tag — redirecting to REASONING to prevent hallucination. "
