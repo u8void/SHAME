@@ -108,6 +108,10 @@
       {
         "path": "deepmind/code_contests",
         "max_samples": 8000
+      },
+      {
+        "path": "ByteDance-Seed/Code-Contests-Plus",
+        "max_samples": 10000
       }
     ],
     "local_dirs": [

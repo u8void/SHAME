@@ -175,6 +175,7 @@ LOADER_FUNCTIONS = {
     "bigcode/self-oss-instruct-sc2-exec-filter-50k": load_self_oss_instruct,
     "AlicanKiraz0/Agentic-Chain-of-Thought-Coding-SFT-Dataset": load_agentic_cot_coding_dataset,
     "deepmind/code_contests": load_deepmind_code_contests,
+    "ByteDance-Seed/Code-Contests-Plus": load_deepmind_code_contests,
 }
 
 def load_generic_hf_dataset(path: str, limit: int = None) -> List[Tuple[str, str]]:
