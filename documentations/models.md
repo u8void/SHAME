@@ -22,9 +22,9 @@ Iris uses **8 distinct roles**, each backed by a specialized GGUF model. The rol
 ### Tiny — 14B params (4 GB RAM)
 | Role | Model | Parameters |
 |------|-------|------------|
-| Triage | Iris AI Triage | 1.5B |
-| Router | Iris AI Router | 1.5B |
-| Math | Iris AI Math | 3.8B |
+| Triage | Iris AI Triage | 1.7B |
+| Router | Iris AI Router | 1.7B |
+| Math | Iris AI Math | 1.5B |
 | Code | Iris AI Code | 3B |
 | Reasoning | Iris AI Reasoning | 4B |
 | General | Iris AI General | 4B |

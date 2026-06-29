@@ -102,7 +102,7 @@ def _run_continuation(
          "Fix errors, fill gaps, ensure consistency. Return the final corrected code inside a ```python``` block, followed by a brief explanation."}
     ]
     reviewed = ""
-    for ev in _stream_tokens(ModelRole.REVIEWER, review_msgs, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings, system_prompt_override=get_reviewer_prompt("Iris")):
+    for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings, system_prompt_override=get_reviewer_prompt("Iris")):
         yield ev
         if ev["type"] == "token":
             reviewed += ev["content"]
@@ -297,7 +297,7 @@ def _run_complex_coding(
          "IMPORTANT: Immediately AFTER the code block, you MUST write a detailed explanation of the code and its features for the user."}
     ]
     final_output = ""
-    for ev in _stream_tokens(ModelRole.REVIEWER, review_msgs, max_tokens=None, temperature=0.4, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings):
+    for ev in _stream_tokens(ModelRole.REASONING, review_msgs, max_tokens=None, temperature=0.4, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings):
         yield ev
         if ev["type"] == "token":
             final_output += ev["content"]
@@ -323,7 +323,7 @@ def _run_complex_coding(
                  "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code inside a ```python``` block."}
             ]
             corrected = ""
-            for ev in _stream_tokens(ModelRole.REVIEWER, correction_msgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris")):
+            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris")):
                 yield ev
                 if ev["type"] == "token":
                     corrected += ev["content"]
@@ -357,7 +357,7 @@ def _run_complex_coding(
             {"role": "user", "content": "Final review pass. Fix remaining issues inside a code block with filename. YOU MUST OUTPUT THE ENTIRE COMPLETE FILE WITH ALL ORIGINAL CONTENT INCLUDED (e.g., if it was an HTML file containing HTML/CSS/JS, output the full HTML file). Never output just a snippet. If there are no issues, just output 'No issues found.'"}
         ]
         _rev = ""
-        for ev in _stream_tokens(ModelRole.REVIEWER, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris")):
+        for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris")):
             yield ev
             if ev["type"] == "token":
                 _rev += ev["content"]
@@ -464,7 +464,7 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
                 {"role": "user", "content": "Review this code for correctness, edge cases, performance, and best practices. Fix issues inside a code block with filename comment. YOU MUST OUTPUT THE ENTIRE COMPLETE FILE WITH ALL ORIGINAL CONTENT INCLUDED (e.g., if it was an HTML file containing HTML/CSS/JS, output the full HTML file). Never output just a snippet. If there are no issues, just output 'No issues found.'"}
             ]
             _rev = ""
-            for ev in _stream_tokens(ModelRole.REVIEWER, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris")):
+            for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris")):
                 yield ev
                 if ev["type"] == "token":
                     _rev += ev["content"]
@@ -479,7 +479,7 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
     yield {"type": "raw_response", "content": full}
 
 
-def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -> Generator[Dict[str, str], None, None]:
+def run_stream(user_query: str, history: list, retriever: Any, settings: dict, is_complex: bool = False) -> Generator[Dict[str, str], None, None]:
     # 1. RAG
     context = ""
     if retriever is not None and len(user_query.split()) >= 3:
@@ -508,4 +508,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     if history:
         optimized = [{"role": m["role"], "content": m["content"]} for m in history] + optimized
         
-    yield from _run_simple_coding(user_query, history, optimized, settings)
+    if is_complex:
+        yield from _run_complex_coding(user_query, history, optimized, context, retriever, settings)
+    else:
+        yield from _run_simple_coding(user_query, history, optimized, settings)

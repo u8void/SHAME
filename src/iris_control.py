@@ -8,21 +8,12 @@ def get_control_prompt(identity: str = "") -> str:
     return "You are the Iris AI Control node."
 
 def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -> Generator[Dict[str, str], None, None]:
-    from src.controller import _oi, OI_AVAILABLE, _prime_oi_with_control
+    from src.controller import (
+        _get_agent_system_prompt, parse_ai_response, execute_action_by_dict,
+    )
+    from src.system_actions import is_complex_control
 
-    if not OI_AVAILABLE:
-        err_msg = "Open Interpreter is not available. Please install it with `pip install open-interpreter`."
-        yield {"type": "token", "content": err_msg}
-        yield {"type": "raw_response", "content": err_msg}
-        return
-
-    # Initialize the Open Interpreter model wrapper
-    yield {"type": "status", "content": "Initializing Open Interpreter..."}
-    _prime_oi_with_control()
-
-    _oi.messages = []
-    
-    # 1. RAG
+    # 1. RAG (Optional for control, but included for completeness)
     context = ""
     if retriever is not None and len(user_query.split()) >= 3:
         # Avoid RAG for short commands like "open it"
