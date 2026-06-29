@@ -78,9 +78,11 @@ no file/system nouns) routes it to `REASONING` instead.
 ### 4.1 `SEARCH`
 **Intent:** Real-time facts, current events, biographical/geographic/historical data, product
 info, definitions that may be time-sensitive.
-**Triggers:** "who is", "what is the current...", "when did", "how many [people/things]",
+**Triggers:** "who is", "what is", "where is", "when did", "how many [people/things]",
 "latest", "price of", named entities + present tense.
 **Anchor:** "What is the capital of France?" → `{"route": "SEARCH", "keywords": "capital of France", "confidence": 0.97}`
+**Anchor (Abstract concept lookup):** "What is bury the light?" → `{"route": "SEARCH", "keywords": "bury the light", "confidence": 0.98}`
+**Override Rule:** Any query starting with "what is X" or "who is X" MUST ALWAYS be routed to `SEARCH`, even if X sounds like an abstract concept, metaphor, or song title.
 **Note:** Static, non-time-sensitive facts that don't require freshness (e.g. "how many
 continents are there") may still route here if Stage A flags them as factual-lookup shaped;
 the downstream search harness (Section 3, three-tier fallback) handles the rest.

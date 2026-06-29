@@ -1,6 +1,6 @@
 
 import os
-_triage_guide_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "documentations", "triage_routing_guide.md")
+_triage_guide_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills", "triage", "triage_routing_guide.md")
 try:
     with open(_triage_guide_path, "r", encoding="utf-8") as _f:
         TRIAGE_SYSTEM_PROMPT = _f.read()
@@ -154,14 +154,19 @@ def classify_task(
         return TaskType.REASONING, None
 
     search_match = re.search(r'\[\s*route:\s*SEARCH:\s*(.*?)\s*\]', parsed_route, re.IGNORECASE)
-    if search_match:
+    if not search_match and parsed_route.upper().startswith("SEARCH"):
+        kw = parsed_route[6:].replace(":", "").strip()
+        if kw.lower() in ["keywords", "query"]:
+            kw = ""
+        return TaskType.SEARCH, kw
+    elif search_match:
         kw = search_match.group(1).strip()
         if kw.lower() in ["keywords", "query"]:
             kw = ""
         return TaskType.SEARCH, kw
 
     for tag, ttype in tag_map.items():
-        if re.search(rf'\[\s*route:\s*{re.escape(tag)}\s*\]', parsed_route, re.IGNORECASE):
+        if tag.upper() == parsed_route.upper().strip() or re.search(rf'\[\s*route:\s*{re.escape(tag)}\s*\]', parsed_route, re.IGNORECASE):
             return ttype, None
 
 
