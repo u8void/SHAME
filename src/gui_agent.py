@@ -11,7 +11,7 @@ try:
 except ImportError:
     pyautogui = None
 
-from src.iris import analyze_image
+from src.iris_vision import analyze_image
 
 
 def _type_text_reliably(text: str):
@@ -36,10 +36,20 @@ def _type_text_reliably(text: str):
     pyautogui.write(text, interval=0.05)
 
 
-def perform_gui_action(task: str, wait_seconds: float = 3.0) -> str:
+def perform_gui_action(task: str, wait_seconds: float = 1.5) -> str:
     
     if pyautogui is None:
-        return "[ERROR] GUI action failed: pyautogui is not installed. Please run `pip install pyautogui`."
+        err = "[ERROR] GUI action failed: pyautogui is not installed. Please run `pip install pyautogui`."
+        print(err)
+        return err
+
+    session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
+    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").upper()
+    if session_type == "wayland" and "GNOME" in desktop:
+        err = "[ERROR] GUI action failed: You are running GNOME Wayland. GNOME Wayland's security model blocks programmatic screenshots and simulated mouse/keyboard inputs. To use Iris Vision GUI automation, you MUST log out and select 'GNOME on Xorg' (X11) from the login screen gear menu."
+        print(err)
+        return err
+
 
     
     if wait_seconds > 0:
@@ -52,7 +62,9 @@ def perform_gui_action(task: str, wait_seconds: float = 3.0) -> str:
         pyautogui.screenshot(screenshot_path)
         screen_w, screen_h = pyautogui.size()
     except Exception as e:
-        return f"[ERROR] GUI action failed: Could not capture screen: {e}"
+        err = f"[ERROR] GUI action failed: Could not capture screen: {e}"
+        print(err)
+        return err
 
     
     prompt = f"""You are a GUI automation agent controlling the user's mouse and keyboard.
@@ -129,8 +141,14 @@ Example for sending a WhatsApp message:
                 print(f"  [GUI] Sleeping {sec}s")
                 time.sleep(sec)
 
-        return "[SUCCESS] GUI task executed successfully."
+        success_msg = "[SUCCESS] GUI task executed successfully."
+        print(success_msg)
+        return success_msg
     except json.JSONDecodeError:
-        return f"[ERROR] GUI task failed: Vision model returned non-JSON response:\n{response}"
+        err = f"[ERROR] GUI task failed: Vision model returned non-JSON response:\n{response}"
+        print(err)
+        return err
     except Exception as e:
-        return f"[ERROR] GUI task failed: {e}"
+        err = f"[ERROR] GUI task failed: {e}"
+        print(err)
+        return err
