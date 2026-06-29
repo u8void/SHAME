@@ -824,10 +824,10 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
         return _new_llm
 
 
-def unload_model(force_all: bool = False) -> None:
+def unload_model(role_to_evict: str = None, force_all: bool = False) -> None:
     
     with _model_lock:
-        _unload_locked(None, force_all=force_all)
+        _unload_locked(role_to_evict, force_all=force_all)
 
 
 def _force_unload_all_models() -> None:

@@ -630,7 +630,14 @@ def parse_ai_response(text: str) -> dict | None:
     try:
         return json.loads(match.group())
     except json.JSONDecodeError:
-        return None
+        # Fallback: fix unquoted words (like max, on, off) produced by tiny models
+        raw = match.group()
+        fixed_json = re.sub(r'(:\s*)([a-zA-Z_][a-zA-Z0-9_]*)(\s*[,}])', r'\1"\2"\3', raw)
+        fixed_json = fixed_json.replace('"True"', 'true').replace('"False"', 'false')
+        try:
+            return json.loads(fixed_json)
+        except json.JSONDecodeError:
+            return None
 
 
 def ai_agent_handle(user_input: str, retriever=None, history=None, **kwargs):
@@ -795,9 +802,13 @@ def _dispatch_action(action: str, d: dict) -> str:
     return None
 
 def _pct(val) -> int:
-    
+    val_str = str(val).lower().replace("%", "").strip()
+    if val_str == "max":
+        return 100
+    if val_str == "min":
+        return 0
     try:
-        return max(0, min(100, int(float(str(val).replace("%", "").strip()))))
+        return max(0, min(100, int(float(val_str))))
     except (ValueError, TypeError):
         return 50
 

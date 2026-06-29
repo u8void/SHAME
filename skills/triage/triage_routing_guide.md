@@ -16,7 +16,7 @@ The router emits **exactly one** JSON object and nothing else:
 {
   "route": "SEARCH | REASONING | GENERAL | MATH | CODE_SIMPLE | CODE_COMPLEX | CONTROL | VISION",
   "keywords": "string | null",
-  "confidence": 0.0
+  "confidence": 0.99
 }
 ```
 
@@ -80,9 +80,10 @@ no file/system nouns) routes it to `REASONING` instead.
 info, definitions that may be time-sensitive.
 **Triggers:** "who is", "what is", "where is", "when did", "how many [people/things]",
 "latest", "price of", named entities + present tense.
+**OVERRIDE RULE (ABSOLUTE PRIORITY):** ANY QUERY STARTING WITH "what is", "who is", "where is", OR "when did" MUST ALWAYS BE ROUTED TO `SEARCH`. DO NOT ROUTE TO REASONING OR GENERAL, EVEN IF THE QUERY SOUNDS ABSTRACT, METAPHORICAL, OR LIKE A SONG TITLE.
 **Anchor:** "What is the capital of France?" → `{"route": "SEARCH", "keywords": "capital of France", "confidence": 0.97}`
 **Anchor (Abstract concept lookup):** "What is bury the light?" → `{"route": "SEARCH", "keywords": "bury the light", "confidence": 0.98}`
-**Override Rule:** Any query starting with "what is X" or "who is X" MUST ALWAYS be routed to `SEARCH`, even if X sounds like an abstract concept, metaphor, or song title.
+**Anchor (Video Game/Song lookup):** "what is devil trigger" → `{"route": "SEARCH", "keywords": "devil trigger", "confidence": 0.99}`
 **Note:** Static, non-time-sensitive facts that don't require freshness (e.g. "how many
 continents are there") may still route here if Stage A flags them as factual-lookup shaped;
 the downstream search harness (Section 3, three-tier fallback) handles the rest.
@@ -93,6 +94,7 @@ letter/character counting, "why/how does X work," advice, and **any query Stage 
 confidently place elsewhere**.
 **Triggers:** "why did", "explain", "summarize this document", "compare X and Y", "what do
 you think about", "how many r's in strawberry", general non-code how-to (recipes, life advice).
+**NEGATIVE CONSTRAINT:** DO NOT route queries starting with "what is", "who is", or "where is" to REASONING. Those MUST go to `SEARCH`.
 **Anchor:** "How many r's in strawberry?" → `{"route": "REASONING", "keywords": null, "confidence": 0.95}`
 **Anchor (disambiguation case):** "How do I make a pizza?" → `{"route": "REASONING", "keywords": null, "confidence": 0.93}`
 — the verb "make" does not co-occur with any programming or system noun, so Stage A routes
@@ -104,10 +106,10 @@ instruction for downstream roles; that would just move the vulnerability one hop
 of closing it.
 
 ### 4.3 `GENERAL`
-**Intent:** Casual chat, creative writing, storytelling, poetry, roleplay, identity questions
-("who are you"), current time/date.
-**Triggers:** "tell me a story", "who are you", "what time is it in X".
-**Anchor:** "Who are you?" → `{"route": "GENERAL", "keywords": null, "confidence": 0.98}`
+**Intent:** Casual chat, creative writing, storytelling, poetry, roleplay, identity questions.
+**Triggers:** "tell me a story", "hello", "good morning".
+**NEGATIVE CONSTRAINT:** DO NOT route queries starting with "what is", "who is", or "where is" to GENERAL. Those MUST go to `SEARCH`.
+**Anchor:** "Write a poem about the ocean." → `{"route": "GENERAL", "keywords": null, "confidence": 0.98}`
 **Greeting handling:** Simple greetings ("hi", "hello") still receive a full route classification
 to `GENERAL` — the harness layer, not the router, decides whether to short-circuit with a
 canned reply. Keeping that decision out of the classification contract removes a second

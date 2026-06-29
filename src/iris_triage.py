@@ -106,7 +106,7 @@ def classify_task(
     answer = res["choices"][0]["message"]["content"].strip()
     cfg = load_generation_config()
     if not _keep_loaded and not cfg.get("keep_triage_loaded"):
-        unload_model()
+        unload_model(ModelRole.TRIAGE)
 
     logger.info(f"[Triage] Raw answer: {answer!r}")
 
@@ -121,7 +121,10 @@ def classify_task(
         "CONTROL":        TaskType.CONTROL,
     }
 
-    # 1. Try parsing JSON format as defined in triage_routing_guide.md
+    # Attempt to parse JSON first
+    parsed_route = answer
+    confidence = 1.0
+     # 1. Try parsing JSON format as defined in triage_routing_guide.md
     try:
         json_str = answer.strip()
         if "```" in json_str:
@@ -143,11 +146,19 @@ def classify_task(
     except Exception:
         pass
 
-    # 2. Fallback to bracket/plain parsing
-    search_match = re.search(r'\[\s*route:\s*SEARCH:\s*(.*?)\s*\]', answer, re.IGNORECASE)
-    if search_match:
+    if confidence < 0.70:
+        logger.info(f"[Routing] Confidence {confidence:.2f} < 0.70. Falling back to REASONING.")
+        return TaskType.REASONING, None
+
+    search_match = re.search(r'\[\s*route:\s*SEARCH:\s*(.*?)\s*\]', parsed_route, re.IGNORECASE)
+    if not search_match and parsed_route.upper().startswith("SEARCH"):
+        kw = parsed_route[6:].replace(":", "").strip()
+        if kw.lower() in ["keywords", "query"]:
+            kw = ""
+        return TaskType.SEARCH, kw
+    elif search_match:
         kw = search_match.group(1).strip()
-        if kw.lower() in ["keywords", "query", ""]:
+        if kw.lower() in ["keywords", "query"]:
             kw = ""
         return TaskType.SEARCH, kw
 
