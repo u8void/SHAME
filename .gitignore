@@ -16,3 +16,4 @@ models/
 *.pkl
 iris_adapters/
 .claude/
+last_request.json
