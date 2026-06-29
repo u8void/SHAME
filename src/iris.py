@@ -55,7 +55,7 @@ def ask_stream(
         
         # Map ModelRole to TaskType
         role_map = {
-            ModelRole.CODE: TaskType.CODING_COMPLEX,
+            ModelRole.CODE: TaskType.CODE,
             ModelRole.MATH: TaskType.MATH,
             ModelRole.REASONING: TaskType.REASONING,
             ModelRole.GENERAL: TaskType.GENERAL,
@@ -98,9 +98,6 @@ def ask_stream(
     elif task_type == TaskType.MATH:
         from src.iris_math import run_stream
         yield from run_stream(user_query, history, retriever, settings)
-    elif task_type == TaskType.CODING_SIMPLE:
+    elif task_type == TaskType.CODE:
         from src.iris_coding import run_stream
-        yield from run_stream(user_query, history, retriever, settings, is_complex=False)
-    elif task_type == TaskType.CODING_COMPLEX:
-        from src.iris_coding import run_stream
-        yield from run_stream(user_query, history, retriever, settings, is_complex=True)
+        yield from run_stream(user_query, history, retriever, settings)

@@ -12,8 +12,7 @@ except Exception:
         "  [ROUTE: REASONING]         — how/why questions, step-by-step explanations, analysis, comparisons, counting letters/characters, summaries\n"
         "  [ROUTE: GENERAL]           — casual chat, greetings, opinions, creative writing, identity questions\n"
         "  [ROUTE: MATH]              — math problems, equations, proofs, calculations\n"
-        "  [ROUTE: CODE_SIMPLE]       — small code snippets, functions, HTML/CSS/JS elements, canvas animations, SVG graphics\n"
-        "  [ROUTE: CODE_COMPLEX]      — full projects, multi-file code, games, complete websites or web apps\n"
+        "  [ROUTE: CODE]              — coding requests, snippets, web apps, projects, debugging\n"
         "  [ROUTE: CONTROL]           — OS/PC commands, opening/closing apps, browser automation, email, power control, system settings\n\n"
         "Output ONLY the tag. Nothing else. No explanation. No JSON. Just the tag.\n"
         "For SEARCH routes, include keywords: [ROUTE: SEARCH: <keywords>]\n"
@@ -114,10 +113,8 @@ def classify_task(
         "GENERAL":        TaskType.GENERAL,
         "REASONING":      TaskType.REASONING,
         "MATH":           TaskType.MATH,
-        "CODING_SIMPLE":  TaskType.CODING_SIMPLE,
-        "CODE_SIMPLE":    TaskType.CODING_SIMPLE,
-        "CODING_COMPLEX": TaskType.CODING_COMPLEX,
-        "CODE_COMPLEX":   TaskType.CODING_COMPLEX,
+        "CODE":           TaskType.CODE,
+        "CODING":         TaskType.CODE,
         "CONTROL":        TaskType.CONTROL,
     }
 
