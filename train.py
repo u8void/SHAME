@@ -34,6 +34,7 @@ from src.iris_datasets import (
     load_open_code_reasoning,
     load_self_oss_instruct,
     load_agentic_cot_coding_dataset,
+    load_deepmind_code_contests,
 )
 
 SYSTEM_PROMPT = "You are Iris, an intelligent and helpful AI assistant trained to assist the user with their tasks."
@@ -173,6 +174,7 @@ LOADER_FUNCTIONS = {
     "nvidia/OpenCodeReasoning": load_open_code_reasoning,
     "bigcode/self-oss-instruct-sc2-exec-filter-50k": load_self_oss_instruct,
     "AlicanKiraz0/Agentic-Chain-of-Thought-Coding-SFT-Dataset": load_agentic_cot_coding_dataset,
+    "deepmind/code_contests": load_deepmind_code_contests,
 }
 
 def load_generic_hf_dataset(path: str, limit: int = None) -> List[Tuple[str, str]]:
