@@ -41,7 +41,6 @@ from src.logger import get_logger
 
 logger = get_logger("app")
 
-from src.iris_math import solve_math
 from src.iris_rag import BookRetriever
 from src.iris_vision import analyze_image
 global_generation_lock = threading.Lock()
@@ -218,15 +217,6 @@ def chat():
     if not user_message and not image_files and not doc_files:
         return jsonify({"reply": "Please send a valid message."}), 400
 
-    math_answer = solve_math(user_message)
-    if math_answer is not None:
-        def math_generate():
-            yield f"data: {json.dumps({'type': 'token', 'content': math_answer})}\n\n"
-        resp = Response(math_generate(), mimetype='text/event-stream')
-        resp.headers['X-Accel-Buffering'] = 'no'
-        resp.headers['Cache-Control']     = 'no-cache'
-        resp.headers['Connection']        = 'keep-alive'
-        return resp
 
     if PREVIEW_MODE:
         def preview_generate():

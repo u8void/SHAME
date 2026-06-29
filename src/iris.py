@@ -17,14 +17,7 @@ def ask_stream(
     if history is None:
         history = []
     
-    # Early math interceptor
-    from src.iris_math import solve_math
-    math_ans = solve_math(user_query)
-    if math_ans:
-        logger.info(f"Math solver intercepted query. Result: {math_ans}")
-        yield {"type": "token", "content": math_ans}
-        yield {"type": "raw_response", "content": math_ans}
-        return
+
 
     # Image checking and formatting
     original_query = user_query
@@ -82,17 +75,6 @@ def ask_stream(
         return
         
     if task_type == TaskType.SEARCH:
-        # Check introspection overrides
-        _INTROSPECTION_RE = re.compile(r'\b(how\s+many\s+[a-zA-Z0-9]\s+in|count\s+the\s+[a-zA-Z0-9]\s+in|starts\s+with|ends\s+with|position\s+of)\b', re.IGNORECASE)
-        _SPELL_RE = re.compile(r'\b(spell(ing)?|spell\s+out|how\s+do\s+you\s+spell|is\s+\w+\s+spelled\s+correctly)\b', re.IGNORECASE)
-        
-        if _INTROSPECTION_RE.search(original_query) or _SPELL_RE.search(original_query):
-            logger.info("[Routing] Overriding SEARCH → REASONING for letter/word introspection query.")
-            task_type = TaskType.REASONING
-            from src.iris_reasoning import run_stream
-            yield from run_stream(user_query, history, retriever, settings, do_search=False)
-            return
-            
         from src.iris_reasoning import run_stream
         yield from run_stream(user_query, history, retriever, settings, do_search=True, direct_answer=direct_answer)
         return

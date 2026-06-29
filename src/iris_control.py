@@ -1,86 +1,83 @@
-def get_control_prompt(identity: str = "") -> str:
-    return "You are the Iris AI Control node. Output automation actions in JSON format."
-
-
 import logging
 from typing import Generator, Dict, Any
 from src.iris_engine import ModelRole, load_model, unload_model, _keep_loaded
 
 logger = logging.getLogger('iris')
 
+def get_control_prompt(identity: str = "") -> str:
+    return "You are the Iris AI Control node."
+
 def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -> Generator[Dict[str, str], None, None]:
-    from src.controller import (
-        _get_agent_system_prompt, parse_ai_response, execute_action_by_dict,
-    )
-    from src.system_actions import get_hardcoded_action_json, is_complex_control
+    from src.controller import _oi, OI_AVAILABLE, _prime_oi_with_3b
 
-    # 1. RAG (Optional for control, but included for completeness)
+    if not OI_AVAILABLE:
+        err_msg = "Open Interpreter is not available. Please install it with `pip install open-interpreter`."
+        yield {"type": "token", "content": err_msg}
+        yield {"type": "raw_response", "content": err_msg}
+        return
+
+    # Initialize the Open Interpreter model wrapper
+    yield {"type": "status", "content": "Initializing Open Interpreter..."}
+    _prime_oi_with_3b()
+
+    _oi.messages = []
+    
+    # 1. RAG
     context = ""
-    if retriever is not None and len(user_query.split()) >= 3:
-        # Avoid RAG for short commands like "open it"
-        if len(user_query.split()) >= 6:
-            context = retriever.retrieve(user_query, top_k=1, category="control")
-            
-    final_query = user_query
+    if retriever is not None and len(user_query.split()) >= 6:
+        context = retriever.retrieve(user_query, top_k=1, category="control")
+
+    task = user_query
     if context:
-        final_query = (
-            f"<retrieved_context>\n{context}\n</retrieved_context>\n\n"
-            f"If the retrieved context is relevant, use it. Otherwise, ignore it.\n\n"
-            f"{final_query}"
-        )
+        task = f"<retrieved_context>\n{context}\n</retrieved_context>\n\nTask: {user_query}"
 
-    # Fast-path for hardcoded actions
-    hardcoded_json = get_hardcoded_action_json(final_query)
-    if hardcoded_json:
-        action_dict = parse_ai_response(hardcoded_json)
-        if action_dict:
-            action_name = action_dict.get("action", "unknown")
-            yield {"type": "status", "content": f"Executing: {action_name}"}
-            result = execute_action_by_dict(action_dict)
-            reply_text = f"Action '{action_name}' executed.\n\nResult:\n{result}"
-            yield {"type": "action_result", "content": f"Action '{action_name}' Executed.\nResult:\n{result}"}
-            yield {"type": "token", "content": reply_text}
-            yield {"type": "raw_response", "content": reply_text}
-            if not _keep_loaded:
-                unload_model()
-            return
-
-    yield {"type": "status", "content": "Generating computer command..."}
-    control_messages = [{"role": "system", "content": _get_agent_system_prompt()}, {"role": "user", "content": final_query}]
-    
-    # 2. History injection (if applicable for control tasks)
+    # 2. History injection
     if history:
-        # We inject the last 2 interactions so it has context for actions like "close it"
-        recent = history[-2:]
-        control_messages = [{"role": m["role"], "content": m["content"]} for m in recent] + control_messages
-    
-    if is_complex_control(user_query, history):
-        logger.info("[Routing] Complex control detected. Loading 3B model (ModelRole.CODE) for control action.")
-        control_llm = load_model(ModelRole.CODE)
-    else:
-        logger.info("[Routing] Simple control detected. Loading 0.5B model (ModelRole.CONTROL) for control action.")
-        control_llm = load_model(ModelRole.CONTROL)
-    
-    action_json = ""
-    for chunk in control_llm.create_chat_completion(messages=control_messages, max_tokens=1024, stream=True, temperature=0.1):
-        delta = chunk["choices"][0].get("delta", {})
-        if "content" in delta:
-            action_json += delta["content"]
+        recent = "\n".join([f"{m['role']}: {m['content']}" for m in history[-2:]])
+        task = f"Recent context:\n{recent}\n\nTask: {task}"
+
+    full_response = ""
+    yield {"type": "status", "content": "Executing via Open Interpreter..."}
+
+    try:
+        for chunk in _oi.chat(task, display=True, stream=True, blocking=True):
+            if not isinstance(chunk, dict):
+                continue
+                
+            chunk_type = chunk.get("type", "")
+            role = chunk.get("role", "")
+            content = chunk.get("content", "")
+            
+            text_to_yield = ""
+            
+            if chunk_type == "message" and role == "assistant":
+                if isinstance(content, str) and content:
+                    text_to_yield = content
+            elif chunk_type == "console" and chunk.get("format") == "output" and content:
+                text_to_yield = f"\n```\n{content}\n```\n"
+            elif role == "computer" and content:
+                if isinstance(content, list):
+                    for item in content:
+                        out = item.get("output", item.get("content", "")) if isinstance(item, dict) else ""
+                        if out:
+                            text_to_yield += f"\n```\n{out}\n```\n"
+                elif isinstance(content, str) and content:
+                    text_to_yield = f"\n```\n{content}\n```\n"
+                    
+            if text_to_yield:
+                full_response += text_to_yield
+                yield {"type": "token", "content": text_to_yield}
+
+    except Exception as e:
+        logger.error(f"[OI Control] Error: {e}")
+        yield {"type": "token", "content": f"\nExecution Error: {e}\n"}
+        full_response += f"\nError: {e}"
 
     if not _keep_loaded:
         unload_model()
 
-    action_dict = parse_ai_response(action_json)
-    if action_dict:
-        action_name = action_dict.get("action", "unknown")
-        yield {"type": "status", "content": f"Executing: {action_name}"}
-        result = execute_action_by_dict(action_dict)
-        reply_text = f"Action '{action_name}' executed.\n\nResult:\n{result}"
-        yield {"type": "action_result", "content": f"Action '{action_name}' Executed.\nResult:\n{result}"}
-        yield {"type": "token", "content": reply_text}
-        yield {"type": "raw_response", "content": reply_text}
-    else:
-        fail_text = "I couldn't translate that into an action I can run. Could you rephrase it?"
-        yield {"type": "status", "content": "Action failed to parse."}
-        yield {"type": "token", "content": fail_text}
-        yield {"type": "raw_response", "content": fail_text}
+    if not full_response.strip():
+        full_response = "Task completed."
+        yield {"type": "token", "content": full_response}
+
+    yield {"type": "raw_response", "content": full_response}

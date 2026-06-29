@@ -40,63 +40,6 @@ from src.logger import get_logger
 logger = get_logger("controller")
 
 
-from src.system_actions import (
-    log_action,
-    _SIMPLE_ACTIONS,
-    _COMPLEX_ACTIONS,
-    handle_open_settings,
-    handle_run_command,
-    handle_open_terminal,
-    handle_volume_set,
-    handle_brightness,
-    handle_brightness_set,
-)
-
-from src.system_actions import (
-    handle_window_close,
-    handle_window_minimize,
-    handle_window_maximize,
-    handle_window_fullscreen,
-    handle_switch_tab,
-    handle_wifi,
-    handle_bluetooth,
-    handle_vpn,
-    handle_speed_test,
-    handle_flush_dns,
-    handle_lock_screen,
-    handle_sleep,
-    handle_restart,
-    handle_shutdown,
-    handle_dnd,
-    handle_dark_mode,
-    handle_night_shift,
-    handle_set_wallpaper,
-    handle_screenshot,
-    handle_screen_record,
-    handle_media,
-    handle_say,
-    handle_kill_process,
-    handle_set_env,
-    handle_notification,
-    handle_take_note,
-    handle_empty_trash,
-    handle_type_text,
-    handle_press_keys,
-    handle_focus_app,
-    handle_fix_file,
-    handle_create_file,
-    handle_read_file,
-    handle_append_file,
-    handle_replace_in_file,
-    handle_move_file,
-    handle_copy_file,
-    handle_delete_file,
-    handle_create_folder,
-    handle_rename_file,
-    handle_compress_files,
-    handle_extract_file,
-    handle_download_file,
-)
 
 
 
@@ -457,23 +400,10 @@ _WEB_SEARCH_TRIGGERS = re.compile(
     re.IGNORECASE,
 )
 
-_WEB_SEARCH_SKIP = re.compile(
-    r"""(?xi)
-    \b(
-      open | launch | play | send | copy | run | set\s+volume |
-      brightness | clipboard | email | spotify | youtube |
-      terminal | command
-    )\b
-    """,
-    re.IGNORECASE,
-)
-
 
 def should_web_search(text: str) -> bool:
-    
-    if len(text.split()) < 5:
-        return False
-    if _WEB_SEARCH_SKIP.search(text):
+    """Determine if web search is likely beneficial based on trigger words."""
+    if len(text.split()) < 3:
         return False
     return bool(_WEB_SEARCH_TRIGGERS.search(text))
 
@@ -538,7 +468,6 @@ try:
     from src.iris import ask_stream
     from src.iris_rag import BookRetriever
     from src.iris_vision import analyze_image
-    from src.iris_math import solve_math
     from src.iris_engine import get_hardware_profile as get_device
 
     IRIS_AVAILABLE = True
@@ -559,34 +488,13 @@ if not MLX_MODEL_ID:
 
 CONFIG_FILE = "./config/control.conf"
 
-_is_linux = platform.system() == "Linux"
 DEFAULT_CONFIG = {
     "email": {
         "smtp_server": "smtp.gmail.com",
         "smtp_port": 587,
         "sender_address": "your_email@gmail.com",
         "sender_password": "your_app_password",
-        "contacts": {"mom": "mom@example.com", "dad": "dad@example.com"},
-    },
-    "apps": {
-        "notepad": "gedit" if _is_linux else "notepad.exe",
-        "calculator": "gnome-calculator" if _is_linux else "calc.exe",
-        "paint": "drawing" if _is_linux else "mspaint.exe",
-        "spotify": "spotify",
-        "rhythmbox": "rhythmbox",
-        "vscode": "code",
-        "chrome": "google-chrome",
-        "firefox": "firefox",
-        "explorer": "nautilus" if _is_linux else "explorer.exe",
-        "terminal": "gnome-terminal" if _is_linux else "cmd.exe",
-        "settings": "gnome-control-center" if _is_linux else "start ms-settings:",
-        "system_monitor": "gnome-system-monitor" if _is_linux else "taskmgr.exe",
-        "store": "gnome-software" if _is_linux else "ms-windows-store:",
-        "camera": "cheese" if _is_linux else "microsoft.windows.camera:",
-        "mail": "thunderbird" if _is_linux else "outlook",
-        "calendar": "gnome-calendar" if _is_linux else "outlookcal:",
-        "word": "libreoffice --writer" if _is_linux else "winword.exe",
-        "excel": "libreoffice --calc" if _is_linux else "excel.exe",
+        "contacts": {},
     },
     "browser": "default",
 }
@@ -726,22 +634,10 @@ def parse_ai_response(text: str) -> dict | None:
 
 
 def ai_agent_handle(user_input: str, retriever=None, history=None, **kwargs):
-    
     history = history or []
-
-    force_role = kwargs.get("force_role") or getattr(
-        ai_agent_handle, "force_role", None
-    )
+    force_role = kwargs.get("force_role") or getattr(ai_agent_handle, "force_role", None)
     settings = kwargs.get("settings", {})
-
-    if not force_role:
-        math_res = solve_math(user_input)
-        if math_res is not None:
-            yield {"type": "token", "content": math_res}
-            return
-
     from src.iris import ask_stream
-
     keep_loaded = kwargs.get("keep_loaded", False)
     yield from ask_stream(
         user_input,
@@ -878,140 +774,6 @@ def _dispatch_action(action: str, d: dict) -> str:
             return f"Resume parsing unavailable: {e}"
 
     
-    if action in ("volume_up", "volume_down", "volume_mute"):
-        from src.system_actions import set_volume
-        return set_volume(action, g("amount", "5%"))
-    if action == "volume_set":
-        percent = _pct(g("percent") or g("amount", 50))
-        return handle_volume_set(percent)
-    if action in ("brightness_up", "brightness_down"):
-        from src.system_actions import set_brightness
-        return set_brightness(action, g("amount", "5%"))
-    if action == "brightness_set":
-        percent = _pct(g("percent") or g("amount", 50))
-        return handle_brightness_set(percent)
-    if action in ("lock_screen", "sleep_computer", "shutdown_computer", "restart_computer"):
-        from src.system_actions import control_power
-        return control_power(action)
-    if action in ("read_clipboard", "write_clipboard", "clipboard_read", "clipboard_copy"):
-        from src.system_actions import manage_clipboard
-        mapped_action = action
-        if action == "clipboard_read":
-            mapped_action = "read_clipboard"
-        elif action == "clipboard_copy":
-            mapped_action = "write_clipboard"
-        return manage_clipboard(mapped_action, g("text", ""))
-    if action == "open_app":
-        from src.system_actions import open_app
-        app_name = g("name", "")
-        result = open_app(app_name)
-        if result.startswith("❌"):
-            logger.info(f"[Action] open_app natively failed for '{app_name}', returning error")
-            return result
-        logger.info(f"[Action] open_app → handled natively")
-        return result
-    if action == "close_app":
-        from src.system_actions import close_app
-        result = close_app(g("name", ""))
-        if result.startswith("❌"):
-            logger.info(f"[Action] close_app natively failed, returning error")
-            return result
-        logger.info(f"[Action] close_app → handled natively")
-        return result
-    if action == "open_file":
-        from src.system_actions import open_file
-        result = open_file(g("path", ""))
-        logger.info(f"[Action] open_file → handled natively")
-        return result
-    if action == "search_files":
-        from src.system_actions import search_files
-        result = search_files(g("query", ""), g("folder", ""))
-        logger.info(f"[Action] search_files → handled natively")
-        return result
-    if action == "open_settings":
-        return handle_open_settings()
-    if action == "dark_mode":
-        return handle_dark_mode(g("state", "on"))
-    if action == "night_shift":
-        return handle_night_shift(g("state", "on"))
-    if action == "do_not_disturb":
-        return handle_dnd(g("state", "on"))
-    if action == "set_wallpaper":
-        return handle_set_wallpaper(g("path", ""))
-    if action == "system_info":
-        return get_system_info(g("what", "all"))
-    if action in ("check_storage", "disk_usage"):
-        return _handle_check_storage(d)
-    if action == "screenshot":
-        return handle_screenshot(g("path", "~/Desktop/screenshot.png"))
-    if action == "screen_record":
-        return handle_screen_record(g("path", "~/Desktop/recording.mp4"), int(g("duration", 30)))
-    if action == "say":
-        return handle_say(g("text", ""))
-    if action == "notification":
-        return handle_notification(g("title", "Iris"), g("body", ""))
-    if action == "take_note":
-        return handle_take_note(g("content", ""))
-    if action == "type_text":
-        return handle_type_text(g("text", ""))
-    if action == "press_keys":
-        return handle_press_keys(g("keys", ""))
-    if action in ("media_play_pause", "media_next", "media_previous", "media_stop"):
-        return handle_media_command(action)
-
-    if action == "focus_app":
-        return handle_focus_app(g("name", ""))
-    if action in ("kill_app", "kill_process"):
-        result = handle_kill_process(g("name", ""))
-        if result.startswith("❌"):
-            logger.info(f"[Action] kill_process natively failed for '{g('name', '')}', returning error")
-            return result
-        logger.info(f"[Action] kill_process → handled natively")
-        return result
-    if action == "window_close":
-        return handle_window_close()
-    if action == "window_minimize":
-        return handle_window_minimize()
-    if action == "window_maximize":
-        return handle_window_maximize()
-    if action == "window_fullscreen":
-        return handle_window_fullscreen()
-    if action == "switch_tab":
-        return handle_switch_tab(g("direction", "next"))
-    if action == "create_file":
-        return handle_create_file(g("path", ""), g("content", ""))
-    if action == "read_file":
-        return handle_read_file(g("path", ""))
-    if action == "append_file":
-        return handle_append_file(g("path", ""), g("content", ""))
-    if action == "replace_in_file":
-        return handle_replace_in_file(g("path", ""), g("find", ""), g("replace", ""))
-    if action == "move_file":
-        return handle_move_file(g("src", "") or g("source", ""), g("dst", "") or g("destination", ""))
-    if action == "copy_file":
-        return handle_copy_file(g("src", "") or g("source", ""), g("dst", "") or g("destination", ""))
-    if action == "delete_file":
-        return handle_delete_file(g("path", ""))
-    if action == "create_folder":
-        return handle_create_folder(g("path", ""))
-    if action == "rename_file":
-        return handle_rename_file(g("path", ""), g("new_name", ""))
-    if action == "compress_files":
-        return handle_compress_files(g("paths", []), g("output", ""))
-    if action == "extract_file":
-        return handle_extract_file(g("path", ""), g("dest", "") or g("destination", ""))
-    if action == "download_file":
-        return handle_download_file(g("url", ""), g("path", ""))
-    if action == "wifi":
-        return handle_wifi(g("state", "on"))
-    if action == "bluetooth":
-        return handle_bluetooth(g("state", "on"))
-    if action == "vpn":
-        return handle_vpn(g("action", "connect"), g("name", ""))
-    if action == "speed_test":
-        return handle_speed_test()
-    if action == "flush_dns":
-        return handle_flush_dns()
 
     if action == "analyze_image":
         try:
@@ -1120,9 +882,7 @@ def execute_action_by_dict(action_dict: dict) -> str:
         return result
 
     
-    if action in _SIMPLE_ACTIONS and action not in ("open_app", "close_app", "kill_app", "kill_process"):
-        logger.warning(f"[Action] Simple action '{action}' was not handled natively, blocking fallthrough to 3B+OI.")
-        return f"Simple action '{action}' could not be completed natively."
+
 
     logger.info(f"[Action] {action} → routing to 3B+OI for complex execution")
     task_parts = [f"Please perform the following action on my system:\nAction: {action}"]
@@ -1154,7 +914,7 @@ You operate as a multi-step agent. A single request may need several actions.
 """
 
 
-from src.system_actions import handle_media_command, get_hardcoded_action_json
+
 
 
 
@@ -1164,13 +924,7 @@ from src.system_actions import handle_media_command, get_hardcoded_action_json
 
 
 def _is_complex_action(action: str) -> bool:
-    
-    if action in _COMPLEX_ACTIONS:
-        return True
-    
-    if action not in _SIMPLE_ACTIONS:
-        return True
-    return False
+    return True
 
 
 def _prime_oi_with_3b():
@@ -1188,20 +942,12 @@ def _prime_oi_with_3b():
 
 def _generate_control_action(messages: list, user_query: str = "", max_tokens: int = 1024) -> str:
     
-    hardcoded = get_hardcoded_action_json(user_query)
-    if hardcoded:
-        logger.info(f"[Model] Simple control → using hardcoded rule for: {user_query}")
-        return hardcoded
+
 
     from src.iris import ModelRole, load_model
-    from src.system_actions import is_complex_control
 
-    if is_complex_control(user_query, []):
-        logger.info("[Model] Complex control → using 3B CODE model")
-        llm = load_model(ModelRole.CODE)
-    else:
-        logger.info("[Model] Simple control → using 0.5B CONTROL model")
-        llm = load_model(ModelRole.CONTROL)
+    logger.info("[Model] Using CODE model for control action")
+    llm = load_model(ModelRole.CODE)
 
     out = ""
     for chunk in llm.create_chat_completion(

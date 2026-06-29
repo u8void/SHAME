@@ -11,7 +11,7 @@ from .iris_engine import (
     get_device,
     load_generation_config,
 )
-from .iris_math import solve_math
+
 from .iris_vision import analyze_image
 from .iris_coding import generate_internal_code
 from .syntax_checker import check_syntax, extract_code_blocks
