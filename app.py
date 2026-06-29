@@ -213,7 +213,7 @@ def chat():
 
     if doc_sections:
         all_docs_text = "\n\n".join(doc_sections)
-        user_message = f"I have attached {len(doc_files)} document(s). Here is the content:\n\n{all_docs_text}\n\nUser Prompt:\n{actual_prompt}"
+        user_message = f"[SYSTEM DIRECTIVE: The user has attached {len(doc_files)} document(s). You MUST analyze the content of these documents to answer their request.]\n\n{all_docs_text}\n\nUser's Request:\n{actual_prompt}"
 
     if not user_message and not image_files and not doc_files:
         return jsonify({"reply": "Please send a valid message."}), 400

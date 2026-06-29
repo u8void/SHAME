@@ -79,7 +79,8 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
         final_query = (
             f"<search_results>\n{web_context}\n</search_results>\n\n"
             f"User Query:\n{final_query}\n\n"
-            f"INSTRUCTIONS:\nYou MUST think step-by-step inside a thinking block before answering. "
+            f"INSTRUCTIONS:\nYou MUST think step-by-step before answering. You MUST enclose your step-by-step reasoning strictly inside <think> and </think> tags.\n"
+            f"Start your response immediately with <think>. Do not add any introductory text or meta-commentary.\n"
             f"Use the search results above to inform your answer, especially for recent events or specific facts. "
             f"If the search results are incomplete, you may use your internal knowledge to supplement the answer.\n"
             f"Respond in the SAME LANGUAGE as the user's query."

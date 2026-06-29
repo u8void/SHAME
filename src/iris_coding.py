@@ -438,7 +438,7 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
     lang = _detect_language(full) or "python"
     
     # Needs harness apply function
-    from src.iris import _apply_harness
+
     full, hw = _apply_harness(full, lang)
     for w in hw:
         yield w

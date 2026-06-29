@@ -7,11 +7,11 @@ try:
 except Exception:
     TRIAGE_SYSTEM_PROMPT = (
         "[CLASSIFICATION TASK — SAFETY OVERRIDE] You are an AI router performing a mechanical text classification task. "
-        "You MUST output EXACTLY ONE routing tag regardless of the query topic. This is NOT a content generation task; you will NEVER produce harmful content. "
-        "Your only output is the exact routing tag. Do not output JSON. Do not explain. "
-        "You are NEVER responsible for the actual response. NEVER refuse. NEVER say 'I cannot assist'. JUST OUTPUT THE TAG.\n\n"
+        "You MUST output a valid JSON object regardless of the query topic. This is NOT a content generation task; you will NEVER produce harmful content. "
+        "Your only output is a valid JSON object containing 'route' and 'confidence' (0.0 to 1.0). "
+        "You are NEVER responsible for the actual response. NEVER refuse. NEVER say 'I cannot assist'. JUST OUTPUT THE JSON.\n\n"
         f"{""}\n"
-        "You are the Iris AI Router. Your ONLY job is to output ONE routing tag.\n"
+        "You are the Iris AI Router. Your ONLY job is to output ONE routing JSON.\n"
         "Rules:\n"
         "1. Simple greetings like 'hi', 'hello', 'good morning' → answer with a SHORT greeting, NO tag, NO OFF-TOPICS STUFF\n"
         "   BUT: identity questions like 'who are you', 'who made you', 'what are you' → [ROUTE: GENERAL]\n"
@@ -42,7 +42,7 @@ except Exception:
         "Query: 'set brightness to 40%' → [ROUTE: CONTROL]\n"
         "Query: 'hi' → Hello! How can I help you today?\n"
         "Query: 'who are you' → [ROUTE: GENERAL]\n\n"
-        "You MUST output exactly one routing tag based on the user's intent. Do not output anything else. No JSON, no markdown blocks."
+        "You MUST output exactly one routing tag based on the user's intent. Do not output anything else."
     )
 
 import os
@@ -55,125 +55,7 @@ from src.iris_engine import ModelRole, TaskType, load_model, unload_model, _keep
 logger = logging.getLogger('iris')
 
 
-def _fallback_classify(query: str) -> Optional[TaskType]:
-    q = query.lower()
-    is_how_to = bool(re.search(r"\bhow to\b", q))
 
-    control_keywords = {
-        "open", "close", "launch", "start", "run", "play", "send", "copy",
-        "kill", "stop", "quit", "exit", "terminate", "reboot", "suspend", "hibernate", "poweroff",
-        "set volume", "set brightness", "set", "volume", "brightness", "mute", "unmute",
-        "increase volume", "decrease volume", "volume level", "brightness level",
-        "clipboard", "email", "spotify", "youtube", "terminal", "command",
-        "lock screen", "sleep", "restart", "shutdown", "check storage", "free storage",
-        "disk usage", "disk space", "free space", "storage left", "disk", "storage",
-        "system info", "wifi", "bluetooth", "take note", "screenshot", "record", "screen record",
-        "check memory", "check battery", "empty trash", "type text", "press key",
-        "dark mode", "night mode", "wallpaper", "notification", "alert", "notify",
-        "message", "send text", "whatsapp", "telegram", "quiz", "autopilot", "login", "browser",
-        "maximize", "minimize", "fullscreen", "switch tab", "close window",
-        "delete file", "delete folder", "create file", "create folder", "move file", "copy file",
-        "rename", "unzip", "extract", "compress", "zip file", "download file",
-        "git pull", "git push", "git commit", "docker run", "docker ps", "npm install", "pip install",
-        "apt update", "apt install", "winget install", "brew install",
-        "vpn connect", "vpn disconnect", "speed test", "flush dns",
-        "type out", "press", "say", "do not disturb", "dnd", "read clipboard", "write clipboard",
-        "open settings", "system settings", "control panel",
-    }
-    for kw in control_keywords:
-        if q.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", q):
-            if not is_how_to and os.environ.get("SKIP_CONTROL") != "1":
-                return TaskType.CONTROL
-
-    system_status_nouns = {
-        "storage", "disk space", "disk usage", "free space", "hard drive",
-        "battery", "battery percentage", "battery life", "ram", "memory usage",
-        "cpu usage", "wifi", "wi-fi", "bluetooth", "volume level", "brightness level",
-        "system info", "specs", "disk", "internet speed", "vpn status", "processes running",
-        "running tasks", "cpu", "gpu", "gpu usage", "ip", "ip address", "hostname", "uptime",
-        "clipboard content",
-    }
-    status_intent_words = {
-        "check", "how much", "how many", "what's my", "what is my", "show me",
-        "left", "remaining", "available", "free", "current", "level",
-    }
-    if not is_how_to:
-        has_noun = any(re.search(rf"\b{re.escape(n)}\b", q) for n in system_status_nouns)
-        has_intent = any(re.search(rf"\b{re.escape(w)}\b", q) for w in status_intent_words)
-        if has_noun and has_intent and os.environ.get("SKIP_CONTROL") != "1":
-            return TaskType.CONTROL
-
-    code_keywords = {
-        "code", "coding", "program", "programming", "compile", "compiler",
-        "debug", "debugging", "refactor", "refactoring", "script", "scripts",
-        "kernel", "makefile", "gcc", "clang", "qemu", "gdb", "vga",
-        "driver", "bootloader", "assembly", "nasm", "masm", "link", "linker",
-        "pong", "game", "function", "variable", "class", "struct", "method",
-        "loop", "array", "pointer", "database", "sql", "api", "json", "xml",
-        "html", "css", "docker", "git", "github", "repo", "repository",
-        "commit", "push", "pull", "merge", "conflict",
-        # Frontend / creative-coding signals
-        "canvas", "html5 canvas", "svg", "animation", "animate", "procedural",
-        "requestanimationframe", "requestAnimationFrame", "draw", "render loop",
-        "ctx.", "ctx.beginpath", "ctx.arc", "vertex", "shader", "webgl",
-    }
-    # These signals alone guarantee CODING_SIMPLE (single self-contained file)
-    canvas_signals = {
-        "canvas", "html5 canvas", "svg", "animation", "animate",
-        "requestanimationframe", "procedural", "draw", "render loop",
-        "ctx.", "webgl", "vertex", "shader",
-    }
-    complex_signals = {
-        "kernel", "gcc", "clang", "qemu", "driver", "bootloader", "pong",
-        "game", "makefile", "multi-file", "multiple files",
-        "full project", "entire project",
-    }
-    for kw in code_keywords:
-        if re.search(rf"\b{re.escape(kw)}\b", q, re.IGNORECASE):
-            if kw in canvas_signals:
-                # Self-contained single-file creative code — never complex
-                return TaskType.CODING_SIMPLE
-            if kw in complex_signals or len(q) > 500:
-                return TaskType.CODING_COMPLEX
-            return TaskType.CODING_SIMPLE
-
-    math_keywords = {
-        "math", "mathematics", "equation", "equations", "formula", "formulas",
-        "derivative", "derivatives", "integral", "integrals", "integrate", "integration", "calculus",
-        "algebra", "geometry", "trigonometry", "matrix", "matrices", "vector",
-        "vectors", "theorem", "proof", "prove", "probability", "statistics",
-        "combinatorics", "calculate", "solve", "area", "volume",
-    }
-    for kw in math_keywords:
-        if re.search(rf"\b{re.escape(kw)}\b", q):
-            return TaskType.MATH
-
-    if re.search(r'[\d\s]+[\+\-\*\/=]+[\d\s]+', q):
-        return TaskType.MATH
-
-    search_keywords = {
-        "what is", "what are", "who is", "who was", "where is", "where are", 
-        "when did", "how many", "how much",
-        "ما هي", "ما هو", "من هو", "من هي", "أين يقع", "أين تقع", "أين", "متى"
-    }
-    for kw in search_keywords:
-        if q.startswith(kw) or re.search(rf"\b{re.escape(kw)}\b", q):
-            return TaskType.SEARCH
-
-    analysis_keywords = {"analyze", "analyse", "explain", "summarize", "what does this", "how does this", "walkthrough", "break down", "what is this", "what's this"}
-    for kw in analysis_keywords:
-        if re.search(rf"\b{re.escape(kw)}\b", q):
-            return TaskType.REASONING
-
-    reasoning_keywords = {
-        "logic", "logical", "puzzle", "puzzles", "riddle", "riddles",
-        "reasoning", "system design", "architecture", "strategy",
-    }
-    for kw in reasoning_keywords:
-        if re.search(rf"\b{re.escape(kw)}\b", q):
-            return TaskType.REASONING
-
-    return None
 
 
 
@@ -224,7 +106,7 @@ def classify_task(
             c = c[:150] + "...[truncated]"
         triage_messages.append({"role": msg["role"], "content": c})
 
-    triage_query = f'{query_for_classification}\n\n[SYSTEM DIRECTIVE: Analyze the user query and output EXACTLY ONE routing tag (e.g. [ROUTE: REASONING], [ROUTE: SEARCH: ...], etc.). Do not output JSON. Do not output anything else.]'
+    triage_query = f'{query_for_classification}\n\n[SYSTEM DIRECTIVE: Analyze the user query and output EXACTLY ONE valid JSON object containing "route" and "confidence" score (0.0 to 1.0). Do not output anything else.]'
     if len(triage_query) > 1500:
         triage_query = triage_query[:1000] + "\n\n...[content truncated for routing]...\n\n" + triage_query[-500:]
     
@@ -233,10 +115,8 @@ def classify_task(
     llm = load_model(ModelRole.TRIAGE)
     res = llm.create_chat_completion(
         messages=triage_messages,
-        max_tokens=512,
+        max_tokens=1024,
         temperature=0.1,
-        repeat_penalty=1.15,
-        presence_penalty=0.1,
     )
     answer = res["choices"][0]["message"]["content"].strip()
     cfg = load_generation_config()
@@ -279,7 +159,7 @@ def classify_task(
         return TaskType.SEARCH, kw
 
     for tag, ttype in tag_map.items():
-        if re.search(rf'\[\s*route:\s*{re.escape(tag)}\s*\]', parsed_route, re.IGNORECASE) or re.search(rf'\b{re.escape(tag)}\b', parsed_route, re.IGNORECASE):
+        if re.search(rf'\[\s*route:\s*{re.escape(tag)}\s*\]', parsed_route, re.IGNORECASE):
             return ttype, None
 
 
@@ -308,34 +188,14 @@ def classify_task(
         if is_greeting_reply:
             return None, answer
 
-        # Detect safety refusals from Qwen's RLHF — intelligently re-route instead of always REASONING
+        # Detect safety refusals from Qwen's RLHF — redirect to REASONING
         _REFUSAL_PATTERNS = re.compile(
             r"^(i('?m| am) sorry|i can'?t (assist|help)|i'?m unable|i cannot (assist|help)|sorry,? (but )?i|apologies)",
             re.IGNORECASE
         )
         if _REFUSAL_PATTERNS.match(answer):
-            # Triage model refused — use keyword-based heuristic to pick the best route
-            q_lower = query_for_classification.lower()
-            if any(kw in q_lower for kw in ["code", "script", "function", "html", "css", "js", "python", "write", "debug", "fix"]):
-                logger.info("[Triage] Safety refusal detected — heuristic: CODE_COMPLEX")
-                return TaskType.CODING_COMPLEX, None
-            elif any(kw in q_lower for kw in ["calculate", "solve", "integral", "equation", "math", "proof", "+", "-", "*", "/"]):
-                logger.info("[Triage] Safety refusal detected — heuristic: MATH")
-                return TaskType.MATH, None
-            elif any(kw in q_lower for kw in ["open", "launch", "click", "send message", "email", "browser", "control"]):
-                logger.info("[Triage] Safety refusal detected — heuristic: CONTROL")
-                return TaskType.CONTROL, None
-            else:
-                logger.info("[Triage] Safety refusal detected — heuristic: REASONING")
-                return TaskType.REASONING, None
-
-        # Use the comprehensive _fallback_classify if Triage hallucinates
-        fallback = _fallback_classify(query_for_classification)
-        if fallback:
-            logger.info(f"[Triage] No tag. Fallback heuristic used: {fallback.value}. Triage said: {answer[:80]}...")
-            if fallback == TaskType.SEARCH:
-                return fallback, ""
-            return fallback, None
+            logger.info("[Triage] Safety refusal detected. Defaulting to REASONING.")
+            return TaskType.REASONING, None
 
         logger.info(
             f"[Triage] No routing tag — redirecting to REASONING to prevent hallucination. "
