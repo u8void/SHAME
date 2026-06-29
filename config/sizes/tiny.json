@@ -3,7 +3,7 @@
     "triage": "Qwen/Qwen2.5-3B-Instruct",
     "router": "Qwen/Qwen2.5-3B-Instruct",
     "control": "Qwen/Qwen2.5-Coder-3B-Instruct",
-    "math": "Qwen/Qwen3.5-4B",
+    "math": "nvidia/OpenMath-Nemotron-1.5B",
     "code": "Qwen/Qwen2.5-Coder-3B-Instruct",
     "reasoning": "WeiboAI/VibeThinker-3B",
     "general": "Qwen/Qwen3.5-4B",
@@ -26,7 +26,7 @@
   "download_urls": {
     "iris_001.gguf": "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
     "iris_002.gguf": "https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf",
-    "iris_003.gguf": "https://huggingface.co/prithivMLmods/VibeThinker-3B-GGUF/resolve/main/VibeThinker-3B.Q4_K_M.gguf",
+    "iris_003.gguf": "https://huggingface.co/bartowski/nvidia_OpenMath-Nemotron-1.5B-GGUF/resolve/main/nvidia_OpenMath-Nemotron-1.5B-Q4_K_M.gguf",
     "iris_004.gguf": "https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf",
     "iris_005.gguf": "https://huggingface.co/prithivMLmods/VibeThinker-3B-GGUF/resolve/main/VibeThinker-3B.Q4_K_M.gguf",
     "iris_006.gguf": "https://huggingface.co/moondream/moondream2-gguf/resolve/main/moondream2-text-model-f16.gguf",
