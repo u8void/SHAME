@@ -29,7 +29,7 @@ def _ensure_open_interpreter():
         print("[Iris] open-interpreter installed ✓\n", flush=True)
 
 
-_ensure_open_interpreter()
+# _ensure_open_interpreter() is now deferred
 
 
 
@@ -57,71 +57,78 @@ from typing import Optional
 
 
 
-try:
-    
-    from interpreter import interpreter as _oi
+OI_AVAILABLE = False
+_oi = None
+_oi_initialized = False
 
-    _oi.auto_run = True   
-    _oi.verbose = False
-    _oi.max_output = 4000
-    _oi.offline = True    
-    _oi.sync_computer = False  
-    _oi.loop = False      
+def _init_oi():
+    global _oi, OI_AVAILABLE, _oi_initialized
+    if _oi_initialized:
+        return
+    _oi_initialized = True
+    
+    _ensure_open_interpreter()
+    
+    try:
+        from interpreter import interpreter as open_interpreter
+        global _oi
+        _oi = open_interpreter
+        
+        _oi.auto_run = True   
+        _oi.verbose = False
+        _oi.max_output = 4000
+        _oi.offline = True    
+        _oi.sync_computer = False  
+        _oi.loop = False      
 
-    _oi.llm.supports_functions = False
-    _oi.llm.supports_vision = False
-    
-    
-    
-    
-    def _iris_native_oi_llm(*args, **kwargs):
-        from src.iris_engine import _model_pool, load_model, ModelRole
+        _oi.llm.supports_functions = False
+        _oi.llm.supports_vision = False
         
-        
-        
-        if not _model_pool:
-            load_model(ModelRole.CONTROL)
+        def _iris_native_oi_llm(*args, **kwargs):
+            from src.iris_engine import _model_pool, load_model, ModelRole
             
-        active_role = next(reversed(_model_pool))
-        model_obj = _model_pool[active_role]
-        
-        clean_kwargs = {
-            "messages": kwargs.get("messages", []),
-            "stream": True,
-            "max_tokens": 1024,
-            "temperature": 0.2
-        }
-        
-        
-        for chunk in model_obj.create_chat_completion(**clean_kwargs):
-            yield chunk
+            if not _model_pool:
+                load_model(ModelRole.CONTROL)
+                
+            active_role = next(reversed(_model_pool))
+            model_obj = _model_pool[active_role]
+            
+            clean_kwargs = {
+                "messages": kwargs.get("messages", []),
+                "stream": True,
+                "max_tokens": 1024,
+                "temperature": 0.2
+            }
+            
+            for chunk in model_obj.create_chat_completion(**clean_kwargs):
+                yield chunk
 
-    _oi.llm.completions = _iris_native_oi_llm
-    _oi.llm.api_base = None
-    _oi.llm.model = "iris-native"
-    _oi.llm.context_window = 8192
-    _oi.llm.max_tokens = 1024
-    _oi.computer.languages = [lang for lang in _oi.computer.languages if lang.__name__ == "Python"]
+        _oi.llm.completions = _iris_native_oi_llm
+        _oi.llm.api_base = None
+        _oi.llm.model = "iris-native"
+        _oi.llm.context_window = 8192
+        _oi.llm.max_tokens = 1024
+        _oi.computer.languages = [lang for lang in _oi.computer.languages if lang.__name__ == "Python"]
 
-    _oi.system_message = (
-        "You are Iris, an AI PC assistant. "
-        "Write and execute ONLY Python code to fulfill the user's request. NEVER write raw Bash or Shell commands.\n"
-        "CRITICAL RULES:\n"
-        "1. NEVER use 'sudo' or administrative privileges.\n"
-        "2. ALWAYS launch desktop/GUI applications or files using non-blocking, fully-detached background processes so they DO NOT block the execution flow.\n"
-        "   Before launching, ALWAYS verify if the executable is available on the system path using `shutil.which`. If it does not exist (for example, 'whatsapp' or 'spotify' is not installed), fall back to opening its web interface in the default browser using Python's built-in `webbrowser` module (e.g., `webbrowser.open('https://web.whatsapp.com')`).\n"
-        "   When launching an executable, redirect stdout/stderr to subprocess.DEVNULL and set start_new_session=True. Example: import subprocess, shutil, webbrowser; cmd = 'gnome-control-center'; subprocess.Popen([cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True) if shutil.which(cmd) else webbrowser.open('https://example.com')\n"
-        "3. NEVER wait for GUI applications to exit, NEVER call .wait(), and NEVER write monitoring loops (e.g., polling with .poll() or using time.sleep) to check if the process is still running. Once you start the process with Popen, the task is complete. Return immediately.\n"
-        "4. To close/kill an application, write Python code to terminate its processes. Keep in mind that some launcher commands differ from the running process names: 'google-chrome' runs as 'chrome', 'libreoffice' runs as 'soffice' or 'soffice.bin', and 'gnome-terminal' runs as 'gnome-terminal-server'. Be careful to terminate the correct process names, and avoid matching substring patterns that might terminate this agent workspace (e.g., do not kill 'chrome-sandbox' or 'antigravity').\n"
-        "5. NEVER use the webbrowser module or python requests to perform a web search or look up information. If you are asked to perform a system action like installing a package or changing a setting, write the python script to do exactly that (e.g. using subprocess). Do not search the web for how to do it."
-    )
+        _oi.system_message = (
+            "You are Iris, an AI PC assistant. "
+            "Write and execute ONLY Python code to fulfill the user's request. NEVER write raw Bash or Shell commands.\n"
+            "CRITICAL RULES:\n"
+            "1. NEVER use 'sudo' or administrative privileges.\n"
+            "2. ALWAYS launch desktop/GUI applications or files using non-blocking, fully-detached background processes so they DO NOT block the execution flow.\n"
+            "   Before launching, ALWAYS verify if the executable is available on the system path using `shutil.which`. If it does not exist (for example, 'whatsapp' or 'spotify' is not installed), fall back to opening its web interface in the default browser using Python's built-in `webbrowser` module (e.g., `webbrowser.open('https://web.whatsapp.com')`).\n"
+            "   When launching an executable, redirect stdout/stderr to subprocess.DEVNULL and set start_new_session=True. Example: import subprocess, shutil, webbrowser; cmd = 'gnome-control-center'; subprocess.Popen([cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True) if shutil.which(cmd) else webbrowser.open('https://example.com')\n"
+            "3. NEVER wait for GUI applications to exit, NEVER call .wait(), and NEVER write monitoring loops (e.g., polling with .poll() or using time.sleep) to check if the process is still running. Once you start the process with Popen, the task is complete. Return immediately.\n"
+            "4. To close/kill an application, write Python code to terminate its processes. Keep in mind that some launcher commands differ from the running process names: 'google-chrome' runs as 'chrome', 'libreoffice' runs as 'soffice' or 'soffice.bin', and 'gnome-terminal' runs as 'gnome-terminal-server'. Be careful to terminate the correct process names, and avoid matching substring patterns that might terminate this agent workspace (e.g., do not kill 'chrome-sandbox' or 'antigravity').\n"
+            "5. NEVER use the webbrowser module or python requests to perform a web search or look up information. If you are asked to perform a system action like installing a package or changing a setting, write the python script to do exactly that (e.g. using subprocess). Do not search the web for how to do it."
+        )
 
-    OI_AVAILABLE = True
-    logger.info("[OI] Open Interpreter ready (offline mode) ✓")
+        OI_AVAILABLE = True
+        logger.info("[OI] Open Interpreter ready (offline mode) ✓")
 
-except Exception as _oi_err:
-    OI_AVAILABLE = False
-    logger.warning(f"[OI] Open Interpreter unavailable: {_oi_err}")
+    except Exception as _oi_err:
+        OI_AVAILABLE = False
+        logger.warning(f"[OI] Open Interpreter unavailable: {_oi_err}")
 
 
 
@@ -193,7 +200,7 @@ def _exec_shell_cmd(cmd: str) -> str:
 
 
 def _run_oi_task(task: str) -> str:
-    
+    _init_oi()
     if not OI_AVAILABLE:
         return "Open Interpreter unavailable. Install: pip install open-interpreter"
     try:
@@ -924,7 +931,7 @@ def _is_complex_action(action: str) -> bool:
 
 
 def _prime_oi_with_control():
-    
+    _init_oi()
     if not OI_AVAILABLE:
         return
     from src.iris_engine import ModelRole, load_model, _model_pool

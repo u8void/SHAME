@@ -21,7 +21,7 @@ def _ensure_open_interpreter():
         _sp.run([sys.executable, "-m", "pip", "install", "-q",
                  "--upgrade", "open-interpreter"], check=True)
         print("[Iris] open-interpreter installed ✓\n", flush=True)
-_ensure_open_interpreter()
+# _ensure_open_interpreter() is now deferred in controller.py
 
 
 import os

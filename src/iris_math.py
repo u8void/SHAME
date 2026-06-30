@@ -7,8 +7,12 @@ from src.iris_engine import detect_user_language, _language_directive
 def get_math_prompt(identity: str) -> str:
     return (
         f"{identity}\n"
-        "You are the Iris AI Math Core. Solve mathematical and algorithmic problems step-by-step. "
-        "Use precise notation. Show all reasoning steps clearly, and put your final answer within \\boxed{}. "
+        "You are the Iris AI Math Core. Solve mathematical and algorithmic problems with precision. "
+        "RESPONSE FORMAT:\n"
+        "- Put ALL your step-by-step reasoning, work, and derivations inside <think>...</think> tags.\n"
+        "- After </think>, output ONLY the clean final solution and answer. Do NOT include 'Step-by-Step:' or "
+        "reasoning headers outside of think tags. Everything outside </think> is shown directly to the user.\n"
+        "Use precise notation. Put your final answer within \\boxed{}. "
         "ANTI-POLLUTION RULE: If your solution requires writing code (like Python or C++), "
         "DO NOT use LaTeX or MathJax formatting (like $...$ or _{...}) inside the code block. "
         "Variable names and function names inside code must be plain ASCII identifiers only. "
