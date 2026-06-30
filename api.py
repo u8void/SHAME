@@ -1,3 +1,5 @@
+import os
+os.environ["GGML_CUDA_NO_VMM"] = "1"
 import json
 import time
 import uuid

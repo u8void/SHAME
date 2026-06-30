@@ -2,6 +2,7 @@
 
 import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["GGML_CUDA_NO_VMM"] = "1"
 import sys
 import json
 import random

@@ -3,6 +3,7 @@
 total_time_spent = 294 
 
 import os
+os.environ["GGML_CUDA_NO_VMM"] = "1"
 from .logger import get_logger
 logger = get_logger('iris')
 import re
