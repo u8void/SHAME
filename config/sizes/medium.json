@@ -24,8 +24,8 @@
   "clip": "iris_007.gguf",
   "max_pool_size": 1,
   "max_seq_length": 512,
-  "n_gpu_layers": 12,
-  "context_length": 4096,
+  "num_layers": 16,
+  "context_length": 8192,
   "download_urls": {
     "qwen3-4b-q4_k_m.gguf": "https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf",
     "qwen2.5-coder-7b-instruct-q4_k_m.gguf": "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf",

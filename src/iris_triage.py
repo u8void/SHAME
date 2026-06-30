@@ -126,18 +126,21 @@ def classify_task(
     parsed_route = answer
     confidence = 1.0
      # 1. Try parsing JSON format as defined in triage_routing_guide.md
+    # Strip CoT think blocks to prevent JSON parsing errors. Supports incomplete/truncated think tags.
+    json_str = re.sub(r'<think>[\s\S]*?(?:</think>|$)', '', answer, flags=re.IGNORECASE).strip()
+
+    # 1. Try parsing JSON format as defined in triage_routing_guide.md
     try:
-        # Strip CoT think blocks to prevent JSON parsing errors
-        json_str = re.sub(r'<think>[\s\S]*?</think>', '', answer, flags=re.IGNORECASE).strip()
-        if "```" in json_str:
-            match = re.search(r'```(?:json)?\s*([\s\S]+?)\s*```', json_str)
+        clean_json = json_str
+        if "```" in clean_json:
+            match = re.search(r'```(?:json)?\s*([\s\S]+?)\s*```', clean_json)
             if match:
-                json_str = match.group(1).strip()
+                clean_json = match.group(1).strip()
         # Fallback to extracting the first matching JSON block if thought tags or other text headers prefix the JSON
-        json_match = re.search(r'(\{[\s\S]*\})', json_str)
+        json_match = re.search(r'(\{[\s\S]*\})', clean_json)
         if json_match:
-            json_str = json_match.group(1).strip()
-        data = json.loads(json_str)
+            clean_json = json_match.group(1).strip()
+        data = json.loads(clean_json)
         if isinstance(data, dict):
             route_val = str(data.get("route", "")).strip().upper()
             kw = data.get("keywords")
@@ -146,7 +149,23 @@ def classify_task(
             if route_val in tag_map:
                 return tag_map[route_val], None
     except Exception:
-        pass
+        # Fallback regex extraction from malformed JSON
+        if "route" in json_str.lower():
+            route_match = re.search(r'"route"\s*:\s*"([^"]+)"', json_str, re.IGNORECASE)
+            if route_match:
+                route_val = route_match.group(1).strip().upper()
+                kw = None
+                kw_match = re.search(r'"keywords"\s*:\s*(?:"([^"]+)"|([^,}]+))', json_str, re.IGNORECASE)
+                if kw_match:
+                    kw = kw_match.group(1) or kw_match.group(2)
+                    if kw:
+                        kw = kw.strip().strip('"').strip("'")
+                        if kw.lower() in ["null", "none"]:
+                            kw = None
+                if route_val == "SEARCH":
+                    return TaskType.SEARCH, kw or ""
+                if route_val in tag_map:
+                    return tag_map[route_val], None
 
     if confidence < 0.70:
         logger.info(f"[Routing] Confidence {confidence:.2f} < 0.70. Falling back to REASONING.")
@@ -172,10 +191,12 @@ def classify_task(
     for tag, ttype in tag_map.items():
         if re.search(rf'\[\s*route:\s*{re.escape(tag)}\s*\]', answer, re.IGNORECASE):
             return ttype, None
+        if re.search(r'\b' + re.escape(tag) + r'\b', json_str, re.IGNORECASE):
+            return ttype, None
         if answer.strip().upper() == tag:
             return ttype, None
 
     # Default fallback — let REASONING handle anything unclear
-    logger.info(f"[Triage] No tag matched — defaulting to REASONING. Answer was: {answer[:80]!r}")
+    logger.info(f"[Triage] No tag matched — defaulting to REASONING. Answer was: {answer[:500]!r}")
     return TaskType.REASONING, None
 
