@@ -542,7 +542,7 @@ body.chat-active .center-panel {
     background-color: transparent;
     border: none;
     padding: 16px 0;
-    text-align: center;
+    text-align: left;
 }
 
 .chat-image {
