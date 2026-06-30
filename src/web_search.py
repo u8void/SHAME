@@ -40,6 +40,23 @@ class SearchResult:
     href: str = ""
     source: str = "web"
 
+    def __post_init__(self):
+        if self.body:
+            patterns = [
+                r"create a sex novel",
+                r"cannot fulfill this request due to",
+                r"unable to provide guidance on creating content",
+                r"inappropriate answer, I will respond",
+                r"sexual themes or activities"
+            ]
+            lines = self.body.splitlines()
+            clean_lines = []
+            for line in lines:
+                if any(re.search(pat, line, re.IGNORECASE) for pat in patterns):
+                    continue
+                clean_lines.append(line)
+            self.body = "\n".join(clean_lines)
+
     def to_dict(self) -> dict:
         return {"title": self.title, "body": self.body, "href": self.href, "source": self.source}
 
