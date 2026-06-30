@@ -258,13 +258,23 @@ _model_paths: dict[str, str] = {}
 # Dynamically sized model pool: keep more models resident in VRAM when GPU is available
 def _get_max_pool_size() -> int:
     try:
-        from src.iris import load_generation_config as _lgc
-        _gcfg = _lgc()
+        _gcfg = load_generation_config()
     except Exception:
         _gcfg = {}
         
     if "max_pool_size" in _gcfg:
         return _gcfg["max_pool_size"]
+
+    try:
+        _size = _gcfg.get("size", "tiny")
+        _size_path = os.path.join(os.path.dirname(CONFIG_PATH), "sizes", f"{_size}.json")
+        if os.path.exists(_size_path):
+            with open(_size_path, "r", encoding="utf-8") as f:
+                _size_cfg = json.load(f)
+            if "max_pool_size" in _size_cfg:
+                return _size_cfg["max_pool_size"]
+    except Exception:
+        pass
         
     _n_gpu = _gcfg.get("n_gpu_layers", -1)
     # On GPU mode, check VRAM to decide pool size
@@ -285,7 +295,6 @@ def _get_max_pool_size() -> int:
             pass
     return 2  # default: 2 models in pool
 
-_MAX_MODELS_IN_POOL = _get_max_pool_size()
 _keep_loaded: bool = False  
 _model_lock = threading.RLock()
 
@@ -589,10 +598,16 @@ def _unload_locked(role_to_evict: str = None, force_all: bool = False) -> None:
                 pass
             del llm
     else:
+        try:
+            cfg = load_generation_config()
+            _keep_triage = cfg.get("keep_triage_loaded", True)
+        except Exception:
+            _keep_triage = True
+            
         keys_to_remove = []
         for r, llm in list(_model_pool.items()):
             # Cost-Aware Swapping: Keep the tiny Triage model resident in VRAM unless forced
-            if not force_all and "iris_001.gguf" in str(_model_paths.get(r, "")):
+            if _keep_triage and not force_all and "iris_001.gguf" in str(_model_paths.get(r, "")):
                 continue
             keys_to_remove.append(r)
             try:
@@ -747,7 +762,8 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
                 _mlx_dir = os.path.join(os.path.dirname(_HERE), "mlx_data", os.path.splitext(filename)[0])
                 if os.path.isdir(_mlx_dir):
                     _mlx_temp = cfg.get("temperature", 0.7)
-                    if len(_model_pool) >= _MAX_MODELS_IN_POOL:
+                    _pool_size_limit = _get_max_pool_size()
+                    if len(_model_pool) >= _pool_size_limit:
                         oldest = next(iter(_model_pool))
                         _unload_locked(oldest)
                     _mlx_llm = _get_mlx_model(_mlx_dir, _mlx_temp)
@@ -778,7 +794,8 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
 
         _main_gpu = cfg.get("main_gpu", 0)
 
-        if len(_model_pool) >= _MAX_MODELS_IN_POOL:
+        _pool_size_limit = _get_max_pool_size()
+        if len(_model_pool) >= _pool_size_limit:
             oldest = next(iter(_model_pool))
             _unload_locked(oldest)
 
