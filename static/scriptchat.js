@@ -17,9 +17,9 @@ function normaliseExt(raw) {
 
 function triggerDownload(filename, content) {
     const blob = new Blob([content], { type: 'text/plain' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
@@ -61,22 +61,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
     window.getChatSettings = () => chatSettings;
     window.setChatSettings = (s) => { chatSettings = s; };
-    const chatInput          = document.getElementById("chatInput");
-    const sendBtn            = document.getElementById("sendBtn");
-    const chatMessages       = document.getElementById("chatMessages");
-    const chatHistory        = document.getElementById("chatHistory");
-    const newChatBtn         = document.getElementById("newChatBtn");
-    const searchToggleBtn    = document.getElementById("searchToggleBtn");
+    const chatInput = document.getElementById("chatInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const chatMessages = document.getElementById("chatMessages");
+    const chatHistory = document.getElementById("chatHistory");
+    const newChatBtn = document.getElementById("newChatBtn");
+    const searchToggleBtn = document.getElementById("searchToggleBtn");
     const searchBarContainer = document.getElementById("searchBarContainer");
-    const searchInput        = document.getElementById("searchInput");
-    const searchClearBtn     = document.getElementById("searchClearBtn");
-    const searchEmpty        = document.getElementById("searchEmpty");
-    const imageInput            = document.getElementById("imageInput");
+    const searchInput = document.getElementById("searchInput");
+    const searchClearBtn = document.getElementById("searchClearBtn");
+    const searchEmpty = document.getElementById("searchEmpty");
+    const imageInput = document.getElementById("imageInput");
     const imagePreviewContainer = document.getElementById("imagePreviewContainer");
-    const welcomeSection        = document.getElementById("welcomeSection");
-    const mainContent           = document.getElementById("mainContent");
-    const sidebar               = document.querySelector(".sidebar");
-    const recentLabel           = document.getElementById("recentLabel") || document.querySelector(".recent-label");
+    const welcomeSection = document.getElementById("welcomeSection");
+    const mainContent = document.getElementById("mainContent");
+    const sidebar = document.querySelector(".sidebar");
+    const recentLabel = document.getElementById("recentLabel") || document.querySelector(".recent-label");
 
     function renderSelectedFiles() {
         if (!imagePreviewContainer) return;
@@ -134,7 +134,7 @@ document.addEventListener("DOMContentLoaded", () => {
             '<mark class="search-highlight">$1</mark>'
         );
     }
-    
+
     // ── Regenerate the conversation title based on actual topic ──
     function regenerateTitle(chat, debounceMs) {
         if (debounceMs === undefined) debounceMs = 3000;
@@ -153,23 +153,23 @@ document.addEventListener("DOMContentLoaded", () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ messages: msgs })
             })
-            .then(res => res.json())
-            .then(data => {
-                if (data.title && data.title !== "New Conversation") {
-                    const t = chats.find(c => c.id === key);
-                    if (t && t.title !== data.title) {
-                        t.title = data.title;
-                        savePersist();
-                        renderChatList();
+                .then(res => res.json())
+                .then(data => {
+                    if (data.title && data.title !== "New Conversation") {
+                        const t = chats.find(c => c.id === key);
+                        if (t && t.title !== data.title) {
+                            t.title = data.title;
+                            savePersist();
+                            renderChatList();
+                        }
                     }
-                }
-            })
-            .catch(err => console.error("Title regeneration failed:", err));
+                })
+                .catch(err => console.error("Title regeneration failed:", err));
         }, debounceMs);
     }
     regenerateTitle._pending = {};
 
-function renderChatList(query = '') {
+    function renderChatList(query = '') {
         if (!chatHistory) return;
         chatHistory.innerHTML = '';
         const q = query.trim().toLowerCase();
@@ -208,7 +208,7 @@ function renderChatList(query = '') {
         chatActive = true;
         document.body.classList.add("chat-active");
         if (chatMessages) {
-            chatMessages.style.display = '';   
+            chatMessages.style.display = '';
             chatMessages.removeAttribute('hidden');
         }
         if (welcomeSection) welcomeSection.style.display = 'none';
@@ -291,7 +291,7 @@ function renderChatList(query = '') {
     function formatActionNormally(obj) {
         const action = (obj.action || '').trim().toLowerCase();
         const params = obj.parameters || obj || {};
-        
+
         function getVal(...keys) {
             for (const k of keys) {
                 if (params[k] !== undefined && params[k] !== null) return String(params[k]);
@@ -416,7 +416,7 @@ function renderChatList(query = '') {
 
         // Strip leading special tokens/headers that sometimes leak from certain models
         let formatted = text.replace(/^(\s|<\|endoftext\|>|<\|im_start\|>assistant<\|im_sep\|>|<\|im_end\|>)+/gi, '');
-        
+
         // Strip <coding> tags as they interfere with markdown parsing and shouldn't be rendered
         formatted = formatted.replace(/<\/?coding>/gi, '');
 
@@ -471,7 +471,7 @@ function renderChatList(query = '') {
 
         work = work.replace(/(?:<think>|<\|thought_start\|>|<thought>)([\s\S]*?)(?:<\/think>|<\|thought_end\|>|<\/thought>|$)/gi, (match, p1) => {
             const content = p1.trim();
-            if (!content) return ''; 
+            if (!content) return '';
 
             const isClosed = /(?:<\/think>|<\|thought_end\|>|<\/thought>)$/i.test(match);
             isThoughtClosed = isClosed;
@@ -528,7 +528,7 @@ function renderChatList(query = '') {
         work = work.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
             const id = `@@@CODE_${blocks.length}@@@`;
             let detectedLang = (lang || '').trim().replace(/@@@[A-Z0-9_]+@@@/gi, '');
-            
+
             // Recover swallowed code if the model forgot a newline (e.g. ```html<div...)
             let extraCode = "";
             const tagIndex = detectedLang.search(/[<{\[]/);
@@ -537,7 +537,7 @@ function renderChatList(query = '') {
                 detectedLang = detectedLang.substring(0, tagIndex).trim();
             }
             detectedLang = detectedLang || 'code';
-            
+
             // Find all thought placeholders inside the code content and move them outside
             const thoughtRegex = /@@@THOUGHT_\d+@@@/g;
             let extractedThoughts = "";
@@ -545,11 +545,11 @@ function renderChatList(query = '') {
             while ((matchThought = thoughtRegex.exec(codeContent)) !== null) {
                 extractedThoughts += "\n" + matchThought[0] + "\n";
             }
-            
+
             let cleanContent = (extraCode + (extraCode && !codeContent.startsWith('\n') ? '\n' : '') + codeContent).replace(/@@@THOUGHT_\d+@@@/g, '').trim();
             const isCmdOrShort = isCommandOrShortBlock(detectedLang, cleanContent);
             const isFinished = match.endsWith('```');
-            
+
             blocks.push({
                 type: 'code',
                 lang: detectedLang,
@@ -567,9 +567,9 @@ function renderChatList(query = '') {
         work = work.replace(/<file_card\s+([^>]*?)(?:\/>|>\s*<\/file_card>)/gi,
             (match, attrsStr, offset) => {
                 const filenameMatch = attrsStr.match(/filename=["']([^"']+)["']/i);
-                const langMatch     = attrsStr.match(/lang=["']([^"']+)["']/i);
-                const filename      = filenameMatch ? filenameMatch[1] : 'file.txt';
-                const lang          = langMatch ? langMatch[1] : 'text';
+                const langMatch = attrsStr.match(/lang=["']([^"']+)["']/i);
+                const filename = filenameMatch ? filenameMatch[1] : 'file.txt';
+                const lang = langMatch ? langMatch[1] : 'text';
 
                 // Find the closest unclaimed code block physically succeeding this tag in the string
                 const afterSub = work.substring(offset);
@@ -608,8 +608,8 @@ function renderChatList(query = '') {
 
                 let fileCardId = '';
                 if (codeIndex !== -1) {
-                    blocks[codeIndex].claimed  = true;
-                    blocks[codeIndex].hidden   = true;
+                    blocks[codeIndex].claimed = true;
+                    blocks[codeIndex].hidden = true;
                     if (isStreaming) {
                         fileCardId = 'fc_stream_' + codeIndex;
                     } else {
@@ -655,7 +655,7 @@ function renderChatList(query = '') {
                 id = `@@@THOUGHT_${index}@@@`;
                 const tKey = 't_' + index;
                 window.toggledBlocks = window.toggledBlocks || {};
-                let isExpanded = window.toggledBlocks[tKey] !== undefined ? window.toggledBlocks[tKey] : true;
+                let isExpanded = window.toggledBlocks[tKey] !== undefined ? window.toggledBlocks[tKey] : !block.isClosed;
                 let inner = escapeHtml(block.content || '').replace(/\n/g, '<br>');
 
                 if (!block.isClosed) {
@@ -741,8 +741,8 @@ function renderChatList(query = '') {
             } else if (block.type === 'filecard') {
                 id = `@@@FILECARD_${index}@@@`;
                 const safeFilename = escapeHtml(block.filename);
-                const safeLang     = escapeHtml(block.lang);
-                const safeId       = escapeHtml(block.fileCardId || '');
+                const safeLang = escapeHtml(block.lang);
+                const safeId = escapeHtml(block.fileCardId || '');
                 html = `
                     <div class="file-card"
                          onclick="window.openCodeViewer(this)"
@@ -817,7 +817,7 @@ function renderChatList(query = '') {
                     // Auto-generate a file card for hidden blocks that weren't claimed by an explicit <file_card> tag
                     if (block.autoCard && block.content && !block.claimed) {
                         const autoLang = block.lang || 'code';
-                        const ext      = normaliseExt(autoLang);
+                        const ext = normaliseExt(autoLang);
                         const autoFilename = window.extractFilenameFromCode ? window.extractFilenameFromCode(block.content, ext) : `snippet.${ext}`;
                         let fcId;
                         if (isStreaming) {
@@ -831,7 +831,7 @@ function renderChatList(query = '') {
                         window.fileCardCache = window.fileCardCache || {};
                         window.fileCardCache[fcId] = block.content;
                         const safeFilename = escapeHtml(autoFilename);
-                        const safeLang     = escapeHtml(autoLang);
+                        const safeLang = escapeHtml(autoLang);
                         html = `
                             <div class="file-card"
                                  onclick="window.openCodeViewer(this)"
@@ -913,34 +913,34 @@ function renderChatList(query = '') {
 
         return work;
     }
-window.extractFilenameFromCode = function(code, ext) {
-    if (!code) return 'snippet.' + ext;
-    const lines = code.trim().split('\n').slice(0, 10);
-    for (const line of lines) {
-        const match = line.match(/^\s*(?:#|\/\/|\/\*|<!--)\s*([\w-]+\.\w+)\s*(?:\*\/|-->)?\s*$/i);
-        if (match && match[1]) return match[1];
-    }
-    const classMatch = code.match(/(?:public\s+)?(?:class|struct|interface)\s+([a-zA-Z0-9_]+)/);
-    if (classMatch && classMatch[1]) return classMatch[1] + '.' + ext;
-    if (code.match(/def\s+main\s*\(/) || code.match(/int\s+main\s*\(/) || code.match(/function\s+main\s*\(/)) return 'main.' + ext;
-    const funcMatch = code.match(/(?:def|function|func)\s+([a-zA-Z0-9_]+)\s*\(/);
-    if (funcMatch && funcMatch[1]) return funcMatch[1] + '.' + ext;
-    return 'snippet.' + ext;
-};
+    window.extractFilenameFromCode = function (code, ext) {
+        if (!code) return 'snippet.' + ext;
+        const lines = code.trim().split('\n').slice(0, 10);
+        for (const line of lines) {
+            const match = line.match(/^\s*(?:#|\/\/|\/\*|<!--)\s*([\w-]+\.\w+)\s*(?:\*\/|-->)?\s*$/i);
+            if (match && match[1]) return match[1];
+        }
+        const classMatch = code.match(/(?:public\s+)?(?:class|struct|interface)\s+([a-zA-Z0-9_]+)/);
+        if (classMatch && classMatch[1]) return classMatch[1] + '.' + ext;
+        if (code.match(/def\s+main\s*\(/) || code.match(/int\s+main\s*\(/) || code.match(/function\s+main\s*\(/)) return 'main.' + ext;
+        const funcMatch = code.match(/(?:def|function|func)\s+([a-zA-Z0-9_]+)\s*\(/);
+        if (funcMatch && funcMatch[1]) return funcMatch[1] + '.' + ext;
+        return 'snippet.' + ext;
+    };
 
-window.downloadCode = (btn, ext) => {
-    const container   = btn.closest('.code-container');
-    const codeElement = container.querySelector('pre code');
-    const text        = codeElement.textContent;
-    const filename    = window.extractFilenameFromCode(text, normaliseExt(ext));
-    triggerDownload(filename, text);
-};
+    window.downloadCode = (btn, ext) => {
+        const container = btn.closest('.code-container');
+        const codeElement = container.querySelector('pre code');
+        const text = codeElement.textContent;
+        const filename = window.extractFilenameFromCode(text, normaliseExt(ext));
+        triggerDownload(filename, text);
+    };
 
     window.copyToClipboard = (btn) => {
         const container = btn.closest('.code-container');
         const codeElement = container.querySelector('pre code');
         const text = codeElement.textContent;
-        
+
         navigator.clipboard.writeText(text).then(() => {
             const originalHtml = btn.innerHTML;
             btn.innerHTML = '<span>✓ Copied!</span>';
@@ -961,7 +961,7 @@ window.downloadCode = (btn, ext) => {
 
         const inner = document.createElement("div");
         inner.classList.add("message-content");
-        
+
         if (imageUrl) {
             const img = document.createElement("img");
             img.src = imageUrl;
@@ -1017,7 +1017,7 @@ window.downloadCode = (btn, ext) => {
 
         let displayImageUrl = null;
         let attachmentName = null;
-        
+
         if (hasFiles) {
             const firstFile = window.selectedFiles[0];
             if (firstFile.type.startsWith('image/')) {
@@ -1045,12 +1045,12 @@ window.downloadCode = (btn, ext) => {
         chatInput.value = '';
         const filesToUpload = [...window.selectedFiles];
         clearFileSelection();
-        
+
         if (typeof handleInputResize === 'function') handleInputResize();
 
         setGeneratingState(true);
         showTypingIndicator();
-        
+
         window._inThinkingStream = false;
 
         let fullReply = "";
@@ -1092,7 +1092,7 @@ window.downloadCode = (btn, ext) => {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = "";
-            
+
             // Create the container but keep it hidden until the first text/token arrives
             aiMessageDiv = document.createElement("div");
             aiMessageDiv.classList.add("message", "ai-message");
@@ -1144,7 +1144,7 @@ window.downloadCode = (btn, ext) => {
                                         document.getElementById('cvLineCount').textContent = lines.length;
                                     }
                                     document.getElementById('cvCharCount').textContent = newCode.length.toLocaleString();
-                                    
+
                                     // Auto-scroll the code viewer body if it was at the bottom
                                     const cvBody = document.getElementById('cvBody');
                                     if (cvBody) {
@@ -1193,7 +1193,7 @@ window.downloadCode = (btn, ext) => {
                             currentResponseText += event.content;
                             scheduleRender();
                         } else if (event.type === "status") {
-                            
+
                             console.log("[Agent Status]", event.content);
                             if (!firstTokenReceived) {
                                 const ind = document.getElementById("typingIndicator");
@@ -1239,7 +1239,7 @@ window.downloadCode = (btn, ext) => {
                         }
                     } catch (e) { console.error("Event parse error", e); }
                 }
-                
+
                 const isAtBottom = chatMessages.scrollHeight - chatMessages.scrollTop <= chatMessages.clientHeight + 50;
                 if (isAtBottom) {
                     chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -1257,7 +1257,7 @@ window.downloadCode = (btn, ext) => {
                     aiContentDiv.innerHTML = formatMessage(currentResponseText);
                 }
             }
-            
+
             // Clean up currentResponseText before saving to prevent corrupting the LLM context
             let cleanResponse = rawResponseText || currentResponseText;
             try {
@@ -1270,14 +1270,14 @@ window.downloadCode = (btn, ext) => {
                         cleanResponse = actionObj.response;
                     }
                 }
-            } catch (e) {}
-            
+            } catch (e) { }
+
             chat.messages.push({ role: 'bot', content: cleanResponse });
             savePersist();
-            
+
             // Regenerate title after every complete exchange (debounced 3s)
             regenerateTitle(chat);
-            
+
             // Final render to apply non-streaming fallback logic (like stripping unclosed <think> tags)
             if (aiContentDiv) {
                 aiContentDiv.innerHTML = formatMessage(cleanResponse, false);
@@ -1300,7 +1300,7 @@ window.downloadCode = (btn, ext) => {
     function setGeneratingState(generating) {
         isGenerating = generating;
         chatInput.disabled = generating;
-        
+
         if (generating) {
             sendBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>`;
             sendBtn.setAttribute("aria-label", "Stop generation");
@@ -1334,51 +1334,51 @@ window.downloadCode = (btn, ext) => {
         let mediaRecorder = null;
         let audioChunks = [];
         let isRecording = false;
-        
+
         dictationBtn.addEventListener('click', async (e) => {
             e.preventDefault();
-            
+
             if (!isRecording) {
                 isRecording = true; // Set instantly to prevent double clicks
                 dictationBtn.classList.add('recording-active');
                 dictationBtn.style.color = '#ff4d4d';
                 chatInput.placeholder = "Listening...";
-                
+
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    
+
                     let options = { mimeType: 'audio/webm' };
                     if (typeof MediaRecorder.isTypeSupported === 'function' && !MediaRecorder.isTypeSupported('audio/webm')) {
                         options = { mimeType: 'audio/mp4' };
                     }
-                    
+
                     mediaRecorder = new MediaRecorder(stream, options);
                     audioChunks = [];
-                    
+
                     mediaRecorder.ondataavailable = (event) => {
                         if (event.data && event.data.size > 0) {
                             audioChunks.push(event.data);
                         }
                     };
-                    
+
                     mediaRecorder.onstop = async () => {
                         isRecording = false;
                         dictationBtn.classList.remove('recording-active');
                         dictationBtn.style.color = '';
                         chatInput.placeholder = "Transcribing...";
-                        
+
                         if (audioChunks.length === 0) {
                             chatInput.placeholder = "Ask anything";
                             return;
                         }
-                        
+
                         const mimeType = options.mimeType || 'audio/webm';
                         const audioBlob = new Blob(audioChunks, { type: mimeType });
                         const formData = new FormData();
                         // Give it an extension matching the mime type
                         const filename = mimeType.includes('mp4') ? 'dictation.mp4' : 'dictation.webm';
                         formData.append("audio", audioBlob, filename);
-                        
+
                         try {
                             const res = await fetch('/api/transcribe', {
                                 method: 'POST',
@@ -1388,7 +1388,7 @@ window.downloadCode = (btn, ext) => {
                             if (data.text) {
                                 chatInput.value += (chatInput.value ? ' ' : '') + data.text.trim();
                                 if (typeof handleInputResize === 'function') handleInputResize();
-                                
+
                                 // Automatically send the message after dictation
                                 if (!isGenerating && chatInput.value.trim() !== '') {
                                     handleSendMessage();
@@ -1400,11 +1400,11 @@ window.downloadCode = (btn, ext) => {
                         } catch (err) {
                             console.error("Dictation network error:", err);
                         }
-                        
+
                         chatInput.placeholder = "Ask anything";
                         stream.getTracks().forEach(track => track.stop());
                     };
-                    
+
                     mediaRecorder.start();
                 } catch (err) {
                     console.error("Microphone access error:", err);
@@ -1496,7 +1496,7 @@ window.downloadCode = (btn, ext) => {
 
     window.appendMessage = appendMessageDOM;
 
-    window.removeSelectedFile = function(index) {
+    window.removeSelectedFile = function (index) {
         window.selectedFiles.splice(index, 1);
         renderSelectedFiles();
     };
@@ -1557,7 +1557,7 @@ window.downloadCode = (btn, ext) => {
 
     window.addEventListener('dragover', (e) => {
         e.preventDefault();
-        
+
         let hasFiles = false;
         if (e.dataTransfer && e.dataTransfer.types) {
             for (let i = 0; i < e.dataTransfer.types.length; i++) {
@@ -1568,7 +1568,7 @@ window.downloadCode = (btn, ext) => {
                 }
             }
         }
-        
+
         if (hasFiles) {
             if (dragOverlay) dragOverlay.classList.add('active');
             clearTimeout(dragTimeout);
@@ -1679,7 +1679,7 @@ window.downloadCode = (btn, ext) => {
 
     document.getElementById('cvDownloadBtn').addEventListener('click', () => {
         const filename = document.getElementById('cvFilename').textContent;
-        const content  = document.getElementById('cvCode').textContent;
+        const content = document.getElementById('cvCode').textContent;
         triggerDownload(filename, content);
     });
 
@@ -1687,7 +1687,7 @@ window.downloadCode = (btn, ext) => {
 
     function openViewer(filename, lang, code) {
         document.getElementById('cvFilename').textContent = filename;
-        document.getElementById('cvLang').textContent     = lang;
+        document.getElementById('cvLang').textContent = lang;
 
         const escaped = code
             .replace(/&/g, '&amp;')
@@ -1696,7 +1696,7 @@ window.downloadCode = (btn, ext) => {
         document.getElementById('cvCode').innerHTML = escaped;
 
         // Build line-number gutter
-        const lines   = code.split('\n');
+        const lines = code.split('\n');
         const gutters = document.getElementById('cvGutters');
         gutters.innerHTML = lines
             .map((_, i) => `<div class="code-viewer-gutter-line">${i + 1}</div>`)
@@ -1725,17 +1725,17 @@ window.downloadCode = (btn, ext) => {
     window.openCodeViewer = function (cardEl) {
         currentCardEl = cardEl;
         const filename = cardEl.dataset.filename;
-        const lang     = cardEl.dataset.lang;
-        const fcId     = cardEl.dataset.filecardId;
+        const lang = cardEl.dataset.lang;
+        const fcId = cardEl.dataset.filecardId;
         const codeText = window.fileCardCache[fcId] || '';
         openViewer(filename, lang, codeText);
     };
 
     // Called from the Download button inside the file card
     window.downloadFileCard = function (btn) {
-        const card     = btn.closest('.file-card');
+        const card = btn.closest('.file-card');
         const filename = card.dataset.filename;
-        const fcId     = card.dataset.filecardId;
+        const fcId = card.dataset.filecardId;
         const codeText = window.fileCardCache[fcId] || '';
         triggerDownload(filename, codeText);
     };
