@@ -17,6 +17,19 @@ def ask_stream(
     if history is None:
         history = []
     
+    # Asynchronously warm the OS page cache for the most common specialist models
+    try:
+        import threading
+        from src.iris_engine import prefetch_model_file, _get_model_filename, ModelRole
+        def _bg_prefetch():
+            for r in [ModelRole.GENERAL, ModelRole.CODE]:
+                try:
+                    prefetch_model_file(_get_model_filename(r))
+                except Exception:
+                    pass
+        threading.Thread(target=_bg_prefetch, daemon=True).start()
+    except Exception:
+        pass
 
 
     # Image checking and formatting
