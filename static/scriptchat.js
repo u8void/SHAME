@@ -878,6 +878,12 @@ document.addEventListener("DOMContentLoaded", () => {
                             <div class="code-header">
                                 <span class="code-lang">${escapeHtml(block.lang)}</span>
                                 <div style="display: flex; gap: 8px;">
+                                    ${block.lang && block.lang.toLowerCase() === 'html' ? `
+                                    <button class="copy-btn" onclick="previewHtml(this)" style="background-color: rgba(163, 133, 255, 0.15); border-color: rgba(163, 133, 255, 0.3); color: #a385ff; display: flex; align-items: center; gap: 4px;">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                        Preview
+                                    </button>
+                                    ` : ''}
                                     <button class="copy-btn" onclick="downloadCode(this, '${escapeHtml(block.lang)}')">
                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                                         Download
@@ -984,6 +990,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const div = document.createElement("div");
             div.innerHTML = formatMessage(text);
             inner.appendChild(div);
+            setTimeout(() => { if (typeof Prism !== 'undefined') Prism.highlightAll(); }, 50);
         } else if (text) {
             const div = document.createElement("div");
             div.textContent = text;
@@ -1281,6 +1288,7 @@ document.addEventListener("DOMContentLoaded", () => {
             // Final render to apply non-streaming fallback logic (like stripping unclosed <think> tags)
             if (aiContentDiv) {
                 aiContentDiv.innerHTML = formatMessage(cleanResponse, false);
+                setTimeout(() => { if (typeof Prism !== 'undefined') Prism.highlightAll(); }, 50);
             }
 
         } catch (err) {
@@ -1738,5 +1746,145 @@ document.addEventListener("DOMContentLoaded", () => {
         const fcId = card.dataset.filecardId;
         const codeText = window.fileCardCache[fcId] || '';
         triggerDownload(filename, codeText);
+    };
+
+    window.previewHtml = function (btn) {
+        const container = btn.closest('.code-container');
+        const codeEl = container.querySelector('code');
+        const htmlCode = codeEl.textContent;
+
+        if (!document.getElementById('preview-modal-styles')) {
+            const style = document.createElement('style');
+            style.id = 'preview-modal-styles';
+            style.textContent = `
+                @keyframes preview-fade-in {
+                    from { opacity: 0; transform: scale(0.98); }
+                    to { opacity: 1; transform: scale(1); }
+                }
+                @keyframes preview-fade-out {
+                    from { opacity: 1; transform: scale(1); }
+                    to { opacity: 0; transform: scale(0.98); }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        const modal = document.createElement('div');
+        modal.className = 'html-preview-modal';
+        modal.style.position = 'fixed';
+        modal.style.top = '0';
+        modal.style.left = '0';
+        modal.style.width = '100vw';
+        modal.style.height = '100vh';
+        modal.style.backgroundColor = 'rgba(10, 10, 12, 0.85)';
+        modal.style.backdropFilter = 'blur(16px)';
+        modal.style.zIndex = '99999';
+        modal.style.display = 'flex';
+        modal.style.flexDirection = 'column';
+        modal.style.animation = 'preview-fade-in 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
+        modal.style.fontFamily = 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+        const header = document.createElement('div');
+        header.style.height = '64px';
+        header.style.backgroundColor = 'rgba(15, 15, 20, 0.9)';
+        header.style.borderBottom = '1px solid rgba(255, 255, 255, 0.08)';
+        header.style.display = 'flex';
+        header.style.alignItems = 'center';
+        header.style.justifyContent = 'space-between';
+        header.style.padding = '0 24px';
+        header.style.color = '#fff';
+
+        const title = document.createElement('div');
+        title.textContent = 'Live Webpage Preview';
+        title.style.fontWeight = '600';
+        title.style.fontSize = '15px';
+        title.style.letterSpacing = '-0.01em';
+        header.appendChild(title);
+
+        const controls = document.createElement('div');
+        controls.style.display = 'flex';
+        controls.style.gap = '8px';
+
+        const devices = [
+            { name: 'Desktop', width: '100%', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>' },
+            { name: 'Tablet', width: '768px', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>' },
+            { name: 'Mobile', width: '375px', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>' }
+        ];
+
+        const buttons = [];
+        devices.forEach(device => {
+            const devBtn = document.createElement('button');
+            devBtn.innerHTML = `${device.icon} <span style="margin-left: 6px;">${device.name}</span>`;
+            devBtn.style.backgroundColor = device.name === 'Desktop' ? '#a385ff' : 'rgba(255, 255, 255, 0.05)';
+            devBtn.style.color = '#fff';
+            devBtn.style.border = 'none';
+            devBtn.style.padding = '8px 16px';
+            devBtn.style.borderRadius = '20px';
+            devBtn.style.cursor = 'pointer';
+            devBtn.style.fontSize = '12px';
+            devBtn.style.fontWeight = '600';
+            devBtn.style.display = 'flex';
+            devBtn.style.alignItems = 'center';
+            devBtn.style.transition = 'all 0.2s';
+
+            devBtn.onclick = () => {
+                iframeWrapper.style.width = device.width;
+                buttons.forEach(b => b.style.backgroundColor = 'rgba(255, 255, 255, 0.05)');
+                devBtn.style.backgroundColor = '#a385ff';
+            };
+
+            buttons.push(devBtn);
+            controls.appendChild(devBtn);
+        });
+        header.appendChild(controls);
+
+        const closeBtn = document.createElement('button');
+        closeBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+        closeBtn.style.background = 'none';
+        closeBtn.style.border = 'none';
+        closeBtn.style.color = '#fff';
+        closeBtn.style.cursor = 'pointer';
+        closeBtn.style.opacity = '0.7';
+        closeBtn.style.transition = 'opacity 0.2s';
+        closeBtn.onmouseenter = () => closeBtn.style.opacity = '1';
+        closeBtn.onmouseleave = () => closeBtn.style.opacity = '0.7';
+        closeBtn.onclick = () => {
+            modal.style.animation = 'preview-fade-out 0.2s ease';
+            setTimeout(() => modal.remove(), 180);
+        };
+        header.appendChild(closeBtn);
+        modal.appendChild(header);
+
+        const bodyArea = document.createElement('div');
+        bodyArea.style.flex = '1';
+        bodyArea.style.display = 'flex';
+        bodyArea.style.justifyContent = 'center';
+        bodyArea.style.alignItems = 'center';
+        bodyArea.style.padding = '24px';
+        bodyArea.style.overflow = 'hidden';
+
+        const iframeWrapper = document.createElement('div');
+        iframeWrapper.style.width = '100%';
+        iframeWrapper.style.height = '100%';
+        iframeWrapper.style.maxWidth = '100%';
+        iframeWrapper.style.maxHeight = '100%';
+        iframeWrapper.style.backgroundColor = '#fff';
+        iframeWrapper.style.borderRadius = '16px';
+        iframeWrapper.style.boxShadow = '0 25px 60px rgba(0, 0, 0, 0.6)';
+        iframeWrapper.style.overflow = 'hidden';
+        iframeWrapper.style.transition = 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
+
+        const iframe = document.createElement('iframe');
+        iframe.style.width = '100%';
+        iframe.style.height = '100%';
+        iframe.style.border = 'none';
+        iframe.sandbox = 'allow-scripts allow-modals allow-same-origin';
+        iframe.srcdoc = htmlCode;
+
+        iframeWrapper.appendChild(iframe);
+        bodyArea.appendChild(iframeWrapper);
+        modal.appendChild(bodyArea);
+
+        document.body.appendChild(modal);
     };
 })();

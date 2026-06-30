@@ -1812,6 +1812,21 @@ body.chat-active .footere {
     line-height: 1.5;
 }
 
+.code-container pre[class*="language-"],
+.code-container code[class*="language-"] {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace !important;
+    font-size: 13px !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+}
+.code-container pre[class*="language-"] {
+    padding: 16px !important;
+}
+
+
 .settings-field input[type="range"] {
     -webkit-appearance: none;
     width: 100%;
