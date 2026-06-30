@@ -1027,23 +1027,21 @@ def _quality_guard(text: str) -> str:
         text = re.sub(r'[\u0400-\u04FF]+', '', text)
         # Remove CJK characters (Chinese/Japanese contamination)
         text = re.sub(r'[\u4e00-\u9fff\u3040-\u30FF\uAC00-\uD7AF]+', '', text)
-        # Remove isolated Latin words sandwiched between Arabic text
-        # Pattern: preceded by Arabic or start, 1-4 English words, followed by Arabic or end
+        
+        # Remove Latin/numbers embedded DIRECTLY inside Arabic words (e.g. الهراMك -> الهراك, والـs7آية -> والـآية)
+        text = re.sub(r'(?<=[\u0600-\u06FF])[A-Za-z0-9]+(?=[\u0600-\u06FF])', '', text)
+        
+        # Remove stray single Latin chars anywhere (but preserve numbers and words)
+        text = re.sub(r'(?<![A-Za-z])[A-Za-z](?![A-Za-z])', '', text)
+        
+        # Remove isolated English words directly attached to Arabic letters (missing spaces)
         text = re.sub(
-            r'(?<=[ \t\n.,،؛:])([A-Za-z]{2,}(?:\s+[A-Za-z]{2,}){0,3})(?=[ \t\n.,،؛:])',
+            r'(?<=[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF])'
+            r'([A-Za-z]{2,})'
+            r'(?=[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF.,،؛])',
             '',
             text
         )
-        # Also catch English words directly adjacent to Arabic
-        text = re.sub(
-            r'(?<=[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF])\s*'
-            r'([A-Za-z]{2,}(?:\s+[A-Za-z]{2,}){0,3})'
-            r'\s*(?=[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF.,،؛])',
-            ' ',
-            text
-        )
-        # Remove stray single Latin chars (but not 'I' standalone or numbers)
-        text = re.sub(r'(?<![A-Za-z])[A-Za-z](?![A-Za-z])', '', text)
 
         # Restore code blocks
         for i, block in enumerate(_code_blocks):
