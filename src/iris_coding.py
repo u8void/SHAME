@@ -25,9 +25,10 @@ def get_code_prompt(identity: str) -> str:
     "NEVER use `$` or `$$` for anything inside the code. "
     "ALWAYS use plain ASCII alphanumeric characters and regular underscores for variable names (e.g., `temp_celsius`). "
     "If you output a single `$` or `_{` inside your code block, the system will crash. Write PLAIN TEXT code only. "
-    "WEB DESIGN RULE: If the user asks for a website or web app, you MUST prioritize extreme visual excellence. "
-    "Do NOT output generic or basic UI. You must use modern, premium aesthetics (e.g., highly polished dark modes, vibrant curated cfolors, glassmorphism, fluid typography, smooth CSS micro-animations, hover effects, and Tailwind CSS if appropriate). "
-    "Always rely heavily on your deep knowledge of modern UI/UX design to deliver a 'WOW' factor. Write complete, realistic copy — never 'Lorem Ipsum'. "
+    "WEB DESIGN RULE (CRITICAL): If the user asks for a website, web app, or web interface, you MUST create it inside a SINGLE, self-contained HTML file (including all markup, styles via Tailwind CDN, and vanilla JS logic in a script tag). "
+    "You MUST ALWAYS use Tailwind CSS (loaded via Tailwind Play CDN script in the head: <script src=\"https://cdn.tailwindcss.com\"></script>) as the default and only styling framework. "
+    "Do NOT output basic or generic UI. Leverage Tailwind classes to implement premium, modern aesthetics (e.g., curated color schemes, vibrant dark/light modes, custom drop-shadows, smooth scale/translate hover transitions, and fluid layout grids). "
+    "Deliver a 'WOW' factor. Write complete, realistic copy — never 'Lorem Ipsum'. "
     "SELF-CONTAINED ANIMATION / CANVAS RULE (ABSOLUTE — applies whenever the task is a visual animation, canvas sketch, SVG graphic, or procedural art): "
     "RULE 1 — NO EXTERNAL ASSETS WHATSOEVER: You MUST NOT reference any external file, URL, or resource. "
     "This includes: src=\"*.svg\", src=\"*.png\", src=\"*.jpg\", url(...), fetch(...), XMLHttpRequest, or any network call. "
@@ -69,6 +70,7 @@ def get_reviewer_prompt(identity: str) -> str:
     "If you provide corrected code, you MUST wrap your final corrected code inside standard markdown triple backticks. "
     "CRITICAL: If you write a code block, the very first line inside the code block MUST be a comment containing ONLY the intended filename (e.g. // main.cpp or # app.py). "
     "VISUAL ANIMATION REVIEW RULE (CRITICAL): If the code under review is a visual animation, canvas sketch, or procedural art, you MUST ensure that it DOES NOT use simple geometric placeholders (like basic circles for characters, or plain rectangles for buildings/trees). It must feature rich procedural details, gradients, complex curves (bezierCurveTo, quadraticCurveTo), and detailed multi-layered backgrounds. If the code is basic or generic, you MUST fully implement and expand the visual elements, adding rich textures, curves, and high-fidelity rendering, outputting the complete revised code file. "
+    "WEB DESIGN REVIEW RULE (CRITICAL): If the code under review is a website, web app, or UI interface, you MUST ensure that it is implemented inside a SINGLE, complete HTML file and ALWAYS uses Tailwind CSS (via Tailwind CDN). If the code is split across files, uses custom CSS stylesheet links, or doesn't use Tailwind, you MUST rewrite it to be a single HTML file using Tailwind CSS classes, outputting the entire revised code file. "
     "If no code changes are needed, or if you are just summarizing, just explain your review in plain text without code blocks."
 )
 
