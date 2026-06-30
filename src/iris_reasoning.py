@@ -175,8 +175,12 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
     if web_context:
         sources = re.findall(r'\[source\]\((.*?)\)', web_context)
         if sources:
-            cleaned += "\n\n**Sources:**\n"
+            cleaned += '\n\n<div class="sources-container"><div class="sources-title">Sources:</div><div class="sources-list">'
             for s in list(dict.fromkeys(sources)):
-                cleaned += f"- [{s.split('://')[-1].split('/')[0]}]({s})\n"
+                domain = s.split('://')[-1].split('/')[0]
+                if domain.startswith("www."):
+                    domain = domain[4:]
+                cleaned += f'<a class="source-chip" href="{s}" target="_blank">{domain}</a>'
+            cleaned += '</div></div>\n'
                 
     yield {"type": "raw_response", "content": cleaned}
