@@ -462,6 +462,8 @@ def export_to_jsonl(pairs: List[Tuple[str, str]], out_dir: str):
 def base_models_match(configured_base: str, existing_base: str) -> bool:
     if not configured_base or not existing_base:
         return False
+    if "mlx_base_models/" in configured_base or "mlx_base_models/" in existing_base:
+        return True
     import re
     def clean(s: str) -> str:
         s = s.lower()
@@ -945,6 +947,47 @@ def main():
         print(f"\n{'='*60}\n  Training: {role.upper()} — {ROLE_MODEL_MAP[role]}\n{'='*60}\n")
         
         base_model = model_override if model_override else ROLE_MODEL_MAP[role]
+        
+        if target == "mps" and base_model == ROLE_MODEL_MAP[role]:
+            target_gguf_name = None
+            if role in ("triage", "router", "general"):
+                target_gguf_name = "iris_001.gguf"
+            elif role == "control":
+                target_gguf_name = "iris_004.gguf"
+            elif role == "math":
+                target_gguf_name = "iris_003.gguf"
+            elif role == "code":
+                target_gguf_name = "iris_004.gguf"
+            elif role == "reasoning":
+                target_gguf_name = "iris_005.gguf"
+            elif role == "vision":
+                target_gguf_name = "InternVL3_5-4B-Q4_K.gguf"
+
+            if target_gguf_name:
+                local_gguf = f"./models/{target_gguf_name}"
+                if not os.path.exists(local_gguf) or os.path.getsize(local_gguf) < 1024:
+                    print(f"[INFO] GGUF model {target_gguf_name} not found. Downloading it first to save bandwidth...")
+                    download_all_models([role])
+                
+                if os.path.exists(local_gguf) and os.path.getsize(local_gguf) >= 1024:
+                    mlx_base_path = f"./mlx_base_models/{role}"
+                    if not os.path.exists(mlx_base_path) or not os.path.exists(os.path.join(mlx_base_path, "config.json")):
+                        print(f"[INFO] Converting local GGUF model {target_gguf_name} to MLX format...")
+                        os.makedirs("./mlx_base_models", exist_ok=True)
+                        conv_cmd = [
+                            "gguf2mlx",
+                            "--input", local_gguf,
+                            "--output", mlx_base_path
+                        ]
+                        try:
+                            subprocess.run(conv_cmd, check=True)
+                            print(f"[INFO] GGUF model converted successfully to MLX at {mlx_base_path}")
+                        except Exception as e:
+                            print(f"[ERROR] Failed to convert GGUF to MLX: {e}. Falling back to standard HuggingFace model.")
+                            mlx_base_path = None
+                    
+                    if mlx_base_path and os.path.exists(mlx_base_path):
+                        base_model = mlx_base_path
         
         args.model = base_model
         args.output_dir = f"./iris_adapters/{role}"
