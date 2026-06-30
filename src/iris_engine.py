@@ -479,7 +479,6 @@ def _is_gguf_valid(path: str, url: Optional[str] = None) -> bool:
 
     return True
 
-
 def download_gguf(filename: str, quiet: bool = False) -> bool:
     dest_path = os.path.join(os.path.dirname(_HERE), "models", filename)
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
@@ -650,7 +649,6 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
                 logger.info(f"[Iris] Evicting cached {role.value} model because n_ctx {cached_n_ctx} < {override_n_ctx}")
                 _unload_locked(role.value)
 
-        # Check if the model is missing, incomplete, or corrupted, and auto-download if needed
         download_info = get_size_config_download_info(filename)
         expected_url = download_info[0] if download_info else None
         
@@ -668,6 +666,17 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
                 )
         cfg = load_generation_config()
         
+        # Load active size config profile (e.g. tiny.json, medium.json)
+        size = cfg.get("size", "tiny")
+        size_path = os.path.join(os.path.dirname(CONFIG_PATH), "sizes", f"{size}.json")
+        size_cfg = {}
+        if os.path.exists(size_path):
+            try:
+                with open(size_path, "r", encoding="utf-8") as f:
+                    size_cfg = json.load(f)
+            except Exception as e:
+                logger.warning(f"[Iris] Failed to load size config {size_path}: {e}")
+
         hw = get_hardware_profile()
 
         if override_n_ctx is not None:
@@ -685,10 +694,18 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
 
             
             n_ctx = min(n_ctx, ROLE_CTX.get(role, n_ctx))
+            if "context_length" in size_cfg:
+                n_ctx = min(n_ctx, size_cfg["context_length"])
             if not n_ctx:
                 n_ctx = hw.ctx_default
 
-        n_gpu_layers = cfg.get("n_gpu_layers", hw.n_gpu_layers)
+        # Determine n_gpu_layers with fallback to size config limits (prevents VRAM OOM on larger models)
+        n_gpu_layers = cfg.get("n_gpu_layers", -1)
+        if (n_gpu_layers == -1 or str(n_gpu_layers).lower() == "auto") and "num_layers" in size_cfg:
+            n_gpu_layers = size_cfg["num_layers"]
+        if n_gpu_layers == -1:
+            n_gpu_layers = hw.n_gpu_layers
+
         n_threads    = cfg.get("n_threads",    hw.n_threads)
         if str(n_threads).lower() == "auto":
             n_threads = hw.n_threads
