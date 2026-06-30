@@ -44,7 +44,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
             f"{final_query}"
         )
 
-    final_query += _language_directive(user_query, role=ModelRole.MATH)
+    # Language directive is applied at the _stream_tokens level via system prompt — no need to inject here
 
     # 2. History & Compaction
     optimized = [{"role": "user", "content": final_query}]
