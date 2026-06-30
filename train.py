@@ -989,6 +989,20 @@ def main():
                     if mlx_base_path and os.path.exists(mlx_base_path):
                         base_model = mlx_base_path
         
+        elif target == "cuda" and base_model == ROLE_MODEL_MAP[role]:
+            # Use pre-quantized 4-bit models from Hugging Face to save download bandwidth
+            cuda_4bit_map = {
+                "meta-llama/Llama-3.2-3B-Instruct": "unsloth/Llama-3.2-3B-Instruct-bnb-4bit",
+                "NousResearch/Hermes-3-Llama-3.1-8B": "unsloth/Hermes-3-Llama-3.1-8B-bnb-4bit",
+                "Qwen/Qwen2.5-Math-7B-Instruct": "unsloth/Qwen2.5-Math-7B-Instruct-bnb-4bit",
+                "Qwen/Qwen2.5-Coder-14B-Instruct": "unsloth/Qwen2.5-Coder-14B-Instruct-bnb-4bit",
+                "deepseek-ai/deepseek-llm-14b-chat": "unsloth/deepseek-llm-14b-chat-bnb-4bit",
+                "Qwen/Qwen3.5-9B-Instruct": "unsloth/Qwen3.5-9B-Instruct-bnb-4bit"
+            }
+            if base_model in cuda_4bit_map:
+                print(f"[INFO] Using pre-quantized HuggingFace model '{cuda_4bit_map[base_model]}' for training to save download bandwidth.")
+                base_model = cuda_4bit_map[base_model]
+        
         args.model = base_model
         args.output_dir = f"./iris_adapters/{role}"
         args.md_dir = ROLE_TRAINING_DIRS[role]
