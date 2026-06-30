@@ -231,14 +231,21 @@ class WebSearch:
             except Exception as e:
                 logger.debug(f"[WebSearch] Parallel Google failed: {e}")
 
-        # Merge and deduplicate by URL
+        # Merge, deduplicate, and demote Wikipedia URLs to the end
         seen_urls = set()
+        non_wiki_results = []
+        wiki_results = []
         for r in results_ddg + results_google:
             url_clean = r.href.strip().lower().rstrip('/')
             url_clean = re.sub(r'^https?://(www\.)?', '', url_clean)
             if url_clean not in seen_urls:
                 seen_urls.add(url_clean)
-                merged_results.append(r)
+                if "wikipedia.org" in r.href.lower():
+                    wiki_results.append(r)
+                else:
+                    non_wiki_results.append(r)
+        
+        merged_results = non_wiki_results + wiki_results
 
         # 2. Wikipedia Fallback (only if we got absolutely no results from DDG/Google)
         if len(merged_results) == 0 and time.time() < deadline:
