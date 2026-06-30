@@ -38,6 +38,24 @@ def classify_task(
     query_for_classification = re.sub(r'\[IMAGE_UPLOADED:[^\]]+\]', '', query_for_classification, flags=re.IGNORECASE)
     query_for_classification = query_for_classification.strip()
 
+    # Deterministic overrides for SEARCH triggers
+    query_lower = query_for_classification.lower()
+    search_triggers = [
+        r"\bwhat\s+is\b",
+        r"\btell\s+me\s+about\b",
+        r"\bwhy\b",
+        r"\bexists\b"
+    ]
+    if any(re.search(pat, query_lower) for pat in search_triggers):
+        clean_kw = query_for_classification
+        for pat in search_triggers:
+            clean_kw = re.sub(pat, "", clean_kw, flags=re.IGNORECASE).strip()
+        clean_kw = clean_kw.rstrip("?").strip()
+        if not clean_kw:
+            clean_kw = query_for_classification
+        logger.info(f"[Triage] Query triggered deterministic SEARCH route: {query_for_classification!r} -> keywords: {clean_kw!r}")
+        return TaskType.SEARCH, clean_kw
+
     # If previous message was an OBSERVATION (agent loop), continue as CONTROL
     if history and history[-1].get("role") == "user" and history[-1].get("content", "").strip().startswith("OBSERVATION:"):
         return TaskType.CONTROL, None
