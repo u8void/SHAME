@@ -23,26 +23,6 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     logger = logging.getLogger('iris')
 
     web_context = ""
-    # Skip web search for simple greetings, identity queries, or short pleasantries
-    skip_search = False
-    clean_query = re.sub(r'[^\w\s]', '', user_query.lower()).strip()
-    greetings = {"hi", "hello", "hey", "yo", "sup", "howdy", "greetings", "good morning", "good afternoon", "good evening", "test"}
-    identity_keywords = {"who are you", "who made you", "who created you", "what is your name", "whats your name", "what are you", "tell me about yourself", "your name"}
-    pleasantries = {"how are you", "how is it going", "hows it going", "how are you doing", "thank you", "thanks", "bye", "goodbye"}
-    if clean_query in greetings or any(kw in clean_query for kw in identity_keywords) or clean_query in pleasantries or len(clean_query.split()) <= 1:
-        skip_search = True
-
-    if not skip_search:
-        yield {"type": "status", "content": f"Searching the web for '{user_query}'..."}
-        try:
-            from src.web_search import WebSearch
-            ws = WebSearch()
-            web_context = ws.search_to_context(user_query, max_results=3)
-            if not web_context:
-                yield {"type": "status", "content": "Web search returned no results."}
-        except Exception as e:
-            logger.warning(f"Web search failed: {e}")
-            yield {"type": "status", "content": "Web search unavailable."}
 
     yield {"type": "status", "content": "Thinking..."}
     
