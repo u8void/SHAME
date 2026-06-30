@@ -129,7 +129,7 @@ The 3B/4B models (code, reasoning, general) are the heart of this tier. The 1.7B
 * **What it cannot do:**
   * Massive multi-step codebase architecture
   * Generate production-quality complex code systems reliably
-  * Graduate-level science (GPQA ~40.0%)
+  * Graduate-level science (GPQA ~40.0%)لاق
   * Long-form coherent technical writing
 
 ---
