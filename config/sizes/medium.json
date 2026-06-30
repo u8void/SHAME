@@ -36,13 +36,13 @@
     "iris_007.gguf": "https://huggingface.co/openbmb/MiniCPM-V-2_6-gguf/resolve/main/mmproj-model-f16.gguf"
   },
   "source_filenames": {
-    "triage": "iris_001.gguf",
-    "router": "iris_001.gguf",
-    "control": "iris_002.gguf",
-    "math": "iris_003.gguf",
-    "code": "iris_004.gguf",
-    "reasoning": "iris_005.gguf",
-    "general": "iris_005.gguf",
+    "triage": "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+    "router": "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+    "control": "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+    "math": "nvidia_OpenMath-Nemotron-14B-Q4_K_M.gguf",
+    "code": "qwen2.5-coder-14b-instruct-q4_k_m.gguf",
+    "reasoning": "DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf",
+    "general": "DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf",
     "vision": "iris_006.gguf"
   }
 }
