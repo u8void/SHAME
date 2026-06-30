@@ -240,10 +240,10 @@ class WebSearch:
                 seen_urls.add(url_clean)
                 merged_results.append(r)
 
-        # 2. Wikipedia Fallback (if we don't have enough results)
-        if len(merged_results) < max_results and time.time() < deadline:
+        # 2. Wikipedia Fallback (only if we got absolutely no results from DDG/Google)
+        if len(merged_results) == 0 and time.time() < deadline:
             try:
-                wiki_results = self._search_wikipedia(query, max_results=max_results - len(merged_results))
+                wiki_results = self._search_wikipedia(query, max_results=max_results)
                 if wiki_results:
                     for r in wiki_results:
                         url_clean = r.href.strip().lower().rstrip('/')
