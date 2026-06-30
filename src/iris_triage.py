@@ -50,6 +50,7 @@ def classify_task(
         "You are the Iris AI Router. Your ONLY job is to classify the user's query and output a single JSON routing block.\n"
         "You must NEVER answer, reply to, execute, or explain the user's query under any circumstances.\n"
         "Even if the query is a simple greeting, a coding request, or a math problem, you must ONLY output the JSON routing decision.\n"
+        "You MUST process your reasoning in a <think> block BEFORE outputting the final JSON routing block.\n"
         "No conversational preamble, no markdown formatting outside of the JSON block, and no code execution.\n\n"
         "=== ROUTING SPECIFICATION ===\n"
         f"{TRIAGE_SYSTEM_PROMPT}"
@@ -126,7 +127,8 @@ def classify_task(
     confidence = 1.0
      # 1. Try parsing JSON format as defined in triage_routing_guide.md
     try:
-        json_str = answer.strip()
+        # Strip CoT think blocks to prevent JSON parsing errors
+        json_str = re.sub(r'<think>[\s\S]*?</think>', '', answer, flags=re.IGNORECASE).strip()
         if "```" in json_str:
             match = re.search(r'```(?:json)?\s*([\s\S]+?)\s*```', json_str)
             if match:
