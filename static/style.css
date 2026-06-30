@@ -2383,6 +2383,10 @@ body.chat-active .footere {
     height: 24px;
     width: auto;
     object-fit: contain;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
 }
 
 .theme-switch-wrapper {
