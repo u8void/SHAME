@@ -79,7 +79,7 @@ class WebSearch:
             adapter = HTTPAdapter(max_retries=retry)
             self._session.mount("https://", adapter)
             self._session.mount("http://", adapter)
-        self._user_agent = "Iris-AI/1.0 (https://github.com/ahmed-barakat/Iris-AI)"
+        self._user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
     
 
@@ -209,36 +209,66 @@ class WebSearch:
             return []
         max_results = max(1, min(max_results, 10))
         deadline = time.time() + timeout
-        all_results: List[SearchResult] = []
+        merged_results: List[SearchResult] = []
 
-        # 1. Try DuckDuckGo first (Best quality general search)
-        if self._ddg_available and time.time() < deadline:
-            ddg_results = self._search_ddg(query, max_results=max_results, timeout=min(6.0, timeout))
-            if ddg_results:
-                logger.info(f"[WebSearch] DDG returned {len(ddg_results)} results for '{query[:60]}'")
-                all_results.extend(ddg_results)
+        import concurrent.futures
 
-        # 2. Wikipedia Fallback (If DDG didn't get enough results or was rate-limited)
-        if len(all_results) < max_results and time.time() < deadline:
-            wiki_results = self._search_wikipedia(query, max_results=max_results - len(all_results))
-            if wiki_results:
-                logger.info(f"[WebSearch] Wikipedia returned {len(wiki_results)} results")
-                all_results.extend(wiki_results)
-
-        # 3. Google Scrape Fallback
-        if len(all_results) == 0 and time.time() < deadline:
-            google_results = self._search_google_scrape(query)
-            if google_results:
-                logger.info(f"[WebSearch] Google returned {len(google_results)} results")
-                all_results.extend(google_results)
-
+        # 1. Run DuckDuckGo and Google searches in parallel
+        results_ddg = []
+        results_google = []
         
-        if include_full_text and all_results and all_results[0].href and time.time() < deadline:
-            full = self._fetch_full_text(all_results[0].href, timeout=4.0)
-            if full:
-                all_results[0].body = full[:4000]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            future_ddg = executor.submit(self._search_ddg, query, max_results, min(6.0, timeout))
+            future_google = executor.submit(self._search_google_scrape, query, min(6.0, timeout))
+            
+            try:
+                results_ddg = future_ddg.result(timeout=min(7.0, timeout))
+            except Exception as e:
+                logger.debug(f"[WebSearch] Parallel DDG failed: {e}")
+                
+            try:
+                results_google = future_google.result(timeout=min(7.0, timeout))
+            except Exception as e:
+                logger.debug(f"[WebSearch] Parallel Google failed: {e}")
 
-        return all_results[:max_results]
+        # Merge and deduplicate by URL
+        seen_urls = set()
+        for r in results_ddg + results_google:
+            url_clean = r.href.strip().lower().rstrip('/')
+            url_clean = re.sub(r'^https?://(www\.)?', '', url_clean)
+            if url_clean not in seen_urls:
+                seen_urls.add(url_clean)
+                merged_results.append(r)
+
+        # 2. Wikipedia Fallback (if we don't have enough results)
+        if len(merged_results) < max_results and time.time() < deadline:
+            try:
+                wiki_results = self._search_wikipedia(query, max_results=max_results - len(merged_results))
+                if wiki_results:
+                    for r in wiki_results:
+                        url_clean = r.href.strip().lower().rstrip('/')
+                        url_clean = re.sub(r'^https?://(www\.)?', '', url_clean)
+                        if url_clean not in seen_urls:
+                            seen_urls.add(url_clean)
+                            merged_results.append(r)
+            except Exception as e:
+                logger.debug(f"[WebSearch] Wikipedia fallback failed: {e}")
+
+        # 3. Fetch full text for the top results in parallel
+        if include_full_text and merged_results and time.time() < deadline:
+            targets = merged_results[:3]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(targets)) as executor:
+                futures = {executor.submit(self._fetch_full_text, r.href, timeout=4.0): r for r in targets}
+                for future in concurrent.futures.as_completed(futures, timeout=5.0):
+                    r = futures[future]
+                    try:
+                        full_content = future.result()
+                        if full_content:
+                            r.body = full_content[:4000]
+                    except Exception as e:
+                        logger.debug(f"[WebSearch] Parallel full-text fetch failed for {r.href}: {e}")
+
+        return merged_results[:max_results]
 
     def search_to_context(self, query: str, max_results: int = 3) -> str:
         
