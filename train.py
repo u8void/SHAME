@@ -989,8 +989,19 @@ def main():
                             subprocess.run(conv_cmd, check=True)
                             print(f"[INFO] GGUF model converted successfully to MLX at {mlx_base_path}")
                         except Exception as e:
-                            print(f"[ERROR] Failed to convert GGUF to MLX: {e}. Falling back to standard HuggingFace model.")
-                            mlx_base_path = None
+                            print(f"[ERROR] Failed to convert GGUF to MLX: {e}.")
+                            if os.path.exists(local_gguf):
+                                print(f"[INFO] Deleting corrupt GGUF file {local_gguf}...")
+                                os.remove(local_gguf)
+                            print(f"[INFO] Re-downloading GGUF model {target_gguf_name} from active tier config...")
+                            download_all_models([role])
+                            try:
+                                print(f"[Convert] Retrying GGUF to MLX conversion...")
+                                subprocess.run(conv_cmd, check=True)
+                                print(f"[INFO] GGUF model converted successfully to MLX on retry.")
+                            except Exception as e2:
+                                print(f"[ERROR] Retry conversion failed: {e2}. Falling back to standard model mapped in tiers.")
+                                mlx_base_path = None
                     
                     if mlx_base_path and os.path.exists(mlx_base_path):
                         base_model = mlx_base_path
@@ -1045,8 +1056,30 @@ def main():
                             tokenizer.save_pretrained(hf_base_path)
                             print(f"[INFO] GGUF model converted successfully to HuggingFace at {hf_base_path}")
                         except Exception as e:
-                            print(f"[ERROR] Failed to convert GGUF to HuggingFace: {e}. Falling back to standard model name.")
-                            hf_base_path = None
+                            print(f"[ERROR] Failed to convert GGUF to HuggingFace: {e}.")
+                            if os.path.exists(local_gguf):
+                                print(f"[INFO] Deleting corrupt GGUF file {local_gguf}...")
+                                os.remove(local_gguf)
+                            print(f"[INFO] Re-downloading GGUF model {target_gguf_name} from active tier config...")
+                            download_all_models([role])
+                            try:
+                                print(f"[Convert] Retrying GGUF to HuggingFace Safetensors conversion...")
+                                model = AutoModelForCausalLM.from_pretrained(
+                                    base_model,
+                                    gguf_file=local_gguf,
+                                    torch_dtype=torch.float16,
+                                    device_map="cpu"
+                                )
+                                tokenizer = AutoTokenizer.from_pretrained(
+                                    base_model,
+                                    gguf_file=local_gguf
+                                )
+                                model.save_pretrained(hf_base_path)
+                                tokenizer.save_pretrained(hf_base_path)
+                                print(f"[INFO] GGUF model converted successfully on retry.")
+                            except Exception as e2:
+                                print(f"[ERROR] Retry conversion failed: {e2}. Falling back to standard model mapped in tiers.")
+                                hf_base_path = None
                     
                     if hf_base_path and os.path.exists(hf_base_path):
                         base_model = hf_base_path
