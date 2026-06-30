@@ -100,7 +100,7 @@ def classify_task(
     llm = load_model(ModelRole.TRIAGE)
     res = llm.create_chat_completion(
         messages=triage_messages,
-        max_tokens=384,
+        max_tokens=1024,
         temperature=0.05,
         repeat_penalty=1.1,
     )
