@@ -88,6 +88,13 @@ class BookRetriever:
         self._cat_index = {}
 
         for path, category in file_entries:
+            # Skip the merged gorgeous_websites_rag_corpus.md file if the individual files exist
+            if "gorgeous_websites_rag_corpus.md" in path:
+                has_subfolder_files = any("rag_corpus" in p for p, _ in file_entries)
+                if has_subfolder_files:
+                    logger.info(f"[RAG] Skipping redundant merged file: {os.path.basename(path)}")
+                    continue
+
             try:
                 ext = os.path.splitext(path)[1].lower()
                 if ext in [".md", ".txt", ".json", ".xml", ".csv"]:
@@ -106,19 +113,25 @@ class BookRetriever:
                 logger.warning(f"[RAG] Could not read {path}: {e}")
                 continue
 
-            paragraphs = re.split(r'\n\s*\n', raw_text)
-            current_chunk = ""
-            for para in paragraphs:
-                para = para.strip()
-                if not para:
-                    continue
-                if len(current_chunk) + len(para) > 1500 and current_chunk:
+            # Keep coding RAG corpus files fully intact (no chunking) to preserve complete code examples and patterns
+            is_coding_kb = "coding" in path.lower() or category == "coding"
+            
+            if is_coding_kb:
+                self._add_chunk(raw_text.strip(), path, category)
+            else:
+                paragraphs = re.split(r'\n\s*\n', raw_text)
+                current_chunk = ""
+                for para in paragraphs:
+                    para = para.strip()
+                    if not para:
+                        continue
+                    if len(current_chunk) + len(para) > 1500 and current_chunk:
+                        self._add_chunk(current_chunk.strip(), path, category)
+                        current_chunk = para + "\n\n"
+                    else:
+                        current_chunk += para + "\n\n"
+                if current_chunk.strip():
                     self._add_chunk(current_chunk.strip(), path, category)
-                    current_chunk = para + "\n\n"
-                else:
-                    current_chunk += para + "\n\n"
-            if current_chunk.strip():
-                self._add_chunk(current_chunk.strip(), path, category)
 
         if not self.chunks:
             logger.info("[RAG] No chunks created. Check that files contain text.")

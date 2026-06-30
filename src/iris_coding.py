@@ -496,7 +496,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
     if context:
         final_query = (
             f"<retrieved_context>\n{context}\n</retrieved_context>\n\n"
-            f"If the retrieved context is relevant, use it. Otherwise, ignore it.\n\n"
+            f"You MUST use the reference architectures, layout patterns, and gorgeous single-file website templates provided in the retrieved context above to implement the gorgeous design, animations, typography, and styling for the website.\n\n"
             f"{final_query}"
         )
         
