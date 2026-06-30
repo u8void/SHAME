@@ -1,4 +1,5 @@
 import os, sys
+os.environ["GGML_CUDA_NO_VMM"] = "1"
 
 
 def _ensure_open_interpreter():
