@@ -950,18 +950,22 @@ def main():
         
         if target == "mps" and base_model == ROLE_MODEL_MAP[role]:
             target_gguf_name = None
-            if role in ("triage", "router", "general"):
-                target_gguf_name = "iris_001.gguf"
-            elif role == "control":
-                target_gguf_name = "iris_004.gguf"
-            elif role == "math":
-                target_gguf_name = "iris_003.gguf"
-            elif role == "code":
-                target_gguf_name = "iris_004.gguf"
-            elif role == "reasoning":
-                target_gguf_name = "iris_005.gguf"
-            elif role == "vision":
-                target_gguf_name = "InternVL3_5-4B-Q4_K.gguf"
+            if SIZE_CONFIG and "gguf" in SIZE_CONFIG:
+                target_gguf_name = SIZE_CONFIG["gguf"].get(role)
+            
+            if not target_gguf_name:
+                if role in ("triage", "router", "general"):
+                    target_gguf_name = "iris_001.gguf"
+                elif role == "control":
+                    target_gguf_name = "iris_004.gguf"
+                elif role == "math":
+                    target_gguf_name = "iris_003.gguf"
+                elif role == "code":
+                    target_gguf_name = "iris_004.gguf"
+                elif role == "reasoning":
+                    target_gguf_name = "iris_005.gguf"
+                elif role == "vision":
+                    target_gguf_name = "InternVL3_5-4B-Q4_K.gguf"
 
             if target_gguf_name:
                 local_gguf = f"./models/{target_gguf_name}"
@@ -990,18 +994,29 @@ def main():
                         base_model = mlx_base_path
         
         elif target == "cuda" and base_model == ROLE_MODEL_MAP[role]:
-            # Use pre-quantized 4-bit models from Hugging Face to save download bandwidth
-            cuda_4bit_map = {
-                "meta-llama/Llama-3.2-3B-Instruct": "unsloth/Llama-3.2-3B-Instruct-bnb-4bit",
-                "NousResearch/Hermes-3-Llama-3.1-8B": "unsloth/Hermes-3-Llama-3.1-8B-bnb-4bit",
-                "Qwen/Qwen2.5-Math-7B-Instruct": "unsloth/Qwen2.5-Math-7B-Instruct-bnb-4bit",
-                "Qwen/Qwen2.5-Coder-14B-Instruct": "unsloth/Qwen2.5-Coder-14B-Instruct-bnb-4bit",
-                "deepseek-ai/deepseek-llm-14b-chat": "unsloth/deepseek-llm-14b-chat-bnb-4bit",
-                "Qwen/Qwen3.5-9B-Instruct": "unsloth/Qwen3.5-9B-Instruct-bnb-4bit"
-            }
-            if base_model in cuda_4bit_map:
-                print(f"[INFO] Using pre-quantized HuggingFace model '{cuda_4bit_map[base_model]}' for training to save download bandwidth.")
-                base_model = cuda_4bit_map[base_model]
+            # Derive unsloth bnb-4bit repository name dynamically based on config
+            org_and_repo = base_model.split("/")
+            if len(org_and_repo) == 2:
+                unsloth_repo = f"unsloth/{org_and_repo[1]}-bnb-4bit"
+                # Check if this repository exists on HF hub to avoid crashing
+                try:
+                    from huggingface_hub import HfApi
+                    api = HfApi()
+                    api.model_info(unsloth_repo)
+                    print(f"[INFO] Found pre-quantized HuggingFace model '{unsloth_repo}' for training to save download bandwidth.")
+                    base_model = unsloth_repo
+                except Exception:
+                    # Fallback to hardcoded known mappings if API check fails or has a different pattern
+                    cuda_4bit_map = {
+                        "meta-llama/Llama-3.2-3B-Instruct": "unsloth/Llama-3.2-3B-Instruct-bnb-4bit",
+                        "NousResearch/Hermes-3-Llama-3.1-8B": "unsloth/Hermes-3-Llama-3.1-8B-bnb-4bit",
+                        "Qwen/Qwen2.5-Math-7B-Instruct": "unsloth/Qwen2.5-Math-7B-Instruct-bnb-4bit",
+                        "Qwen/Qwen2.5-Coder-14B-Instruct": "unsloth/Qwen2.5-Coder-14B-Instruct-bnb-4bit",
+                        "deepseek-ai/deepseek-llm-14b-chat": "unsloth/deepseek-llm-14b-chat-bnb-4bit",
+                        "Qwen/Qwen3.5-9B-Instruct": "unsloth/Qwen3.5-9B-Instruct-bnb-4bit"
+                    }
+                    if base_model in cuda_4bit_map:
+                        base_model = cuda_4bit_map[base_model]
         
         args.model = base_model
         args.output_dir = f"./iris_adapters/{role}"
