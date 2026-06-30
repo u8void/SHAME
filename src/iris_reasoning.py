@@ -88,7 +88,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
             f"Respond in the SAME LANGUAGE as the user's query."
         )
         
-    final_query += _language_directive(user_query, is_thinking_model=True)
+    final_query += _language_directive(user_query, role=ModelRole.REASONING)
     
     # 2. History & Compaction
     optimized = [{"role": "user", "content": final_query}]

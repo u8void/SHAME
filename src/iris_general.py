@@ -55,7 +55,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
             f"If the search results are incomplete, you may use your internal knowledge to supplement the answer."
         )
 
-    final_query += _language_directive(user_query)
+    final_query += _language_directive(user_query, role=ModelRole.GENERAL)
     
     # 2. History & Compaction
     optimized = [{"role": "user", "content": final_query}]

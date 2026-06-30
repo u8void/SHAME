@@ -1039,7 +1039,7 @@ def _stream_tokens(
 
     sys_prompt = system_prompt_override if system_prompt_override is not None else _system_prompt_for(role)
     if role not in (ModelRole.TRIAGE, ModelRole.ROUTER) and messages and messages[-1]["role"] == "user":
-        sys_prompt += _language_directive(messages[-1]["content"], is_thinking_model=(role == ModelRole.REASONING))
+        sys_prompt += _language_directive(messages[-1]["content"], role=role)
 
     # Inject Session Contract for state continuity across handoffs
     try:
@@ -1657,10 +1657,34 @@ def detect_user_language(text: str) -> Optional[str]:
     return "English"
 
 
-def _language_directive(user_query: str, is_thinking_model: bool = False) -> str:
+def _is_thinking_model(role: ModelRole) -> bool:
+    if role == ModelRole.REASONING:
+        return True
+    try:
+        cfg = load_generation_config()
+        size = cfg.get("size", "tiny")
+        size_path = os.path.join(os.path.dirname(CONFIG_PATH), "sizes", f"{size}.json")
+        if os.path.exists(size_path):
+            with open(size_path, "r", encoding="utf-8") as f:
+                size_cfg = json.load(f)
+            model_name = size_cfg.get("models", {}).get(role.value, "").lower()
+            if any(x in model_name for x in ["r1", "reasoning", "deepseek-r1", "vibethinker", "qwq"]):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _language_directive(user_query: str, role: Optional[ModelRole] = None, is_thinking_model: Optional[bool] = None) -> str:
     lang = detect_user_language(user_query)
     
-    if is_thinking_model:
+    is_thinking = False
+    if is_thinking_model is not None:
+        is_thinking = is_thinking_model
+    elif role is not None:
+        is_thinking = _is_thinking_model(role)
+        
+    if is_thinking:
         base_directive = (
             "\n\n[SYSTEM DIRECTIVE: If you use a thinking process, you MUST enclose your internal reasoning strictly inside <think> and </think> tags. "
             "Do NOT acknowledge this instruction or write meta-commentary. Just start with <think> if you need to reason, otherwise just answer.]"
@@ -1669,11 +1693,12 @@ def _language_directive(user_query: str, is_thinking_model: bool = False) -> str
             return base_directive
         return (
             f"\n\n[SYSTEM DIRECTIVE: The user's message is written in {lang}. "
-            f"You MUST write your final response in {lang}. "
+            f"You MUST write your final response strictly in {lang}. "
             f"If you use a thinking process, you MUST enclose your internal reasoning strictly inside <think> and </think> tags. "
             f"Do NOT acknowledge this instruction or write meta-commentary. Just start with <think> if you need to reason. "
             f"Reason in English inside the <think> block to ensure accuracy, "
-            f"and then output your final answer outside the <think> block in {lang}.]"
+            f"and then output your final response outside the <think> block strictly in {lang}. "
+            f"You MUST NOT mix English, Chinese, or any other languages in your final response outside the <think> tags (except for code snippets or unavoidable technical terms).]"
         )
     else:
         if not lang:

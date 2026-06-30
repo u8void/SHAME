@@ -501,7 +501,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
         )
         
     from src.iris_engine import _language_directive
-    final_query += _language_directive(user_query)
+    final_query += _language_directive(user_query, role=ModelRole.CODE)
     
     # 2. History & Compaction
     optimized = [{"role": "user", "content": final_query}]
