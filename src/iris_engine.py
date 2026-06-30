@@ -243,10 +243,10 @@ DEFAULT_THREADS_BATCH = 4
 
 
 IRIS_IDENTITY = (
-    "You are Iris AI, a powerful AI assistant created entirely by Iris Team "
+    "You are Iris AI, a powerful AI assistant created entirely by Iris Team. "
     "If asked who made you, who created you, or who you are, you MUST answer that you are Iris AI, created by Iris Team. "
     "Answer directly without introducing yourself with 'I am Iris AI' at the start of every message. "
-    "CRITICAL LANGUAGE RULE: You MUST always respond in English. All responses, explanations, code comments, and text MUST be written entirely in English, even if the user speaks or inputs in Arabic or any other language. Your internal reasoning process and final response must be fully in English."
+    "You are multilingual: always respond in the same language the user uses."
 )
 
 
@@ -986,6 +986,32 @@ def _quality_guard(text: str) -> str:
         "", text
     ).strip()
 
+    # --- Cross-language contamination cleanup ---
+    # If the text is predominantly Arabic, strip stray English/Chinese word fragments
+    # that bleed in due to quantized model confusion
+    _arabic_chars = sum(1 for c in text if 0x0600 <= ord(c) <= 0x06FF or 0x0750 <= ord(c) <= 0x077F or 0xFB50 <= ord(c) <= 0xFDFF or 0xFE70 <= ord(c) <= 0xFEFF)
+    _latin_chars = sum(1 for c in text if 'a' <= c.lower() <= 'z')
+    _chinese_chars = sum(1 for c in text if 0x4E00 <= ord(c) <= 0x9FFF)
+    _total_script = _arabic_chars + _latin_chars + _chinese_chars
+    
+    if _total_script > 20 and _arabic_chars > _total_script * 0.5:
+        # Text is majority Arabic — clean up foreign contamination
+        # Remove stray Chinese characters
+        if _chinese_chars > 0:
+            text = re.sub(r'[\u4e00-\u9fff]+', '', text)
+        # Remove isolated English words (1-3 words) that appear between Arabic text
+        # but preserve technical terms, numbers, and intentional English (e.g. code, names)
+        # Pattern: Arabic text, then 1-3 English words, then Arabic text again
+        text = re.sub(
+            r'(?<=[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF])\s+'
+            r'([A-Za-z]{2,}(?:\s+[A-Za-z]{2,}){0,2})'
+            r'\s+(?=[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF])',
+            ' ',
+            text
+        )
+        # Clean up double/triple spaces left after removal
+        text = re.sub(r'  +', ' ', text).strip()
+
     # --- Repetition loop detection: truncate if a sentence repeats 3+ times ---
     sentences = re.split(r'(?<=[.!?])\s+', text)
     if len(sentences) > 6:
@@ -1668,7 +1694,7 @@ def _is_thinking_model(role: ModelRole) -> bool:
             with open(size_path, "r", encoding="utf-8") as f:
                 size_cfg = json.load(f)
             model_name = size_cfg.get("models", {}).get(role.value, "").lower()
-            if any(x in model_name for x in ["r1", "reasoning", "deepseek-r1", "vibethinker", "qwq"]):
+            if any(x in model_name for x in ["r1", "reasoning", "deepseek-r1", "vibethinker", "qwq", "qwen3"]):
                 return True
     except Exception:
         pass
@@ -1683,6 +1709,9 @@ def _language_directive(user_query: str, role: Optional[ModelRole] = None, is_th
         is_thinking = is_thinking_model
     elif role is not None:
         is_thinking = _is_thinking_model(role)
+
+    # For Arabic specifically, use much stronger anti-mixing directives
+    is_arabic = (lang == "Arabic")
         
     if is_thinking:
         base_directive = (
@@ -1691,9 +1720,22 @@ def _language_directive(user_query: str, role: Optional[ModelRole] = None, is_th
         )
         if not lang:
             return base_directive
+        if is_arabic:
+            return (
+                "\n\n[CRITICAL LANGUAGE DIRECTIVE — ARABIC RESPONSE REQUIRED]\n"
+                "The user wrote in Arabic. You MUST follow these rules EXACTLY:\n"
+                "1. Your FINAL answer (everything outside <think> tags) MUST be written ENTIRELY in Arabic (العربية).\n"
+                "2. Do NOT insert ANY English words, Chinese characters, or other non-Arabic text in your final answer.\n"
+                "   - WRONG: 'الأهرامات هي مباني Graves ضخمة' (mixing English)\n"
+                "   - CORRECT: 'الأهرامات هي مبانٍ ضخمة' (pure Arabic)\n"
+                "3. You may think/reason in English inside <think>...</think> tags only.\n"
+                "4. Technical terms (e.g. Python, HTML) may remain in English only if there is no Arabic equivalent.\n"
+                "5. If you catch yourself writing English or Chinese in the final answer, STOP and rewrite in Arabic.\n"
+                "[END LANGUAGE DIRECTIVE]"
+            )
         return (
             f"\n\n[SYSTEM DIRECTIVE: The user's message is written in {lang}. "
-            f"You MUST write your final response strictly in {lang}. "
+            f"You MUST write your final response strictly and entirely in {lang}. "
             f"If you use a thinking process, you MUST enclose your internal reasoning strictly inside <think> and </think> tags. "
             f"Do NOT acknowledge this instruction or write meta-commentary. Just start with <think> if you need to reason. "
             f"Reason in English inside the <think> block to ensure accuracy, "
@@ -1703,6 +1745,14 @@ def _language_directive(user_query: str, role: Optional[ModelRole] = None, is_th
     else:
         if not lang:
             return ""
+        if is_arabic:
+            return (
+                "\n\n[CRITICAL LANGUAGE DIRECTIVE — ARABIC RESPONSE REQUIRED]\n"
+                "The user wrote in Arabic. You MUST respond ENTIRELY in Arabic (العربية).\n"
+                "Do NOT mix English, Chinese, or any other language into your response.\n"
+                "Do NOT write any thinking process or internal reasoning. Answer the query directly in Arabic.\n"
+                "[END LANGUAGE DIRECTIVE]"
+            )
         return (
             f"\n\n[SYSTEM DIRECTIVE: The user's message is written in {lang}. "
             f"You MUST write your final response in {lang}. "
