@@ -465,18 +465,33 @@ function renderChatList(query = '') {
         });
 
         // 2. Extract Think Block (Internal)
-        let hasThought = false;
+        let combinedThought = "";
+        let isThoughtClosed = true;
+        let firstThoughtId = "";
+
         work = work.replace(/(?:<think>|<\|thought_start\|>|<thought>)([\s\S]*?)(?:<\/think>|<\|thought_end\|>|<\/thought>|$)/gi, (match, p1) => {
             const content = p1.trim();
             if (!content) return ''; 
-            if (hasThought) return '';
 
             const isClosed = /(?:<\/think>|<\|thought_end\|>|<\/thought>)$/i.test(match);
-            const id = `@@@THOUGHT_${blocks.length}@@@`;
-            blocks.push({ type: 'thought', content: content, isClosed: isClosed });
-            hasThought = true;
-            return id;
+            isThoughtClosed = isClosed;
+
+            if (combinedThought === "") {
+                combinedThought = content;
+                firstThoughtId = `@@@THOUGHT_${blocks.length}@@@`;
+                blocks.push({ type: 'thought', content: '', isClosed: true });
+                return firstThoughtId;
+            } else {
+                combinedThought += "\n\n" + content;
+                return '';
+            }
         });
+
+        if (combinedThought !== "") {
+            const blockIndex = parseInt(firstThoughtId.match(/\d+/)[0]);
+            blocks[blockIndex].content = combinedThought;
+            blocks[blockIndex].isClosed = isThoughtClosed;
+        }
 
         work = work.replace(/<coding>([\s\S]*?)(?:<\/coding>|$)/gi, (match, p1) => {
             const id = `@@@CODING_${blocks.length}@@@`;
@@ -640,7 +655,7 @@ function renderChatList(query = '') {
                 id = `@@@THOUGHT_${index}@@@`;
                 const tKey = 't_' + index;
                 window.toggledBlocks = window.toggledBlocks || {};
-                let isExpanded = window.toggledBlocks[tKey] !== undefined ? window.toggledBlocks[tKey] : !block.isClosed;
+                let isExpanded = window.toggledBlocks[tKey] !== undefined ? window.toggledBlocks[tKey] : true;
                 let inner = escapeHtml(block.content || '').replace(/\n/g, '<br>');
 
                 if (!block.isClosed) {
