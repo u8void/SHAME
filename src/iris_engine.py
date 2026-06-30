@@ -630,12 +630,26 @@ def _unload_locked(role_to_evict: str = None, force_all: bool = False) -> None:
             pass
 
 
+def prefetch_model_file(filename: str) -> None:
+    try:
+        path = _model_path(filename)
+        if os.path.exists(path):
+            if hasattr(os, "posix_fadvise") and hasattr(os, "POSIX_FADV_WILLNEED"):
+                logger.info(f"[Iris] Prefetching model pages into OS cache: {filename}")
+                fd = os.open(path, os.O_RDONLY)
+                os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_WILLNEED)
+                os.close(fd)
+    except Exception as e:
+        logger.debug(f"[Iris] Prefetch failed for {filename}: {e}")
+
+
 def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama':
     
     global _model_pool, _model_paths
 
     with _model_lock:
         filename = _get_model_filename(role)
+        prefetch_model_file(filename)
         path = _model_path(filename)
         
         

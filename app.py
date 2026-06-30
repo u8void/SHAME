@@ -809,8 +809,17 @@ def model_status():
     })
 
 def warmup_models():
-    # Warmup disabled as requested to prevent loading/locking models in RAM on startup.
-    pass
+    # Prefetch GGUF files into OS page cache at startup (zero VRAM overhead)
+    try:
+        from src.iris_engine import prefetch_model_file, _get_model_filename, ModelRole
+        for role in [ModelRole.TRIAGE, ModelRole.GENERAL, ModelRole.CODE, ModelRole.CONTROL]:
+            try:
+                filename = _get_model_filename(role)
+                prefetch_model_file(filename)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 @app.route("/api/unload_models", methods=["POST"])
 def unload_models_endpoint():
