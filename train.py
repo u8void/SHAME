@@ -1038,7 +1038,6 @@ def main():
                         print(f"[INFO] Converting local GGUF model {target_gguf_name} to Hugging Face Safetensors format...")
                         os.makedirs(hf_base_path, exist_ok=True)
                         try:
-                            import torch
                             from transformers import AutoModelForCausalLM, AutoTokenizer
                             print(f"[Convert] Loading GGUF weights from {local_gguf} on CPU...")
                             model = AutoModelForCausalLM.from_pretrained(
