@@ -418,6 +418,17 @@ def should_web_search(text: str) -> bool:
 def web_search(query: str, max_results: int = 5) -> str:
     
     try:
+        from src.iris_engine import detect_user_language, translate_text
+        lang = detect_user_language(query)
+        if lang and lang != "English":
+            translated = translate_text(query, "English")
+            if translated and translated != query:
+                logger.info(f"[Controller WebSearch] Translated search query '{query}' to English: '{translated}'")
+                query = translated
+    except Exception as e:
+        logger.warning(f"[Controller WebSearch] Failed to translate query: {e}")
+
+    try:
         q = urllib.parse.quote_plus(query)
         url = f"https://html.duckduckgo.com/html/?q={q}"
         req = urllib.request.Request(

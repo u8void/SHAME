@@ -1013,8 +1013,12 @@ def _quality_guard(text: str) -> str:
 
 def translate_text(text: str, target_lang: str) -> str:
     target = target_lang.lower().strip()
-    if target == "english" or not target:
+    if not target:
         return text
+    if target == "english":
+        if detect_user_language(text) == "English":
+            return text
+        target = "en"
 
     try:
         from deep_translator import GoogleTranslator

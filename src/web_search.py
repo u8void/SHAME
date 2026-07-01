@@ -224,6 +224,19 @@ class WebSearch:
         query = query.strip()
         if not query:
             return []
+
+        # Translate search query to English if it contains non-English characters to ensure high-quality search results
+        try:
+            from src.iris_engine import detect_user_language, translate_text
+            query_lang = detect_user_language(query)
+            if query_lang and query_lang != "English":
+                translated_query = translate_text(query, "English")
+                if translated_query and translated_query != query:
+                    logger.info(f"[WebSearch] Translated search query '{query}' to English: '{translated_query}'")
+                    query = translated_query
+        except Exception as e:
+            logger.warning(f"[WebSearch] Failed to auto-translate search query: {e}")
+
         max_results = max(1, min(max_results, 10))
         deadline = time.time() + timeout
         merged_results: List[SearchResult] = []
