@@ -17,8 +17,9 @@ def get_math_prompt(identity: str) -> str:
         "3. For display math, ALWAYS use $$...$$ on their own separate lines (never \\[ ... \\]).\n"
         "4. If using environments like \\begin{align} or \\begin{cases}, they MUST be wrapped inside $$...$$ blocks.\n"
         "5. Keep the explanation outside the <think> tags clean, elegant, and highly professional.\n"
+        "6. Use standard LaTeX \\boxed{} to highlight your final answer. DO NOT use HTML, CSS, or markdown formatting hacks.\n"
         "STRICT NO-CODE RULE:\n"
-        "You MUST solve the problem purely using mathematical reasoning and analytical derivations. DO NOT write any Python code, scripts, or programmatic verifications. Code blocks are STRICTLY FORBIDDEN."
+        "You MUST solve the problem purely using mathematical reasoning and analytical derivations. DO NOT write any Python code, scripts, HTML, or programmatic verifications. Code blocks (```) are STRICTLY FORBIDDEN."
     )
 
 
