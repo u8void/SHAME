@@ -1014,6 +1014,15 @@ def translate_text(text: str, target_lang: str) -> str:
 
     try:
         from deep_translator import GoogleTranslator
+        try:
+            supported = GoogleTranslator().get_supported_languages(as_dict=True)
+            if target not in supported and target not in supported.values():
+                for name, code in supported.items():
+                    if target in name:
+                        target = code
+                        break
+        except Exception:
+            pass
     except ImportError:
         return text
 
@@ -1756,10 +1765,42 @@ def get_device(force_cpu=False):
     return _Device("cpu" if force_cpu else "gpu")
 
 def detect_user_language(text: str) -> Optional[str]:
-    
-    if not text:
+    if not text or not text.strip():
         return None
-    
+
+    # 1. Try online detection via Google Translate API
+    try:
+        import requests
+        from deep_translator import GoogleTranslator
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "auto",
+            "tl": "en",
+            "dt": "t",
+            "q": text[:500]  # First 500 characters is plenty for accurate detection
+        }
+        resp = requests.get(url, params=params, timeout=3.0)
+        if resp.ok:
+            data = resp.json()
+            detected_code = data[2]
+            if detected_code:
+                detected_code = detected_code.lower()
+                langs = GoogleTranslator().get_supported_languages(as_dict=True)
+                code_to_name = {code.lower(): name.title() for name, code in langs.items()}
+                # Overrides for some common code/name discrepancies
+                code_to_name['zh-cn'] = 'Chinese'
+                code_to_name['zh-tw'] = 'Chinese'
+                code_to_name['iw'] = 'Hebrew'
+                
+                lang_name = code_to_name.get(detected_code)
+                if lang_name:
+                    logger.info(f"[Iris] Online language detection: detected '{detected_code}' -> '{lang_name}'")
+                    return lang_name
+    except Exception as e:
+        logger.debug(f"[Iris] Online language detection failed: {e}")
+
+    # 2. Fallback to character-set heuristics (offline)
     sample = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
     sample = re.sub(r"https?://\S+", " ", sample)
 
@@ -1787,7 +1828,6 @@ def detect_user_language(text: str) -> Optional[str]:
 
     if not counts:
         return "English"
-    
     
     non_latin = {k: v for k, v in counts.items() if k != "English"}
     if non_latin:
