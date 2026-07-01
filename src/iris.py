@@ -63,7 +63,6 @@ def ask_stream(
     is_translated = False
 
     if user_lang and user_lang != "English":
-        yield {"type": "status", "content": f"Processing query in English to prevent hallucination..."}
         translated_query = translate_text(user_query, "English")
         if translated_query and translated_query != user_query:
             user_query = translated_query
