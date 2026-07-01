@@ -420,10 +420,9 @@ body {
 .chat-messages {
     flex: 1;
     overflow-y: auto;
-    padding: 24px 0;
+    padding: 24px 32px;
     display: flex;
     flex-direction: column;
-    align-items: center;
     gap: 16px;
     min-height: 0;
     scrollbar-width: thin;
@@ -495,9 +494,7 @@ body.chat-active .center-panel {
 
 .message {
     display: flex;
-    width: 100%;
-    max-width: 850px;
-    padding: 0 32px;
+    max-width: 75%;
     opacity: 0;
     transform: translateY(8px);
     animation: messageIn 0.3s var(--ease-out-expo) forwards;
@@ -511,11 +508,13 @@ body.chat-active .center-panel {
 }
 
 .user-message {
-    justify-content: flex-end;
+    align-self: flex-end;
 }
 
 .ai-message {
-    justify-content: flex-start;
+    align-self: center;
+    width: 100%;
+    max-width: 850px;
 }
 
 .message-content {
@@ -526,7 +525,6 @@ body.chat-active .center-panel {
     color: var(--text-primary);
     word-wrap: break-word;
     letter-spacing: -0.011em;
-    max-width: 85%;
 }
 
 .user-message .message-content {
