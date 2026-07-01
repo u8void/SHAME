@@ -614,18 +614,6 @@ def fallback_classify(query: str) -> TaskType | None:
             else:
                 return TaskType.CODING_SIMPLE
 
-    math_keywords = {
-        "math", "mathematics", "equation", "equations", "formula", "formulas",
-        "derivative", "derivatives", "integral", "integrals", "calculus",
-        "algebra", "geometry", "trigonometry", "matrix", "matrices", "vector", "vectors",
-        "theorem", "proof", "prove", "probability", "statistics", "combinatorics"
-    }
-    for kw in math_keywords:
-        if re.search(rf"\b{re.escape(kw)}\b", q):
-            return TaskType.MATH
-            
-    if re.search(r'[\d\s]+[\+\-\*\/=]+[\d\s]+', q):
-        return TaskType.MATH
 
     reasoning_keywords = {
         "logic", "logical", "puzzle", "puzzles", "riddle", "riddles",
