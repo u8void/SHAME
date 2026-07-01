@@ -158,11 +158,7 @@ def _run_continuation(
 
     yield {"type": "status", "content": "Stage 1 \u2014 Continuing code..."}
     full = ""
-<<<<<<< HEAD
-    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, skip_repetition_guard=True):
-=======
     for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings):
->>>>>>> a7e6c1c (coding master)
         yield ev
         if ev["type"] == "token":
             full += ev["content"]
@@ -180,11 +176,8 @@ def _run_continuation(
             idx = full.find("</think>")
             if idx != -1:
                 full = full[:idx] + full[idx + len("</think>"):]
-<<<<<<< HEAD
-=======
 
     # Strip trailing text after file_card tags inside code blocks
-    import re
     def strip_after_file_card(match):
         code_block = match.group(0)
         file_card_match = re.search(r'<file_card\s+[^>]*>.*?</file_card>', code_block, re.DOTALL)
@@ -197,7 +190,6 @@ def _run_continuation(
         return code_block
     
     full = re.sub(r'```[\s\S]*?```', strip_after_file_card, full)
->>>>>>> a7e6c1c (coding master)
 
     from src.iris_engine import _detect_language
     lang = _detect_language(full)
@@ -212,11 +204,7 @@ def _run_continuation(
              "Fix errors, fill gaps, ensure consistency. Return the final corrected code inside a ```python``` block, followed by a brief explanation."}
         ]
         reviewed = ""
-<<<<<<< HEAD
-        for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=get_reviewer_prompt("Iris"), skip_repetition_guard=True):
-=======
-        for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=get_reviewer_prompt("Iris"), ):
->>>>>>> a7e6c1c (coding master)
+        for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=get_reviewer_prompt("Iris")):
             yield ev
             if ev["type"] == "token":
                 reviewed += ev["content"]
@@ -376,11 +364,7 @@ def _run_complex_coding(
     # it were the answer. think_mode="status" suppresses the content and only pings
     # a lightweight "Thinking..." status; we forward status events for UI feedback
     # but never forward token/thinking content here.
-<<<<<<< HEAD
-    for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="status", settings=settings, extra_stop_words=["```"], skip_repetition_guard=True):
-=======
-    for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="status", settings=settings, extra_stop_words=["```"], ):
->>>>>>> a7e6c1c (coding master)
+    for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="status", settings=settings, extra_stop_words=["```"]):
         if ev["type"] == "status":
             yield ev
         if ev["type"] in ("token", "thinking"):
@@ -429,11 +413,7 @@ def _run_complex_coding(
         {"role": "user", "content": code_content}
     ]
     full_code = ""
-<<<<<<< HEAD
-    for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.4, think_mode="show", settings=settings, skip_repetition_guard=True):
-=======
-    for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.4, think_mode="show", settings=settings, ):
->>>>>>> a7e6c1c (coding master)
+    for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.4, think_mode="show", settings=settings):
         if user_lang == "English" or ev["type"] != "token":
             yield ev
         if ev["type"] == "token":
@@ -453,10 +433,7 @@ def _run_complex_coding(
             if idx != -1:
                 full_code = full_code[:idx] + full_code[idx + len("</think>"):]
 
-<<<<<<< HEAD
-=======
     # Strip trailing text after file_card tags inside code blocks
-    import re
     def strip_after_file_card(match):
         code_block = match.group(0)
         file_card_match = re.search(r'<file_card\s+[^>]*>.*?</file_card>', code_block, re.DOTALL)
@@ -469,7 +446,6 @@ def _run_complex_coding(
     
     full_code = re.sub(r'```[\s\S]*?```', strip_after_file_card, full_code)
 
->>>>>>> a7e6c1c (coding master)
     final_output = ""
     if isinstance(settings, dict) and settings.get("code_review"):
         yield {"type": "status", "content": "Stage 3 \u2014 Reviewing and optimizing..."}
@@ -483,11 +459,7 @@ def _run_complex_coding(
              "Return the final corrected code inside a ``` language block. "
              "IMPORTANT: Immediately AFTER the code block, you MUST write a detailed explanation of the code and its features for the user."}
         ]
-<<<<<<< HEAD
-        for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.4, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings, skip_repetition_guard=True):
-=======
-        for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.4, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings, ):
->>>>>>> a7e6c1c (coding master)
+        for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.4, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings):
             if ev["type"] == "token":
                 final_output += ev["content"]
             else:
@@ -523,11 +495,7 @@ def _run_complex_coding(
             yield {"type": "clear"}
             yield {"type": "status", "content": "Applying syntax auto-correction..."}
             corrected = ""
-<<<<<<< HEAD
-            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), skip_repetition_guard=True):
-=======
-            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), ):
->>>>>>> a7e6c1c (coding master)
+            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris")):
                 if user_lang == "English" or ev["type"] != "token":
                     yield ev
                 if ev["type"] == "token":
@@ -562,11 +530,7 @@ def _run_complex_coding(
             {"role": "user", "content": "Final review pass. Fix remaining issues inside a code block with filename. YOU MUST OUTPUT THE ENTIRE COMPLETE FILE WITH ALL ORIGINAL CONTENT INCLUDED (e.g., if it was an HTML file containing HTML/CSS/JS, output the full HTML file). Never output just a snippet. If there are no issues, just output 'No issues found.'"}
         ]
         _rev = ""
-<<<<<<< HEAD
-        for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), skip_repetition_guard=True):
-=======
-        for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), ):
->>>>>>> a7e6c1c (coding master)
+        for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris")):
             if ev["type"] == "token":
                 _rev += ev["content"]
         if not _keep_loaded:
@@ -620,16 +584,11 @@ def generate_internal_code(
 
 
 
-
 def _run_simple_coding(user_query: str, history: list, optimized: list, settings: dict) -> Generator[Dict[str, str], None, None]:
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     yield {"type": "status", "content": "Writing code..."}
     full = ""
-<<<<<<< HEAD
-    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, skip_repetition_guard=True):
-=======
-    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, ):
->>>>>>> a7e6c1c (coding master)
+    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings):
         if user_lang == "English" or ev["type"] != "token":
             yield ev
         if ev["type"] == "token":
@@ -650,10 +609,7 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
             if idx != -1:
                 full = full[:idx] + full[idx + len("</think>"):]
 
-<<<<<<< HEAD
-=======
     # Strip trailing text after file_card tags inside code blocks
-    import re
     def strip_after_file_card(match):
         code_block = match.group(0)
         file_card_match = re.search(r'<file_card\s+[^>]*>.*?</file_card>', code_block, re.DOTALL)
@@ -666,7 +622,6 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
     
     full = re.sub(r'```[\s\S]*?```', strip_after_file_card, full)
 
->>>>>>> a7e6c1c (coding master)
     from src.iris_engine import _detect_language
     lang = _detect_language(full)
     
@@ -682,11 +637,7 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
                  "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code."}
             ]
             corrected = ""
-<<<<<<< HEAD
-            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, skip_repetition_guard=True):
-=======
-            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, ):
->>>>>>> a7e6c1c (coding master)
+            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings):
                 if user_lang == "English" or ev["type"] != "token":
                     yield ev
                 if ev["type"] == "token":
@@ -728,11 +679,7 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
                 {"role": "user", "content": "Review this code for correctness, edge cases, performance, and best practices. Fix issues inside a code block with filename comment. YOU MUST OUTPUT THE ENTIRE COMPLETE FILE WITH ALL ORIGINAL CONTENT INCLUDED (e.g., if it was an HTML file containing HTML/CSS/JS, output the full HTML file). Never output just a snippet. If there are no issues, just output 'No issues found.'"}
             ]
             _rev = ""
-<<<<<<< HEAD
-            for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=get_reviewer_prompt("Iris"), skip_repetition_guard=True):
-=======
-            for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=get_reviewer_prompt("Iris"), ):
->>>>>>> a7e6c1c (coding master)
+            for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=get_reviewer_prompt("Iris")):
                 if ev["type"] == "token":
                     _rev += ev["content"]
             if not _keep_loaded:
