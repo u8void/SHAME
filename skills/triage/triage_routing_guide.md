@@ -117,14 +117,14 @@ exploitable "the model can choose to output plain text instead of JSON" surface.
 
 ### 4.4 `MATH`
 **Intent:** Formal mathematics, arithmetic, symbolic algebra, equations, proofs, probability,
-physics calculations.
+physics calculations, geometry, combinatorics, math word problems.
 **Triggers:** "calculate", "solve", "derivative", "integral", "prove that", bare arithmetic
-expressions, "differential equation", "algebra", "calculus", "math".
-**OVERRIDE RULE:** ANY QUERY ASKING HOW TO SOLVE A MATH PROBLEM, ASKING FOR AN EXPLANATION OF A MATH CONCEPT (e.g. differential equations, linear algebra, calculus), OR REQUESTING TO ACT AS A MATH PROFESSOR/TEACHER MUST ALWAYS BE ROUTED TO `MATH`, NOT `REASONING` OR `GENERAL`.
+expressions, "differential equation", "algebra", "calculus", "math", geometry terms ("circle", "triangle"), formulas (e.g. `$n$`).
+**OVERRIDE RULE:** ANY QUERY ASKING HOW TO SOLVE A MATH PROBLEM, ASKING FOR AN EXPLANATION OF A MATH CONCEPT (e.g. differential equations, linear algebra, calculus), OR INVOLVING MATH WORD PROBLEMS (e.g. geometry, combinatorics) MUST ALWAYS BE ROUTED TO `MATH`, NOT `REASONING` OR `GENERAL`.
 **Anchor:** "Prove that there are infinitely many primes." → `{"route": "MATH", "keywords": null, "confidence": 0.96}`
+**Anchor (Math Word Problem):** "You are given a positive integer $n$. There are $n$ points placed distinctively on the circumference of a circle. Into how many distinct regions is the interior divided?" → `{"route": "MATH", "keywords": null, "confidence": 0.98}`
 **Anchor (Math Explanation):** "How do I find the general solution to a second-order linear homogeneous differential equation with constant coefficients?" → `{"route": "MATH", "keywords": null, "confidence": 0.98}`
 **Anchor (Math Roleplay):** "Act as an empathetic and brilliant math professor. I want to learn how to solve differential equations." → `{"route": "MATH", "keywords": null, "confidence": 0.99}`
-
 ### 4.5 `CODE_SIMPLE`
 **Intent:** Isolated, single-file programming tasks. Includes canvas/SVG/procedural-art/animation
 requests per the paper's explicit override.
