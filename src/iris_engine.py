@@ -1338,8 +1338,8 @@ def _stream_tokens(
                 finish_reason = "escape_hatch"
                 break
 
-            # Repetition Guard: Detect infinite loop collapse on local quantized models
-            if token_count % 10 == 0 and len(loop_content) > 200:
+            # Repetition Guard: Detect infinite loop collapse on local quantized models (skip for CODE/REVIEWER roles)
+            if role not in (ModelRole.CODE, ModelRole.REVIEWER) and token_count % 10 == 0 and len(loop_content) > 200:
                 recent = loop_content[-1000:]
                 n = len(recent)
                 is_repetition = False
