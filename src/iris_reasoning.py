@@ -86,7 +86,6 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
             f"DO NOT pretend to search the web inside your thought process. The search results have ALREADY been provided to you in the SEARCH RESULTS block above. Read the provided results directly.\n"
             f"Use the search results above to inform your answer. If the search results are incomplete, you may use your internal knowledge to supplement the answer.\n"
             f"CRITICAL: After you output </think>, write ONLY the clean final answer. Do NOT include 'Final Answer:', 'Step-by-Step Explanation:', or numbered analysis steps outside of <think> tags. The text after </think> is shown directly to the user.\n"
-            f"Respond in the SAME LANGUAGE as the user's query."
         )
         
     final_query += _language_directive(user_query, role=ModelRole.REASONING)

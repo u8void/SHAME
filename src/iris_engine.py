@@ -1029,13 +1029,17 @@ def translate_text(text: str, target_lang: str) -> str:
     def protect_math(m):
         math_blocks.append(m.group(0))
         return f"\n<PROTECTED_MATH_{len(math_blocks)-1}>\n"
+        
+    # Protect think blocks entirely so they remain in English
+    think_blocks = []
+    def protect_think(m):
+        think_blocks.append(m.group(0))
+        return f"\n<PROTECTED_THINK_BLOCK_{len(think_blocks)-1}>\n"
 
     temp = re.sub(r'```[\s\S]*?```', protect_code, text)
     temp = re.sub(r'\$\$[\s\S]*?\$\$', protect_math, temp)
     temp = re.sub(r'`[^`]+`', protect_inline, temp)
-    
-    # Protect think tags
-    temp = temp.replace("<think>", "\n<PROTECTED_THINK_OPEN>\n").replace("</think>", "\n<PROTECTED_THINK_CLOSE>\n")
+    temp = re.sub(r'<think>[\s\S]*?(?:</think>|$)', protect_think, temp)
 
     # Split by newlines but group them into chunks so we don't hit the 5000 character limit,
     # while preserving paragraph context for better translation quality.
@@ -1101,8 +1105,8 @@ def translate_text(text: str, target_lang: str) -> str:
         final_text = re.sub(fr'<PROTECTED_MATH_{i}>', lambda m, c=math: c.replace('\\', r'\\'), final_text)
     for i, inline in enumerate(inline_code):
         final_text = re.sub(fr'<PROTECTED_INLINE_{i}>', lambda m, c=inline: c.replace('\\', r'\\'), final_text)
-
-    final_text = final_text.replace("<PROTECTED_THINK_OPEN>", "<think>").replace("<PROTECTED_THINK_CLOSE>", "</think>")
+    for i, think in enumerate(think_blocks):
+        final_text = re.sub(fr'<PROTECTED_THINK_BLOCK_{i}>', lambda m, c=think: c.replace('\\', r'\\'), final_text)
 
     return final_text
 
