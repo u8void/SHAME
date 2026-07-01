@@ -326,36 +326,38 @@ def _run_complex_coding(
     if not _keep_loaded:
         unload_model()
 
-    yield {"type": "status", "content": "Stage 3 \u2014 Reviewing and optimizing..."}
-
-    review_msgs = optimized + [
-        {"role": "assistant", "content": full_code},
-        {"role": "user",
-         "content": f"Review the above code against the original architecture blueprint:\n\n{raw_reasoning}\n\n"
-         "1. Verify that every file, function, and constraint in the blueprint was implemented correctly.\n"
-         "2. Fix all syntax errors, logical bugs, and edge cases.\n"
-         "Return the final corrected code inside a ``` language block. "
-         "IMPORTANT: Immediately AFTER the code block, you MUST write a detailed explanation of the code and its features for the user."}
-    ]
     final_output = ""
-    for ev in _stream_tokens(ModelRole.REASONING, review_msgs, max_tokens=None, temperature=0.4, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings):
-        if ev["type"] == "token":
-            final_output += ev["content"]
-        else:
-            yield ev
-    if not _keep_loaded:
-        unload_model()
+    if isinstance(settings, dict) and settings.get("code_review"):
+        yield {"type": "status", "content": "Stage 3 \u2014 Reviewing and optimizing..."}
 
-    # Fallback protection: if final_output is too short or lacks code blocks, fall back to Stage 2 code
-    if len(final_output.strip()) < 50 or "```" not in final_output:
-        logger.warning("[Complex Coding] Stage 3 final output is empty/invalid. Falling back to Stage 2 code.")
-        final_output = full_code
-        yield {"type": "status", "content": "Code quality verified. No modifications needed."}
-    else:
-        yield {"type": "clear"}
-        yield {"type": "status", "content": "Applying code optimizations..."}
-        if user_lang == "English":
+        review_msgs = optimized + [
+            {"role": "assistant", "content": full_code},
+            {"role": "user",
+             "content": f"Review the above code against the original architecture blueprint:\n\n{raw_reasoning}\n\n"
+             "1. Verify that every file, function, and constraint in the blueprint was implemented correctly.\n"
+             "2. Fix all syntax errors, logical bugs, and edge cases.\n"
+             "Return the final corrected code inside a ``` language block. "
+             "IMPORTANT: Immediately AFTER the code block, you MUST write a detailed explanation of the code and its features for the user."}
+        ]
+        for ev in _stream_tokens(ModelRole.REASONING, review_msgs, max_tokens=None, temperature=0.4, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings):
+            if ev["type"] == "token":
+                final_output += ev["content"]
+            else:
+                yield ev
+        if not _keep_loaded:
+            unload_model()
+
+        # Fallback protection: if final_output is too short or lacks code blocks, fall back to Stage 2 code
+        if len(final_output.strip()) < 50 or "```" not in final_output:
+            logger.warning("[Complex Coding] Stage 3 final output is empty/invalid. Falling back to Stage 2 code.")
+            final_output = full_code
+            yield {"type": "status", "content": "Code quality verified. No modifications needed."}
+        else:
+            yield {"type": "clear"}
+            yield {"type": "status", "content": "Applying code optimizations..."}
             yield {"type": "token", "content": final_output}
+    else:
+        final_output = full_code
 
     from src.iris_engine import _detect_language
     lang = _detect_language(final_output)
