@@ -600,7 +600,7 @@ def _unload_locked(role_to_evict: str = None, force_all: bool = False) -> None:
         keys_to_remove = []
         for r, llm in list(_model_pool.items()):
             # Cost-Aware Swapping: Keep the tiny Triage model resident in VRAM unless forced
-            if _keep_triage and not force_all and "iris_001.gguf" in str(_model_paths.get(r, "")):
+            if _keep_triage and not force_all and r in (ModelRole.TRIAGE.value, ModelRole.ROUTER.value):
                 continue
             keys_to_remove.append(r)
             try:
@@ -621,6 +621,27 @@ def _unload_locked(role_to_evict: str = None, force_all: bool = False) -> None:
             ctypes.CDLL(None).malloc_trim(0)
         except Exception:
             pass
+
+
+def _evict_from_pool_locked(pool_size_limit: int) -> None:
+    global _model_pool
+    if len(_model_pool) >= pool_size_limit:
+        try:
+            cfg = load_generation_config()
+            _keep_triage = cfg.get("keep_triage_loaded", True)
+        except Exception:
+            _keep_triage = True
+
+        role_to_evict = None
+        if _keep_triage:
+            for r in _model_pool:
+                if r not in (ModelRole.TRIAGE.value, ModelRole.ROUTER.value):
+                    role_to_evict = r
+                    break
+        if role_to_evict is None:
+            role_to_evict = next(iter(_model_pool))
+
+        _unload_locked(role_to_evict)
 
 
 def prefetch_model_file(filename: str) -> None:
@@ -779,9 +800,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
                 if os.path.isdir(_mlx_dir):
                     _mlx_temp = cfg.get("temperature", 0.7)
                     _pool_size_limit = _get_max_pool_size()
-                    if len(_model_pool) >= _pool_size_limit:
-                        oldest = next(iter(_model_pool))
-                        _unload_locked(oldest)
+                    _evict_from_pool_locked(_pool_size_limit)
                     _mlx_llm = _get_mlx_model(_mlx_dir, _mlx_temp)
                     if _mlx_llm is not None:
                             
@@ -811,9 +830,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
         _main_gpu = cfg.get("main_gpu", 0)
 
         _pool_size_limit = _get_max_pool_size()
-        if len(_model_pool) >= _pool_size_limit:
-            oldest = next(iter(_model_pool))
-            _unload_locked(oldest)
+        _evict_from_pool_locked(_pool_size_limit)
 
         logger.info(f"[Iris] Instantiating Llama: model={path}, n_gpu_layers={n_gpu_layers}, n_threads={n_threads}, main_gpu={_main_gpu}")
         try:

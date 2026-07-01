@@ -101,80 +101,81 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
     _r_temp = 0.4 if web_context else 0.3
     _r_tokens = 8192 if web_context else 6144
     
-    user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
-    for ev in _stream_tokens(ModelRole.REASONING, optimized, max_tokens=_r_tokens, temperature=_r_temp, think_mode="show"):
-        if user_lang == "English" or ev["type"] != "token":
-            yield ev
-        if ev["type"] == "token":
-            full += ev["content"]
-        elif ev["type"] == "thinking":
-            thought_process += ev["content"]
-            
-    if not _keep_loaded:
-        unload_model()
-
-    # Strip any leaked <think>/<\/think> tags from thought_process since _stream_tokens
-    # may yield a synthetic "</think>" as a thinking event when the model stops mid-think.
-    # We re-wrap the thought_process cleanly below to avoid double tags.
-    thought_clean = thought_process.strip()
-    thought_clean = re.sub(r'</?think>', '', thought_clean, flags=re.IGNORECASE).strip()
-    # Also strip other think tag variants
-    thought_clean = re.sub(r'<\|?/?thought(?:_(?:start|end))?\|?>', '', thought_clean, flags=re.IGNORECASE).strip()
-    
-    # Build the visible answer (without think tags) for quality checks and translation
-    visible_answer = full.strip()
-    # Strip any leaked think tags from visible answer too
-    visible_answer = re.sub(r'</?think>', '', visible_answer, flags=re.IGNORECASE).strip()
-    visible_answer = re.sub(r'<\|?/?thought(?:_(?:start|end))?\|?>', '', visible_answer, flags=re.IGNORECASE).strip()
-        
-    cleaned_answer = _quality_guard(visible_answer) if visible_answer else ""
-
-    # --- Output Completeness Validation ---
-    _EVASION_PHRASES = re.compile(
-        r'^(the final answer is[:\s]*|\[?routing complete\]?\.?|done\.?|answer[:\s]*|result[:\s]*)$',
-        re.IGNORECASE
-    )
-    _is_collapsed = (
-        len(cleaned_answer) < 5
-        or bool(_EVASION_PHRASES.match(cleaned_answer))
-    )
-    
-    if _is_collapsed:
-        logger.warning(f"[Completeness] Evasion-loophole detected. Visible output too thin ({len(cleaned_answer)} chars). Attempting recovery.")
-        yield {"type": "clear"}
-        yield {"type": "status", "content": "Retrying for complete response..."}
-        
-        _assistant_context = visible_answer
-        if thought_clean:
-            _assistant_context = f"<think>{thought_clean}</think>\n{cleaned_answer}"
-            
-        retry_msgs = optimized + [
-            {"role": "assistant", "content": _assistant_context},
-            {"role": "user", "content": (
-                "Your previous response was incomplete — it only contained a thought process or closing phrase without the actual answer. "
-                "Please provide the FULL, complete explanation now outside of any <think> tags. Do not skip or abbreviate."
-            )}
-        ]
-        retry_full = ""
-        retry_thought = ""
-        for ev in _stream_tokens(ModelRole.REASONING, retry_msgs, max_tokens=_r_tokens, temperature=0.5, think_mode="show"):
+    try:
+        user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
+        for ev in _stream_tokens(ModelRole.REASONING, optimized, max_tokens=_r_tokens, temperature=_r_temp, think_mode="show"):
             if user_lang == "English" or ev["type"] != "token":
                 yield ev
             if ev["type"] == "token":
-                retry_full += ev["content"]
+                full += ev["content"]
             elif ev["type"] == "thinking":
-                retry_thought += ev["content"]
-                
-        # Use the retry answer; combine think from both rounds
-        retry_answer = retry_full.strip()
-        retry_answer = re.sub(r'</?think>', '', retry_answer, flags=re.IGNORECASE).strip()
+                thought_process += ev["content"]
+
+        # Strip any leaked <think>/<\/think> tags from thought_process since _stream_tokens
+        # may yield a synthetic "</think>" as a thinking event when the model stops mid-think.
+        # We re-wrap the thought_process cleanly below to avoid double tags.
+        thought_clean = thought_process.strip()
+        thought_clean = re.sub(r'</?think>', '', thought_clean, flags=re.IGNORECASE).strip()
+        # Also strip other think tag variants
+        thought_clean = re.sub(r'<\|?/?thought(?:_(?:start|end))?\|?>', '', thought_clean, flags=re.IGNORECASE).strip()
         
-        if retry_answer:
-            cleaned_answer = _quality_guard(retry_answer)
-        # Merge retry thought into thought_clean for the final raw_response
-        if retry_thought.strip():
-            retry_thought_clean = re.sub(r'</?think>', '', retry_thought, flags=re.IGNORECASE).strip()
-            thought_clean = (thought_clean + "\n\n[Retry]\n" + retry_thought_clean).strip()
+        # Build the visible answer (without think tags) for quality checks and translation
+        visible_answer = full.strip()
+        # Strip any leaked think tags from visible answer too
+        visible_answer = re.sub(r'</?think>', '', visible_answer, flags=re.IGNORECASE).strip()
+        visible_answer = re.sub(r'<\|?/?thought(?:_(?:start|end))?\|?>', '', visible_answer, flags=re.IGNORECASE).strip()
+            
+        cleaned_answer = _quality_guard(visible_answer) if visible_answer else ""
+
+        # --- Output Completeness Validation ---
+        _EVASION_PHRASES = re.compile(
+            r'^(the final answer is[:\s]*|\[?routing complete\]?\.?|done\.?|answer[:\s]*|result[:\s]*)$',
+            re.IGNORECASE
+        )
+        _is_collapsed = (
+            len(cleaned_answer) < 5
+            or bool(_EVASION_PHRASES.match(cleaned_answer))
+        )
+        
+        if _is_collapsed:
+            logger.warning(f"[Completeness] Evasion-loophole detected. Visible output too thin ({len(cleaned_answer)} chars). Attempting recovery.")
+            yield {"type": "clear"}
+            yield {"type": "status", "content": "Retrying for complete response..."}
+            
+            _assistant_context = visible_answer
+            if thought_clean:
+                _assistant_context = f"<think>{thought_clean}</think>\n{cleaned_answer}"
+                
+            retry_msgs = optimized + [
+                {"role": "assistant", "content": _assistant_context},
+                {"role": "user", "content": (
+                    "Your previous response was incomplete — it only contained a thought process or closing phrase without the actual answer. "
+                    "Please provide the FULL, complete explanation now outside of any <think> tags. Do not skip or abbreviate."
+                )}
+            ]
+            retry_full = ""
+            retry_thought = ""
+            for ev in _stream_tokens(ModelRole.REASONING, retry_msgs, max_tokens=_r_tokens, temperature=0.5, think_mode="show"):
+                if user_lang == "English" or ev["type"] != "token":
+                    yield ev
+                if ev["type"] == "token":
+                    retry_full += ev["content"]
+                elif ev["type"] == "thinking":
+                    retry_thought += ev["content"]
+                    
+            # Use the retry answer; combine think from both rounds
+            retry_answer = retry_full.strip()
+            retry_answer = re.sub(r'</?think>', '', retry_answer, flags=re.IGNORECASE).strip()
+            
+            if retry_answer:
+                cleaned_answer = _quality_guard(retry_answer)
+            # Merge retry thought into thought_clean for the final raw_response
+            if retry_thought.strip():
+                retry_thought_clean = re.sub(r'</?think>', '', retry_thought, flags=re.IGNORECASE).strip()
+                thought_clean = (thought_clean + "\n\n[Retry]\n" + retry_thought_clean).strip()
+    finally:
+        if not _keep_loaded:
+            unload_model()
 
     # --- Translation (only translate the visible answer, not think blocks) ---
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)

@@ -67,16 +67,17 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     full = ""
     thought_process = ""
-    for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=8192, temperature=0.6, think_mode="show"):
-        if user_lang == "English" or ev["type"] != "token":
-            yield ev
-        if ev["type"] == "token":
-            full += ev["content"]
-        elif ev["type"] == "thinking":
-            thought_process += ev["content"]
-            
-    if not _keep_loaded:
-        unload_model()
+    try:
+        for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=8192, temperature=0.6, think_mode="show"):
+            if user_lang == "English" or ev["type"] != "token":
+                yield ev
+            if ev["type"] == "token":
+                full += ev["content"]
+            elif ev["type"] == "thinking":
+                thought_process += ev["content"]
+    finally:
+        if not _keep_loaded:
+            unload_model()
 
     # Strip any leaked <think>/<\/think> tags from thought_process since _stream_tokens
     # may yield a synthetic "</think>" as a thinking event when the model stops mid-think.

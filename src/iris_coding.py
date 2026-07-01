@@ -745,7 +745,11 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
     if history:
         optimized = [{"role": m["role"], "content": m["content"]} for m in history] + optimized
         
-    if is_complex:
-        yield from _run_complex_coding(user_query, history, optimized, context, retriever, settings)
-    else:
-        yield from _run_simple_coding(user_query, history, optimized, settings)
+    try:
+        if is_complex:
+            yield from _run_complex_coding(user_query, history, optimized, context, retriever, settings)
+        else:
+            yield from _run_simple_coding(user_query, history, optimized, settings)
+    finally:
+        if not _keep_loaded:
+            unload_model()

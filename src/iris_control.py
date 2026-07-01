@@ -42,13 +42,14 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     control_llm = load_model(ModelRole.CONTROL)
     
     action_json = ""
-    for chunk in control_llm.create_chat_completion(messages=control_messages, max_tokens=1024, stream=True, temperature=0.1):
-        delta = chunk["choices"][0].get("delta", {})
-        if "content" in delta:
-            action_json += delta["content"]
-
-    if not _keep_loaded:
-        unload_model()
+    try:
+        for chunk in control_llm.create_chat_completion(messages=control_messages, max_tokens=1024, stream=True, temperature=0.1):
+            delta = chunk["choices"][0].get("delta", {})
+            if "content" in delta:
+                action_json += delta["content"]
+    finally:
+        if not _keep_loaded:
+            unload_model()
 
     action_dict = parse_ai_response(action_json)
     if action_dict:
