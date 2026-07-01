@@ -931,6 +931,43 @@ document.addEventListener("DOMContentLoaded", () => {
         if (code.match(/def\s+main\s*\(/) || code.match(/int\s+main\s*\(/) || code.match(/function\s+main\s*\(/)) return 'main.' + ext;
         const funcMatch = code.match(/(?:def|function|func)\s+([a-zA-Z0-9_]+)\s*\(/);
         if (funcMatch && funcMatch[1]) return funcMatch[1] + '.' + ext;
+
+        // Fallback: Generate a meaningful name from the user's query
+        try {
+            let activeQuery = "";
+            const chat = typeof chats !== 'undefined' && typeof currentChatId !== 'undefined' ? chats.find(c => c.id === currentChatId) : null;
+            if (chat && chat.messages) {
+                for (let i = chat.messages.length - 1; i >= 0; i--) {
+                    if (chat.messages[i].role === 'user') {
+                        const q = chat.messages[i].content || "";
+                        if (q.split(/\s+/).length > 2) {
+                            activeQuery = q;
+                            break;
+                        }
+                    }
+                }
+                if (!activeQuery) {
+                    for (let i = chat.messages.length - 1; i >= 0; i--) {
+                        if (chat.messages[i].role === 'user') {
+                            activeQuery = chat.messages[i].content || "";
+                            break;
+                        }
+                    }
+                }
+            }
+            if (activeQuery) {
+                let words = activeQuery.toLowerCase().split(/\s+/);
+                const filler = new Set(['ok', 'please', 'create', 'make', 'a', 'the', 'for', 'it', 'website', 'page', 'landing', 'me', 'to', 'build', 'design', 'beautiful', 'using']);
+                words = words.filter(w => !filler.has(w) && w.match(/^\w+$/));
+                if (words.length > 0) {
+                    const slug = words.slice(0, 4).join('_');
+                    if (slug) return slug + '.' + ext;
+                }
+            }
+        } catch (e) {
+            console.error("Error generating slug filename:", e);
+        }
+
         return 'snippet.' + ext;
     };
 

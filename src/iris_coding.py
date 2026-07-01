@@ -372,6 +372,8 @@ def _run_complex_coding(
                 {"role": "user",
                  "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code inside a ```python``` block."}
             ]
+            yield {"type": "clear"}
+            yield {"type": "status", "content": "Applying syntax auto-correction..."}
             corrected = ""
             for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris")):
                 if user_lang == "English" or ev["type"] != "token":
@@ -384,7 +386,8 @@ def _run_complex_coding(
             second_err = check_syntax(corrected, lang)
             if second_err:
                 yield {"type": "token", "content": "\n\n> \u26a0\ufe0f Auto-correction attempted but some errors may remain."}
-            final_output = final_output + "\n\n---\n### \ud83d\udd27 Syntax Auto-Correction\n\n" + corrected
+            if "```" in corrected:
+                final_output = corrected
 
     
     yield {"type": "status", "content": "Verifying complex code in sandbox..."}
