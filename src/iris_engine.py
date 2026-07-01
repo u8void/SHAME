@@ -1040,6 +1040,10 @@ def translate_text(text: str, target_lang: str) -> str:
     temp = re.sub(r'\$\$[\s\S]*?\$\$', protect_math, temp)
     temp = re.sub(r'`[^`]+`', protect_inline, temp)
     temp = re.sub(r'<think>[\s\S]*?(?:</think>|$)', protect_think, temp)
+    # Also protect any standalone think tags that weren't caught by the paired regex above
+    # (e.g. orphaned </think> tags or variant tags)
+    temp = re.sub(r'</?think>', lambda m: (think_blocks.append(m.group(0)), f"<PROTECTED_THINK_BLOCK_{len(think_blocks)-1}>")[1], temp, flags=re.IGNORECASE)
+    temp = re.sub(r'<\|?/?thought(?:_(?:start|end))?\|?>', lambda m: (think_blocks.append(m.group(0)), f"<PROTECTED_THINK_BLOCK_{len(think_blocks)-1}>")[1], temp, flags=re.IGNORECASE)
 
     # Split by newlines but group them into chunks so we don't hit the 5000 character limit,
     # while preserving paragraph context for better translation quality.

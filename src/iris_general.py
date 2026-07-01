@@ -77,29 +77,38 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
             
     if not _keep_loaded:
         unload_model()
-        
-    cleaned = _quality_guard(full)
+
+    # Strip any leaked <think>/<\/think> tags from thought_process since _stream_tokens
+    # may yield a synthetic "</think>" as a thinking event when the model stops mid-think.
+    thought_clean = thought_process.strip()
+    thought_clean = re.sub(r'</?think>', '', thought_clean, flags=re.IGNORECASE).strip()
+    thought_clean = re.sub(r'<\|?/?thought(?:_(?:start|end))?\|?>', '', thought_clean, flags=re.IGNORECASE).strip()
+
+    # Strip any leaked think tags from the visible answer
+    visible_answer = full.strip()
+    visible_answer = re.sub(r'</?think>', '', visible_answer, flags=re.IGNORECASE).strip()
     
-    # Translate if necessary
+    cleaned = _quality_guard(visible_answer) if visible_answer else ""
+    
+    # Translate only the visible answer (not think blocks)
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     if user_lang != "English" and cleaned:
         from src.iris_engine import translate_text
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
-        translated = translate_text(cleaned, user_lang)
-        cleaned = translated
+        cleaned = translate_text(cleaned, user_lang)
+
+    # Build final display: think block (always English) + translated answer
+    display_content = ""
+    if thought_clean:
+        display_content = f"<think>\n{thought_clean}\n</think>\n\n{cleaned}"
+    else:
+        display_content = cleaned
+    
+    if display_content:
         yield {"type": "clear"}
-        yield {"type": "token", "content": cleaned}
-            
-    if full and cleaned and cleaned != full and user_lang == "English":
-        yield {"type": "clear"}
-        yield {"type": "token", "content": cleaned}
+        yield {"type": "token", "content": display_content}
+    elif not thought_clean:
+        yield {"type": "token", "content": "I'm Iris AI."}
+        display_content = "I'm Iris AI."
         
-    final_content = ""
-    if thought_process:
-        final_content += f"<think>\n{thought_process.strip()}\n</think>\n"
-    if cleaned:
-        final_content += cleaned
-    elif not thought_process:
-        final_content = "I'm Iris AI."
-        
-    yield {"type": "raw_response", "content": final_content}
+    yield {"type": "raw_response", "content": display_content}

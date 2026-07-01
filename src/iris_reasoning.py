@@ -112,40 +112,41 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
             
     if not _keep_loaded:
         unload_model()
+
+    # Strip any leaked <think>/<\/think> tags from thought_process since _stream_tokens
+    # may yield a synthetic "</think>" as a thinking event when the model stops mid-think.
+    # We re-wrap the thought_process cleanly below to avoid double tags.
+    thought_clean = thought_process.strip()
+    thought_clean = re.sub(r'</?think>', '', thought_clean, flags=re.IGNORECASE).strip()
+    # Also strip other think tag variants
+    thought_clean = re.sub(r'<\|?/?thought(?:_(?:start|end))?\|?>', '', thought_clean, flags=re.IGNORECASE).strip()
+    
+    # Build the visible answer (without think tags) for quality checks and translation
+    visible_answer = full.strip()
+    # Strip any leaked think tags from visible answer too
+    visible_answer = re.sub(r'</?think>', '', visible_answer, flags=re.IGNORECASE).strip()
+    visible_answer = re.sub(r'<\|?/?thought(?:_(?:start|end))?\|?>', '', visible_answer, flags=re.IGNORECASE).strip()
         
-    combined = ""
-    if thought_process:
-        combined += f"<think>\n{thought_process.strip()}"
-        if full:
-            combined += f"\n</think>\n{full}"
-        else:
-            combined += "\n</think>"
-    else:
-        combined = full
-        
-    cleaned = _quality_guard(combined)
+    cleaned_answer = _quality_guard(visible_answer) if visible_answer else ""
 
     # --- Output Completeness Validation ---
-    _visible = cleaned.strip()
-    _visible_no_think = re.sub(r'<think>[\s\S]*?</think>', '', _visible).strip()
-    
     _EVASION_PHRASES = re.compile(
         r'^(the final answer is[:\s]*|\[?routing complete\]?\.?|done\.?|answer[:\s]*|result[:\s]*)$',
         re.IGNORECASE
     )
     _is_collapsed = (
-        len(_visible_no_think) < 5
-        or bool(_EVASION_PHRASES.match(_visible_no_think))
+        len(cleaned_answer) < 5
+        or bool(_EVASION_PHRASES.match(cleaned_answer))
     )
     
     if _is_collapsed:
-        logger.warning(f"[Completeness] Evasion-loophole detected. Visible output too thin ({len(_visible_no_think)} chars). Attempting recovery.")
+        logger.warning(f"[Completeness] Evasion-loophole detected. Visible output too thin ({len(cleaned_answer)} chars). Attempting recovery.")
         yield {"type": "clear"}
         yield {"type": "status", "content": "Retrying for complete response..."}
         
-        _assistant_context = full
-        if thought_process.strip():
-            _assistant_context = f"<think>{thought_process}</think>\n{_visible_no_think}"
+        _assistant_context = visible_answer
+        if thought_clean:
+            _assistant_context = f"<think>{thought_clean}</think>\n{cleaned_answer}"
             
         retry_msgs = optimized + [
             {"role": "assistant", "content": _assistant_context},
@@ -155,31 +156,44 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
             )}
         ]
         retry_full = ""
+        retry_thought = ""
         for ev in _stream_tokens(ModelRole.REASONING, retry_msgs, max_tokens=_r_tokens, temperature=0.5, think_mode="show"):
             if user_lang == "English" or ev["type"] != "token":
                 yield ev
             if ev["type"] == "token":
                 retry_full += ev["content"]
+            elif ev["type"] == "thinking":
+                retry_thought += ev["content"]
                 
-        if thought_process.strip():
-            combined = f"<think>\n{thought_process.strip()}\n</think>\n{retry_full}"
-        else:
-            combined = retry_full
-            
-        cleaned = _quality_guard(combined)
-
-    if combined and cleaned and cleaned != combined:
-        yield {"type": "clear"}
-        yield {"type": "token", "content": cleaned}
+        # Use the retry answer; combine think from both rounds
+        retry_answer = retry_full.strip()
+        retry_answer = re.sub(r'</?think>', '', retry_answer, flags=re.IGNORECASE).strip()
         
+        if retry_answer:
+            cleaned_answer = _quality_guard(retry_answer)
+        # Merge retry thought into thought_clean for the final raw_response
+        if retry_thought.strip():
+            retry_thought_clean = re.sub(r'</?think>', '', retry_thought, flags=re.IGNORECASE).strip()
+            thought_clean = (thought_clean + "\n\n[Retry]\n" + retry_thought_clean).strip()
+
+    # --- Translation (only translate the visible answer, not think blocks) ---
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
-    if user_lang != "English" and cleaned:
+    if user_lang != "English" and cleaned_answer:
         from src.iris_engine import translate_text
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
-        translated = translate_text(cleaned, user_lang)
-        cleaned = translated
+        cleaned_answer = translate_text(cleaned_answer, user_lang)
+
+    # --- Build final combined output for display ---
+    # Re-assemble: think block (always English) + translated visible answer
+    display_content = ""
+    if thought_clean:
+        display_content = f"<think>\n{thought_clean}\n</think>\n\n{cleaned_answer}"
+    else:
+        display_content = cleaned_answer
+
+    if display_content:
         yield {"type": "clear"}
-        yield {"type": "token", "content": cleaned}
+        yield {"type": "token", "content": display_content}
         
     if web_context:
         sources = re.findall(r'\[source\]\((.*?)\)', web_context)
@@ -192,4 +206,4 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
                 unique_sources.append({"url": s, "domain": domain})
             yield {"type": "sources", "sources": unique_sources}
                 
-    yield {"type": "raw_response", "content": cleaned}
+    yield {"type": "raw_response", "content": display_content}
