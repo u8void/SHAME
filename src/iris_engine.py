@@ -1035,17 +1035,58 @@ def translate_text(text: str, target_lang: str) -> str:
     # Protect think tags
     temp = temp.replace("<think>", "\n<PROTECTED_THINK_OPEN>\n").replace("</think>", "\n<PROTECTED_THINK_CLOSE>\n")
 
-    # Split by newlines so we don't hit the 5000 character limit of GoogleTranslator
+    # Split by newlines but group them into chunks so we don't hit the 5000 character limit,
+    # while preserving paragraph context for better translation quality.
     lines = temp.split('\n')
     translated_lines = []
     
     try:
         translator = GoogleTranslator(source='auto', target=target)
+        
+        current_chunk_lines = []
+        current_chunk_len = 0
+        
+        def translate_current_chunk():
+            if not current_chunk_lines:
+                return []
+            text_to_translate = '\n'.join(current_chunk_lines)
+            
+            if not text_to_translate.strip():
+                return current_chunk_lines
+                
+            try:
+                translated_text = translator.translate(text_to_translate)
+                # Fallback in case translate returns None
+                if translated_text is None:
+                    return current_chunk_lines
+                return translated_text.split('\n')
+            except Exception as e:
+                import logging
+                logging.getLogger('iris').warning(f"Chunk translation failed: {e}")
+                return current_chunk_lines
+
         for line in lines:
-            if not line.strip() or line.strip().startswith("<PROTECTED_"):
+            is_protected = line.strip().startswith("<PROTECTED_")
+            
+            if is_protected:
+                if current_chunk_lines:
+                    translated_lines.extend(translate_current_chunk())
+                    current_chunk_lines = []
+                    current_chunk_len = 0
                 translated_lines.append(line)
             else:
-                translated_lines.append(translator.translate(line))
+                # If adding this line exceeds 4500 chars, flush the chunk
+                if current_chunk_len + len(line) > 4500 and current_chunk_lines:
+                    translated_lines.extend(translate_current_chunk())
+                    current_chunk_lines = []
+                    current_chunk_len = 0
+                    
+                current_chunk_lines.append(line)
+                current_chunk_len += len(line) + 1 # +1 for \n
+                
+        if current_chunk_lines:
+            translated_lines.extend(translate_current_chunk())
+            
         final_text = '\n'.join(translated_lines)
     except Exception as e:
         logger.warning(f"Translation failed: {e}")
