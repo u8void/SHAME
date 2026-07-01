@@ -477,6 +477,19 @@ def _is_gguf_valid(path: str, url: Optional[str] = None) -> bool:
     except Exception:
         return False
 
+    if url:
+        try:
+            import urllib.request
+            req = urllib.request.Request(url, method='HEAD')
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                remote_size = int(resp.headers.get('Content-Length', 0))
+                if remote_size > 0:
+                    if abs(local_size - remote_size) > 1024:
+                        logger.warning(f"[Iris] Size mismatch for {path}: local={local_size}, remote={remote_size}")
+                        return False
+        except Exception as e:
+            logger.debug(f"[Iris] Remote size check skipped for {path}: {e}")
+
     return True
 
 def download_gguf(filename: str, quiet: bool = False) -> bool:
