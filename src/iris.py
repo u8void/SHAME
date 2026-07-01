@@ -16,6 +16,8 @@ def ask_stream(
 ) -> Generator[Dict[str, str], None, None]:
     if history is None:
         history = []
+    if settings is None:
+        settings = {}
     
     # Asynchronously warm the OS page cache for the most common specialist models
     try:
@@ -67,6 +69,7 @@ def ask_stream(
         if translated_query and translated_query != user_query:
             user_query = translated_query
             is_translated = True
+            settings["user_lang"] = user_lang
 
         if history:
             translated_history = []

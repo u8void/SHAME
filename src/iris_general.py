@@ -64,7 +64,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     if history:
         optimized = [{"role": m["role"], "content": m["content"]} for m in history] + optimized
     # 3. Generation
-    user_lang = detect_user_language(user_query)
+    user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     full = ""
     thought_process = ""
     for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=8192, temperature=0.6, think_mode="show"):
@@ -81,7 +81,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     cleaned = _quality_guard(full)
     
     # Translate if necessary
-    user_lang = detect_user_language(user_query)
+    user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     if user_lang != "English" and cleaned:
         from src.iris_engine import translate_text
         yield {"type": "status", "content": f"Translating to {user_lang}..."}

@@ -102,7 +102,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
     _r_temp = 0.4 if web_context else 0.3
     _r_tokens = 8192 if web_context else 6144
     
-    user_lang = detect_user_language(user_query)
+    user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     for ev in _stream_tokens(ModelRole.REASONING, optimized, max_tokens=_r_tokens, temperature=_r_temp, think_mode="show"):
         if user_lang == "English" or ev["type"] != "token":
             yield ev
@@ -178,7 +178,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
         yield {"type": "clear"}
         yield {"type": "token", "content": cleaned}
         
-    user_lang = detect_user_language(user_query)
+    user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     if user_lang != "English" and cleaned:
         from src.iris_engine import translate_text
         yield {"type": "status", "content": f"Translating to {user_lang}..."}

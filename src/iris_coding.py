@@ -288,7 +288,7 @@ def _run_complex_coding(
     retriever,
     settings=None
 ) -> Generator[Dict[str, str], None, None]:
-    user_lang = detect_user_language(user_query)
+    user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     
     yield {"type": "status", "content": "Stage 1 \u2014 Deep reasoning..."}
 
@@ -489,7 +489,7 @@ def _run_complex_coding(
         else:
             yield {"type": "status", "content": "Code quality verified. No modifications needed."}
 
-    user_lang = detect_user_language(user_query)
+    user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     if user_lang != "English" and final_output:
         from src.iris_engine import translate_text
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
@@ -526,7 +526,7 @@ def generate_internal_code(
 
 
 def _run_simple_coding(user_query: str, history: list, optimized: list, settings: dict) -> Generator[Dict[str, str], None, None]:
-    user_lang = detect_user_language(user_query)
+    user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     yield {"type": "status", "content": "Writing code..."}
     full = ""
     for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, skip_repetition_guard=True):
@@ -626,7 +626,7 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
             else:
                 yield {"type": "status", "content": "Code quality verified. No modifications needed."}
 
-    user_lang = detect_user_language(user_query)
+    user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     if user_lang != "English" and full:
         from src.iris_engine import translate_text
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
