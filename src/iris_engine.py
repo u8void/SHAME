@@ -1277,6 +1277,10 @@ def _stream_tokens(
         finish_reason = "stop"
         buffer = ""
         token_count = 0
+        
+        # Continuation leading code fence stripping logic
+        stripped_leading_fence = False if (loop_idx > 0 and role in (ModelRole.CODE, ModelRole.REASONING)) else True
+        continuation_buffer = ""
 
         for chunk in stream:
             choices = chunk.get("choices", [])
@@ -1292,6 +1296,19 @@ def _stream_tokens(
                 continue
             
             token_count += 1
+
+            if not stripped_leading_fence:
+                continuation_buffer += token
+                if len(continuation_buffer) >= 20 or "\n" in continuation_buffer or (len(continuation_buffer) >= 10 and "`" not in continuation_buffer):
+                    match = re.match(r'^\s*```(?:html|python|py|javascript|js|css|sh|bash|json|markdown|md)?\s*', continuation_buffer, re.IGNORECASE)
+                    if match:
+                        logger.info(f"[Continuation] Stripped leading code fence from loop {loop_idx}: {continuation_buffer[:match.end()]!r}")
+                        continuation_buffer = continuation_buffer[match.end():]
+                    stripped_leading_fence = True
+                    token = continuation_buffer
+                    continuation_buffer = ""
+                else:
+                    continue
 
             # Cross-Domain Escape Hatch: MATH
             test_content = loop_content + buffer + token
@@ -1561,7 +1578,13 @@ def _stream_tokens(
             if "finish_reason" in choice and choice["finish_reason"]:
                 finish_reason = choice["finish_reason"]
 
-        logger.debug(f"[Model Finish] Role: {role.value.upper()} | Model: {model_name} | Tokens consumed: {token_count} | Status: {finish_reason}")
+        if not stripped_leading_fence and continuation_buffer:
+            match = re.match(r'^\s*```(?:html|python|py|javascript|js|css|sh|bash|json|markdown|md)?\s*', continuation_buffer, re.IGNORECASE)
+            if match:
+                continuation_buffer = continuation_buffer[match.end():]
+            buffer += continuation_buffer
+            stripped_leading_fence = True
+            continuation_buffer = ""
 
         if buffer:
             if think_mode == "hidden" and in_thinking:

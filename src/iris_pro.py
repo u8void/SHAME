@@ -1152,6 +1152,8 @@ async def ask_stream(
                     for i in range(MAX_CONTINUATION_LOOPS):
                         finish_reason = "stop"
                         loop_content = ""
+                        stripped_leading_fence = False if i > 0 else True
+                        continuation_buffer = ""
                         async for chunk in client.stream_chat(
                             model=Model.CODE_SIMPLE.value,
                             messages=code_messages,
@@ -1165,13 +1167,35 @@ async def ask_stream(
                                 delta = choice.get("delta", {})
                                 token = delta.get("content", "")
                                 if token:
-                                    loop_content += token
-                                    full_content += token
-                                    yield {"type": "token", "content": token}
+                                    if not stripped_leading_fence:
+                                        continuation_buffer += token
+                                        if len(continuation_buffer) >= 20 or "\n" in continuation_buffer or (len(continuation_buffer) >= 10 and "`" not in continuation_buffer):
+                                            match = re.match(r'^\s*```(?:html|python|py|javascript|js|css|sh|bash|json|markdown|md)?\s*', continuation_buffer, re.IGNORECASE)
+                                            if match:
+                                                continuation_buffer = continuation_buffer[match.end():]
+                                            stripped_leading_fence = True
+                                            token = continuation_buffer
+                                            continuation_buffer = ""
+                                        else:
+                                            continue
+                                    if token:
+                                        loop_content += token
+                                        full_content += token
+                                        yield {"type": "token", "content": token}
                                 if "finish_reason" in choice and choice["finish_reason"]:
                                     finish_reason = choice["finish_reason"]
                             except (KeyError, IndexError):
                                 pass
+                        if not stripped_leading_fence and continuation_buffer:
+                            match = re.match(r'^\s*```(?:html|python|py|javascript|js|css|sh|bash|json|markdown|md)?\s*', continuation_buffer, re.IGNORECASE)
+                            if match:
+                                continuation_buffer = continuation_buffer[match.end():]
+                            if continuation_buffer:
+                                loop_content += continuation_buffer
+                                full_content += continuation_buffer
+                                yield {"type": "token", "content": continuation_buffer}
+                            stripped_leading_fence = True
+                            continuation_buffer = ""
                         if finish_reason == "length":
                             log.warning("Model.CODE_SIMPLE hit max_tokens length in CODING_SIMPLE. Auto-continuing (loop %d)...", i+1)
                             code_messages.append({"role": "assistant", "content": loop_content})
@@ -1267,6 +1291,8 @@ async def ask_stream(
                     for i in range(MAX_CONTINUATION_LOOPS):
                         finish_reason = "stop"
                         loop_content = ""
+                        stripped_leading_fence = False if i > 0 else True
+                        continuation_buffer = ""
                         async for chunk in client.stream_chat(
                             model=Model.CODE_COMPLEX.value,
                             messages=code_messages,
@@ -1280,9 +1306,21 @@ async def ask_stream(
                                 delta = choice.get("delta", {})
                                 token = delta.get("content", "")
                                 if token:
-                                    raw_code += token
-                                    loop_content += token
-                                    yield {"type": "token", "content": token}
+                                    if not stripped_leading_fence:
+                                        continuation_buffer += token
+                                        if len(continuation_buffer) >= 20 or "\n" in continuation_buffer or (len(continuation_buffer) >= 10 and "`" not in continuation_buffer):
+                                            match = re.match(r'^\s*```(?:html|python|py|javascript|js|css|sh|bash|json|markdown|md)?\s*', continuation_buffer, re.IGNORECASE)
+                                            if match:
+                                                continuation_buffer = continuation_buffer[match.end():]
+                                            stripped_leading_fence = True
+                                            token = continuation_buffer
+                                            continuation_buffer = ""
+                                        else:
+                                            continue
+                                    if token:
+                                        raw_code += token
+                                        loop_content += token
+                                        yield {"type": "token", "content": token}
                                     
                                 if "finish_reason" in choice and choice["finish_reason"]:
                                     finish_reason = choice["finish_reason"]
@@ -1291,6 +1329,16 @@ async def ask_stream(
                                     yield {"type": "status", "content": "Writing code..."}
                             except (KeyError, IndexError):
                                 pass
+                        if not stripped_leading_fence and continuation_buffer:
+                            match = re.match(r'^\s*```(?:html|python|py|javascript|js|css|sh|bash|json|markdown|md)?\s*', continuation_buffer, re.IGNORECASE)
+                            if match:
+                                continuation_buffer = continuation_buffer[match.end():]
+                            if continuation_buffer:
+                                raw_code += continuation_buffer
+                                loop_content += continuation_buffer
+                                yield {"type": "token", "content": continuation_buffer}
+                            stripped_leading_fence = True
+                            continuation_buffer = ""
                                 
                         if finish_reason == "length":
                             log.warning("MiMo hit max_tokens length. Auto-continuing (loop %d)...", i+1)
@@ -1343,6 +1391,8 @@ async def ask_stream(
                     for i in range(MAX_CONTINUATION_LOOPS):
                         finish_reason = "stop"
                         loop_content = ""
+                        stripped_leading_fence = False if i > 0 else True
+                        continuation_buffer = ""
                         async for chunk in client.stream_chat(
                             model=Model.CODE_REVIEWER.value,
                             messages=review_messages,
@@ -1356,9 +1406,21 @@ async def ask_stream(
                                 delta = choice.get("delta", {})
                                 token = delta.get("content", "")
                                 if token:
-                                    raw_review += token
-                                    loop_content += token
-                                    yield {"type": "token", "content": token}
+                                    if not stripped_leading_fence:
+                                        continuation_buffer += token
+                                        if len(continuation_buffer) >= 20 or "\n" in continuation_buffer or (len(continuation_buffer) >= 10 and "`" not in continuation_buffer):
+                                            match = re.match(r'^\s*```(?:html|python|py|javascript|js|css|sh|bash|json|markdown|md)?\s*', continuation_buffer, re.IGNORECASE)
+                                            if match:
+                                                continuation_buffer = continuation_buffer[match.end():]
+                                            stripped_leading_fence = True
+                                            token = continuation_buffer
+                                            continuation_buffer = ""
+                                        else:
+                                            continue
+                                    if token:
+                                        raw_review += token
+                                        loop_content += token
+                                        yield {"type": "token", "content": token}
                                     
                                 if "finish_reason" in choice and choice["finish_reason"]:
                                     finish_reason = choice["finish_reason"]
@@ -1367,6 +1429,16 @@ async def ask_stream(
                                     yield {"type": "status", "content": "Reviewing code..."}
                             except (KeyError, IndexError):
                                 pass
+                        if not stripped_leading_fence and continuation_buffer:
+                            match = re.match(r'^\s*```(?:html|python|py|javascript|js|css|sh|bash|json|markdown|md)?\s*', continuation_buffer, re.IGNORECASE)
+                            if match:
+                                continuation_buffer = continuation_buffer[match.end():]
+                            if continuation_buffer:
+                                raw_review += continuation_buffer
+                                loop_content += continuation_buffer
+                                yield {"type": "token", "content": continuation_buffer}
+                            stripped_leading_fence = True
+                            continuation_buffer = ""
                                 
                         if finish_reason == "length":
                             log.warning("MiMo hit max_tokens length. Auto-continuing (loop %d)...", i+1)
