@@ -1044,7 +1044,12 @@ def translate_text(text: str, target_lang: str) -> str:
     temp = re.sub(r'```[\s\S]*?```', protect_code, text)
     temp = re.sub(r'\$\$[\s\S]*?\$\$', protect_math, temp)
     temp = re.sub(r'`[^`]+`', protect_inline, temp)
+    # Protect English think tags
     temp = re.sub(r'<think>[\s\S]*?(?:</think>|$)', protect_think, temp)
+    # Protect think-like tags in ANY language (e.g. <نتيجة>...</نتيجة>, <pensée>...</pensée>, etc.)
+    # Match any paired non-ASCII tags: <non-ascii...>content</non-ascii...>
+    # Non-ASCII = any character with code point > 127
+    temp = re.sub(r'<([\x80-\xff][\w]*)>([\s\S]*?)</\1>', lambda m: (think_blocks.append(m.group(0)), f"\n<PROTECTED_THINK_BLOCK_{len(think_blocks)-1}>\n")[1], temp)
     # Also protect any standalone think tags that weren't caught by the paired regex above
     # (e.g. orphaned </think> tags or variant tags)
     temp = re.sub(r'</?think>', lambda m: (think_blocks.append(m.group(0)), f"<PROTECTED_THINK_BLOCK_{len(think_blocks)-1}>")[1], temp, flags=re.IGNORECASE)
