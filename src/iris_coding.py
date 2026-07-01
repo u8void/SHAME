@@ -270,6 +270,7 @@ def _run_complex_coding(
     retriever,
     settings=None
 ) -> Generator[Dict[str, str], None, None]:
+    user_lang = detect_user_language(user_query)
     
     yield {"type": "status", "content": "Stage 1 \u2014 Deep reasoning..."}
 
@@ -294,7 +295,8 @@ def _run_complex_coding(
 
     raw_reasoning = ""
     for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="pass", settings=settings, extra_stop_words=["```"]):
-        yield ev
+        if user_lang == "English" or ev["type"] != "token":
+            yield ev
         if ev["type"] in ("token", "thinking"):
             raw_reasoning += ev["content"]
     if not _keep_loaded:
@@ -317,7 +319,8 @@ def _run_complex_coding(
     ]
     full_code = ""
     for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.4, think_mode="pass", settings=settings):
-        yield ev
+        if user_lang == "English" or ev["type"] != "token":
+            yield ev
         if ev["type"] == "token":
             full_code += ev["content"]
     if not _keep_loaded:
@@ -351,7 +354,8 @@ def _run_complex_coding(
     else:
         yield {"type": "clear"}
         yield {"type": "status", "content": "Applying code optimizations..."}
-        yield {"type": "token", "content": final_output}
+        if user_lang == "English":
+            yield {"type": "token", "content": final_output}
 
     from src.iris_engine import _detect_language
     lang = _detect_language(final_output)
@@ -368,7 +372,8 @@ def _run_complex_coding(
             ]
             corrected = ""
             for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris")):
-                yield ev
+                if user_lang == "English" or ev["type"] != "token":
+                    yield ev
                 if ev["type"] == "token":
                     corrected += ev["content"]
             if not _keep_loaded:
@@ -402,7 +407,8 @@ def _run_complex_coding(
         ]
         _rev = ""
         for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris")):
-            yield ev
+            if user_lang == "English" or ev["type"] != "token":
+                yield ev
             if ev["type"] == "token":
                 _rev += ev["content"]
         if not _keep_loaded:
@@ -451,10 +457,12 @@ def generate_internal_code(
 
 
 def _run_simple_coding(user_query: str, history: list, optimized: list, settings: dict) -> Generator[Dict[str, str], None, None]:
+    user_lang = detect_user_language(user_query)
     yield {"type": "status", "content": "Writing code..."}
     full = ""
     for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings):
-        yield ev
+        if user_lang == "English" or ev["type"] != "token":
+            yield ev
         if ev["type"] == "token":
             full += ev["content"]
             
@@ -477,7 +485,8 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
             ]
             corrected = ""
             for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings):
-                yield ev
+                if user_lang == "English" or ev["type"] != "token":
+                    yield ev
                 if ev["type"] == "token":
                     corrected += ev["content"]
                     
@@ -526,7 +535,8 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
             if "```" in _rev:
                 yield {"type": "clear"}
                 yield {"type": "status", "content": "Applying code review updates..."}
-                yield {"type": "token", "content": _rev}
+                if user_lang == "English":
+                    yield {"type": "token", "content": _rev}
                 _rl = _detect_language(_rev) or lang
                 _rev, _hw = _apply_harness(_rev, _rl)
                 for w in _hw:

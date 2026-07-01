@@ -52,9 +52,11 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
         optimized = [{"role": m["role"], "content": m["content"]} for m in history] + optimized
 
     # 3. Generation — model thinks and solves, no preemptive interception
+    user_lang = detect_user_language(user_query)
     full = ""
     for ev in _stream_tokens(ModelRole.MATH, optimized, max_tokens=4096, temperature=0.2, think_mode="show"):
-        yield ev
+        if user_lang == "English" or ev["type"] != "token":
+            yield ev
         if ev["type"] == "token":
             full += ev["content"]
 

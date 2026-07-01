@@ -101,8 +101,10 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
     _r_temp = 0.4 if web_context else 0.3
     _r_tokens = 6144 if web_context else 4096
     
+    user_lang = detect_user_language(user_query)
     for ev in _stream_tokens(ModelRole.REASONING, optimized, max_tokens=_r_tokens, temperature=_r_temp, think_mode="show"):
-        yield ev
+        if user_lang == "English" or ev["type"] != "token":
+            yield ev
         if ev["type"] == "token":
             full += ev["content"]
         elif ev["type"] == "thinking":
@@ -165,7 +167,8 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
         ]
         retry_full = ""
         for ev in _stream_tokens(ModelRole.REASONING, retry_msgs, max_tokens=_r_tokens, temperature=0.5, think_mode="show"):
-            yield ev
+            if user_lang == "English" or ev["type"] != "token":
+                yield ev
             if ev["type"] == "token":
                 retry_full += ev["content"]
         cleaned = _quality_guard(retry_full)
