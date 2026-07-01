@@ -414,7 +414,7 @@ body {
 }
 
 .sidebar.expanded+.main-content {
-    margin-left: var(--sidebar-expanded);
+    margin-left: var(--sidebar-collapsed);
 }
 
 .chat-messages {
@@ -494,10 +494,13 @@ body.chat-active .center-panel {
 
 .message {
     display: flex;
-    max-width: 100%;
+    width: 100%;
+    max-width: 850px;
+    margin: 0 auto;
     opacity: 0;
     transform: translateY(8px);
     animation: messageIn 0.3s var(--ease-out-expo) forwards;
+    box-sizing: border-box;
 }
 
 @keyframes messageIn {
@@ -508,13 +511,11 @@ body.chat-active .center-panel {
 }
 
 .user-message {
-    align-self: flex-end;
+    justify-content: flex-end;
 }
 
 .ai-message {
-    align-self: flex-start;
-    width: 100%;
-    max-width: 850px;
+    justify-content: flex-start;
     direction: ltr !important;
 }
 
@@ -1940,7 +1941,7 @@ body.chat-active .footere {
     }
 
     .message {
-        max-width: 90%;
+        max-width: 100%;
     }
 
     .hi-text {
