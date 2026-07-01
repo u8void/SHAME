@@ -1004,10 +1004,10 @@ document.addEventListener("DOMContentLoaded", () => {
     function appendMessageDOM(role, text, scroll = true, imageUrl = null, attachmentName = null) {
         const outer = document.createElement("div");
         outer.classList.add("message", role === "user" ? "user-message" : "ai-message");
-        outer.setAttribute("dir", "auto");
 
         const inner = document.createElement("div");
         inner.classList.add("message-content");
+        inner.setAttribute("dir", "auto");
 
         if (imageUrl) {
             const img = document.createElement("img");
@@ -1144,10 +1144,10 @@ document.addEventListener("DOMContentLoaded", () => {
             // Create the container but keep it hidden until the first text/token arrives
             aiMessageDiv = document.createElement("div");
             aiMessageDiv.classList.add("message", "ai-message");
-            aiMessageDiv.setAttribute("dir", "auto");
             aiMessageDiv.style.display = "none";
             aiContentDiv = document.createElement("div");
             aiContentDiv.classList.add("message-content");
+            aiContentDiv.setAttribute("dir", "auto");
             aiMessageDiv.appendChild(aiContentDiv);
             chatMessages.appendChild(aiMessageDiv);
 

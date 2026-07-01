@@ -546,7 +546,7 @@ body.chat-active .center-panel {
     border-radius: 20px;
     border-bottom-left-radius: 6px;
     padding: 16px 24px;
-    text-align: left;
+    text-align: start;
     box-shadow: 0 4px 12px var(--shadow-color);
     width: fit-content;
     max-width: 100%;
@@ -578,7 +578,7 @@ body.chat-active .center-panel {
     transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
     box-shadow: 0 4px 12px var(--shadow-color);
     max-width: 750px;
-    text-align: left;
+    text-align: start;
 }
 
 .thought-header {
