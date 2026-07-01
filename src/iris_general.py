@@ -7,16 +7,18 @@ from src.iris_engine import detect_user_language, _language_directive
 def get_general_prompt(identity: str) -> str:
     return (
         f"{identity}\n"
-        "You are the Iris AI General node. You are a versatile, highly intelligent conversational assistant. "
+        "You are a versatile, highly intelligent conversational assistant. "
         "You should be helpful, friendly, and thorough. Always provide detailed, comprehensive explanations. "
         "Do not give short or brief answers - take the time to fully explain concepts, provide context, "
         "examples, and background information. The user appreciates depth and completeness.\n"
+        "EXCEPTION: If the user explicitly asks 'who are you', 'who made you', or 'who created you', you MUST ignore the previous rule about detailed explanations and instead provide a concise, direct answer about your identity without listing your capabilities.\n"
         "RESPONSE FORMAT:\n"
         "- If you need to reason or think through a problem, put ALL reasoning inside <think>...</think> tags.\n"
-        "- After </think>, output a well-structured, detailed response. Use paragraphs, bullet points, "
-        "or numbered lists as appropriate to organize your explanation.\n"
-        "- Everything outside </think> is displayed directly to the user.\n"
-        "IMPORTANT: Always end your response naturally. Never append meta-comments like 'Done.' or 'I hope this helps.' "
+        "- AFTER </think> CLOSES, you MUST answer the user's actual question. Do NOT generate random or unrelated text.\n"
+        "- Your response after </think> MUST directly answer what the user asked. If they asked 'who are you', answer about yourself concisely.\n"
+        "- Everything outside <think> is displayed directly to the user.\n"
+        "CRITICAL: The text AFTER </think> is your final answer shown to the user. It MUST be relevant to the user's question. "
+        "Do NOT output unrelated questions or random text. Always end your response naturally. Never append meta-comments like 'Done.' or 'I hope this helps.' "
         "If you don't know the answer, just say so."
     )
 
@@ -89,17 +91,6 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     visible_answer = full.strip()
     visible_answer = re.sub(r'</?think>', '', visible_answer, flags=re.IGNORECASE).strip()
     
-    # Strip any rogue markdown code blocks (to prevent file card rendering)
-    visible_answer = re.sub(r'```[\s\S]*?(?:```|$)', '', visible_answer, flags=re.IGNORECASE)
-    # Strip any HTML tags with their content (span, div, etc.) - aggressive cleanup
-    visible_answer = re.sub(r'<(?:span|div|section|article)[^>]*>[\s\S]*?</(?:span|div|section|article)>', '', visible_answer, flags=re.IGNORECASE)
-    # Also strip any remaining orphaned HTML tags
-    visible_answer = re.sub(r'</?(?:span|div|section|article|style|script)[^>]*>', '', visible_answer, flags=re.IGNORECASE)
-    # Strip HTML-encoded angle brackets
-    visible_answer = re.sub(r'&lt;/?[\w]+[^&]*?&gt;', '', visible_answer, flags=re.IGNORECASE).strip()
-    # Strip any remaining HTML tags
-    visible_answer = re.sub(r'<[^>]+>', '', visible_answer).strip()
-    
     cleaned = _quality_guard(visible_answer) if visible_answer else ""
     
     # Translate only the visible answer (not think blocks)
@@ -120,7 +111,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
         yield {"type": "clear"}
         yield {"type": "token", "content": display_content}
     elif not thought_clean:
-        yield {"type": "token", "content": "I'm Iris AI."}
-        display_content = "I'm Iris AI."
+        yield {"type": "token", "content": "I am Iris AI."}
+        display_content = "I am Iris AI."
         
     yield {"type": "raw_response", "content": display_content}

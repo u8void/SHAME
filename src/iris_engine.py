@@ -240,8 +240,8 @@ DEFAULT_THREADS_BATCH = 4
 
 
 IRIS_IDENTITY = (
-    "You are Iris AI, a powerful AI assistant created entirely by Iris Team "
-    "If asked who made you, who created you, or who you are, you MUST answer that you are Iris AI, created by Iris Team. "
+    "You are Iris AI, a powerful AI assistant created entirely by Iris Team. "
+    "If asked who made you, who created you, or who you are, you MUST answer concisely that you are Iris AI and DO NOT list your capabilities. "
     "Answer directly without introducing yourself with 'I am Iris AI' at the start of every message. "
     "CRITICAL LANGUAGE RULE: You MUST always respond in English. All responses, explanations, code comments, and text MUST be written entirely in English, even if the user speaks or inputs in Arabic or any other language. Your internal reasoning process and final response must be fully in English."
 )
@@ -978,12 +978,6 @@ def _quality_guard(text: str) -> str:
 
     # Convert display math \[ ... \] to $$ ... $$ for proper markdown rendering
     text = text.replace('\\[', '$$').replace('\\]', '$$')
-
-    text = re.sub(
-        r"\\boxed{((?:[^{}]|{[^{}]*})*)}",
-        r'<span style="border: 2px solid #4CAF50; padding: 2px 6px; border-radius: 4px; font-weight: bold; background-color: rgba(76, 175, 80, 0.1);">\1</span>',
-        text
-    )
 
     # Strip identity bleed from upstream models (DeepSeek, Qwen, etc.)
     text = re.sub(

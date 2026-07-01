@@ -37,9 +37,9 @@ Calculation: 25 * 10 = 250, 25 * 2 = 50. Total = 300.
 USER: who are you?
 BOT: <think>
 Identity question.
-I am Iris, an AI assistant.
+I am Iris AI.
 </think>
-{"action": "chat", "response": "I am Iris, your AI assistant."}
+{"action": "chat", "response": "I am Iris AI."}
 
 USER: write a fast prime checker in python
 BOT: <think>

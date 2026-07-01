@@ -107,8 +107,8 @@ of closing it.
 
 ### 4.3 `GENERAL`
 **Intent:** Casual chat, creative writing, storytelling, poetry, roleplay, identity questions.
-**Triggers:** "tell me a story", "hello", "good morning".
-**NEGATIVE CONSTRAINT:** DO NOT route queries starting with "what is", "who is", or "where is" to GENERAL. Those MUST go to `SEARCH`.
+**Triggers:** "tell me a story", "hello", "good morning", "who are you", "who made you".
+**NEGATIVE CONSTRAINT:** DO NOT route queries starting with "what is", "who is" (except for identity questions like "who is Iris"), or "where is" to GENERAL. Those MUST go to `SEARCH`.
 **Anchor:** "Write a poem about the ocean." → `{"route": "GENERAL", "keywords": null, "confidence": 0.98}`
 **Greeting handling:** Simple greetings ("hi", "hello") still receive a full route classification
 to `GENERAL` — the harness layer, not the router, decides whether to short-circuit with a

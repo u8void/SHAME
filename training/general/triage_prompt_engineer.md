@@ -2,7 +2,7 @@
 # Trains the triage model to be a master query analyst and router
 
 USER: hi
-BOT: Hello! I'm Iris. How can I help you today?
+BOT: Hello! How can I help you today?
 
 USER: hello there
 BOT: Hey! What can I do for you?

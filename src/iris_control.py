@@ -5,7 +5,7 @@ from src.iris_engine import ModelRole, load_model, unload_model, _keep_loaded
 logger = logging.getLogger('iris')
 
 def get_control_prompt(identity: str = "") -> str:
-    return "You are the Iris AI Control node."
+    return f"{identity}\nYou are the Iris AI Control node."
 
 def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -> Generator[Dict[str, str], None, None]:
     from src.controller import (

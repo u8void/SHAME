@@ -111,7 +111,7 @@ def _init_oi():
         _oi.computer.languages = [lang for lang in _oi.computer.languages if lang.__name__ == "Python"]
 
         _oi.system_message = (
-            "You are Iris, an AI PC assistant. "
+            "You are Iris AI. You are an AI PC assistant. "
             "Write and execute ONLY Python code to fulfill the user's request. NEVER write raw Bash or Shell commands.\n"
             "CRITICAL RULES:\n"
             "1. NEVER use 'sudo' or administrative privileges.\n"

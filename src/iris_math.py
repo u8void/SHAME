@@ -8,18 +8,26 @@ def get_math_prompt(identity: str) -> str:
     return (
         f"{identity}\n"
         "You are the Iris AI Math Core. Solve mathematical and algorithmic problems with precision. "
+        "EXCEPTION: If the user explicitly asks 'who are you', 'who made you', or 'who created you', you MUST provide a concise, direct answer about your identity without listing your capabilities.\n"
         "RESPONSE FORMAT:\n"
         "- Put ALL your step-by-step reasoning, work, and derivations inside <think>...</think> tags.\n"
-        "- After </think>, output ONLY the clean final solution and answer. Everything outside </think> is shown directly to the user.\n"
+        "- After </think>, output ONLY the clean final solution and answer (or your concise identity answer). Everything outside </think> is shown directly to the user.\n"
         "LATEX FORMATTING RULES:\n"
         "1. You MUST use FULL, flawless LaTeX for all mathematics.\n"
         "2. For inline math, ALWAYS use $...$ (never \\( ... \\)). Do NOT put spaces inside the delimiters (e.g., $x$ not $ x $).\n"
         "3. For display math, ALWAYS use $$...$$ on their own separate lines (never \\[ ... \\]).\n"
         "4. If using environments like \\begin{align} or \\begin{cases}, they MUST be wrapped inside $$...$$ blocks.\n"
         "5. Keep the explanation outside the <think> tags clean, elegant, and highly professional.\n"
-        "6. Use standard LaTeX \\boxed{} to highlight your final answer. DO NOT use HTML, CSS, or markdown formatting hacks.\n"
-        "STRICT NO-CODE RULE:\n"
-        "You MUST solve the problem purely using mathematical reasoning and analytical derivations. DO NOT write any Python code, scripts, HTML, or programmatic verifications. Code blocks (```) are STRICTLY FORBIDDEN."
+        "6. For your final answer, just write it in clean LaTeX without any wrapping. For example, write $x = 5$ or $$x = 5$$ directly. Do NOT use \\boxed{}, HTML tags, or CSS styling.\n"
+    "STRICT NO-CODE RULE:\n"
+    "You MUST solve the problem purely using mathematical reasoning and analytical derivations. DO NOT write any Python code, scripts, or programmatic verifications.\n"
+    "ABSOLUTE BANS (VIOLATION = FATAL ERROR):\n"
+    "1. Code blocks (```) are STRICTLY FORBIDDEN. Never wrap your answer in triple backticks.\n"
+    "2. HTML tags are STRICTLY FORBIDDEN. No <span>, no <div>, no <style>, no <p>, no HTML of any kind.\n"
+    "3. Your final answer must be written DIRECTLY as plain LaTeX text, like: The answer is $x = 5$ or $$x = 5$$\n"
+    "   WRONG: ```$x = 5$```\n"
+    "   WRONG: <span>$x = 5$</span>\n"
+    "   CORRECT: The answer is $x = 5$"
     )
 
 
@@ -48,7 +56,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
         )
 
     final_query += _language_directive(user_query, role=ModelRole.MATH)
-    final_query += "\n\nCRITICAL INSTRUCTION: You MUST solve this problem purely analytically. DO NOT write any Python code, sympy scripts, or code blocks. DO NOT use HTML/CSS styling or any HTML tags (like <span>). Use standard LaTeX \\boxed{} for your final answer."
+    final_query += "\n\nCRITICAL INSTRUCTION: You MUST solve this problem purely analytically. DO NOT write any Python code, sympy scripts, or code blocks. DO NOT use HTML tags like <span>, CSS styling, or \\boxed{}. Just write your final answer in clean plain LaTeX (e.g. $x = 5$ or $$x = 5$$)."
 
 
     # 2. History & Compaction
@@ -81,9 +89,14 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     
     # Strip any rogue markdown code blocks (to prevent file card rendering), even if unclosed
     visible_answer = re.sub(r'```[\s\S]*?(?:```|$)', '', visible_answer, flags=re.IGNORECASE)
-    # Strip any rogue HTML span tags (both raw and HTML-encoded), handling typos
-    visible_answer = re.sub(r'</?span[\s\S]*?(?:>|&gt;|$)', '', visible_answer, flags=re.IGNORECASE)
-    visible_answer = re.sub(r'&lt;/?span[\s\S]*?(?:>|&gt;|$)', '', visible_answer, flags=re.IGNORECASE).strip()
+    # Strip any HTML tags with their content (span, div, etc.) - aggressive cleanup
+    visible_answer = re.sub(r'<(?:span|div|section|article)[^>]*>[\s\S]*?</(?:span|div|section|article)>', '', visible_answer, flags=re.IGNORECASE)
+    # Also strip any remaining orphaned HTML tags
+    visible_answer = re.sub(r'</?(?:span|div|section|article|style|script)[^>]*>', '', visible_answer, flags=re.IGNORECASE)
+    # Strip HTML-encoded angle brackets
+    visible_answer = re.sub(r'&lt;/?[\w]+[^&]*?&gt;', '', visible_answer, flags=re.IGNORECASE).strip()
+    # Strip any remaining HTML tags
+    visible_answer = re.sub(r'<[^>]+>', '', visible_answer).strip()
 
     from src.iris_engine import _quality_guard
     cleaned = _quality_guard(visible_answer) if visible_answer else ""
