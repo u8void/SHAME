@@ -1836,7 +1836,7 @@ def detect_user_language(text: str) -> Optional[str]:
 
 
 def _is_thinking_model(role: ModelRole) -> bool:
-    if role == ModelRole.REASONING:
+    if role in (ModelRole.REASONING, ModelRole.MATH):
         return True
     try:
         cfg = load_generation_config()

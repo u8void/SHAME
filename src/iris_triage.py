@@ -30,6 +30,148 @@ from src.iris_engine import ModelRole, TaskType, load_model, unload_model, _keep
 logger = logging.getLogger('iris')
 
 
+
+def is_math_query(query: str) -> bool:
+    # 1. First, check if this is likely a coding request to avoid misrouting it to MATH.
+    # Code requests should fall through to normal triage or coding routes.
+    query_lower = query.lower()
+    
+    # Check for code blocks or explicit code requests
+    if "```" in query:
+        return False
+        
+    code_indicators = [
+        r"\b(?:write|create|implement|make|program|code|run|debug|fix)\s+(?:a\s+)?(?:python|javascript|js|c\+\+|cpp|java|rust|go|php|typescript|html|css|sql|script|function|program|class|method)\b",
+        r"\b(?:python|javascript|js|c\+\+|cpp|java|rust|go|php|typescript|html|css|sql)\b.*\b(?:code|function|class|array|list|dict|loop|import|return)\b",
+        r"\b(?:code|function|class|array|list|dict|loop|import|return)\b.*\b(?:python|javascript|js|c\+\+|cpp|java|rust|go|php|typescript|html|css|sql)\b"
+    ]
+    if any(re.search(pat, query_lower) for pat in code_indicators):
+        return False
+
+    # Avoid routing historical/biographical/factual queries to MATH
+    search_override_indicators = [
+        r"\bwho\s+(?:is|was|were|wrote|created|discovered|invented|proved)\b",
+        r"\bwhere\s+(?:is|was|were|did)\b",
+        r"\bwhen\s+(?:did|was|were|is)\b",
+        r"\bwhy\s+(?:did|was|were|is)\b",
+        r"\bhistory\s+of\b",
+        r"\btell\s+me\s+about\b"
+    ]
+    if any(re.search(pat, query_lower) for pat in search_override_indicators):
+        return False
+
+    # 2. Check for LaTeX mathematical syntax
+    latex_patterns = [
+        r"\$\$",
+        r"\\\[",
+        r"\\\]",
+        r"\\\(",
+        r"\\\)",
+        r"\\begin\{[a-zA-Z]+[*]?\}",
+        r"\\end\{[a-zA-Z]+[*]?\}",
+        r"\\(?:frac|sum|int|lim|sqrt|alpha|beta|gamma|delta|pi|theta|infty|times|div|pm|le|ge|neq|approx|in|subset|cup|cap|nabla|partial|forall|exists|rightarrow|implies|iff|mathbb|mathcal|mathbf|mathrm|boxed|cdot|log|sin|cos|tan|ln|binom)"
+    ]
+    if any(re.search(pat, query) for pat in latex_patterns):
+        return True
+
+    # 3. Check for Unicode mathematical characters
+    unicode_math_chars = r"[∫∑∏√∞∠△±≤≥≠≈∈∉⊆⊂∪∩¬∧∨⇒⇔∀∃]"
+    if re.search(unicode_math_chars, query):
+        return True
+
+    # 4. Check for algebraic variables and equations (e.g. x^2, 2x + 3 = 7, y = mx + c)
+    algebra_patterns = [
+        # Variables with exponents, e.g. x^2, y^n, (x+1)^3
+        r"\b[a-zA-Z]\^[-+*]?[0-9a-zA-Zn]+\b",
+        r"\([a-zA-Z]\s*[-+*/^]\s*\d+\)\^[-+*]?[0-9a-zA-Zn]+\b",
+        # Variables with subscripts, e.g. x_i, a_n, y_{j}
+        r"\b[a-zA-Z]_[0-9a-zA-Zni_]+\b",
+        r"\b[a-zA-Z]_\{[0-9a-zA-Zni_]+\}",
+        # Standard algebraic equations, e.g. 2x + 3 = 7, 4y - 2 = x, x^2 - 4 = 0
+        r"\b\d*[a-zA-Z]\s*[-+*/^]\s*\d*[a-zA-Z0-9]\s*[=<>]",
+        r"[=<>]\s*\d*[a-zA-Z]\s*[-+*/^]\s*\d*[a-zA-Z0-9]",
+        r"\b\d*[a-zA-Z]\s*[=<>]\s*\d+",
+        r"\b\d+\s*[=<>]\s*\d*[a-zA-Z]\b",
+        # Function definitions, e.g., f(x) = x^2, g(x,y)
+        r"\b[fgh]\([a-zA-Z](?:\s*,\s*[a-zA-Z])*\)\s*="
+    ]
+    if any(re.search(pat, query) for pat in algebra_patterns):
+        return True
+
+    # 5. Check for pure arithmetic / numerical expressions
+    arithmetic_patterns = [
+        # Multiple numbers separated by basic operators, optionally with parenthesis
+        r"\b\d+\s*[-+*/^%]\s*\d+\s*[-+*/^%]\s*\d+",
+        r"\(\s*\d+\s*[-+*/^%]\s*\d+\s*\)",
+        r"\b\d+\s*[-+*/^%]\s*\d+\s*=\s*\d+",
+        # Two numbers with specific math operators (*, /, ^, %)
+        r"\b\d+(?:\.\d+)?\s*[\*\/^%]\s*\d+(?:\.\d+)?\b",
+        # Two numbers with addition or subtraction (guarded against dates/phone numbers)
+        r"\b\d+(?:\.\d+)?\s*\+\s*\d+(?:\.\d+)?\b",
+        r"(?<!\d-)\b\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\b(?!-\d)",
+        # Percentage calculation: "15% of 340"
+        r"\b\d+(?:\.\d+)?%\s+of\s+\d+",
+        # Fraction operations: "1/2 + 3/4"
+        r"\b\d+/\d+\s*[-+*/]\s*\d+/\d+",
+        # Arithmetic series pattern: "1 + 2 + 3 + ... + 100" or similar
+        r"\d+\s*[-+*/]\s*\d+\s*[-+*/]\s*\d+\s*[-+*/]\s*\.\.\.\s*[-+*/]\s*\d+",
+        # sum/product of ...
+        r"\b(?:sum|product|difference|ratio|quotient|average)\s+of\s+.*?\d+"
+    ]
+    if any(re.search(pat, query_lower) for pat in arithmetic_patterns):
+        return True
+
+    # 6. Specific math verbs / trigger phrases
+    math_phrases = [
+        r"\bsolve\s+(?:the\s+)?(?:equation|system|inequality|integral|derivative|limit|problem)\b",
+        r"\bcalculate\s+(?:the\s+)?(?:value|sum|product|integral|derivative|probability|limit|mean|median|variance|std|standard\s+deviation|percentage)\b",
+        r"\bcompute\s+(?:the\s+)?(?:sum|product|integral|derivative|probability|limit|mean|median|variance|std|standard\s+deviation|percentage)\b",
+        r"\bevaluate\s+(?:the\s+)?(?:expression|integral|derivative|limit)\b",
+        r"\bfind\s+(?:the\s+)?(?:minimum|maximum|roots|eigenvalues|eigenvectors|determinant|sum|product|limit|probability|derivative|integral)\b",
+        r"\bprove\s+that\b",
+        r"\bderive\s+(?:the\s+)?(?:formula|equation|derivative)\b",
+        r"\bsimplify\s+(?:the\s+)?(?:expression|fraction|equation)\b",
+        r"\bfactor\s+(?:the\s+)?(?:polynomial|expression|quadratic)\b",
+        r"\bexpand\s+(?:the\s+)?(?:expression|polynomial)\b"
+    ]
+    if any(re.search(pat, query_lower) for pat in math_phrases):
+        return True
+
+    # 7. Math terms and concepts
+    math_nouns = [
+        # General math terminology, matrices (plural), highly specific terms
+        r"\b(?:derivative|integral|matrices|polynomial|algebra|calculus|trigonometry|geometry|theorem|logarithm|sine|cosine|tangent|factorial|prime\s+number|divisors|gcd|lcm|modular\s+arithmetic|modulus|complex\s+number|eigenvalue|eigenvector|determinant|transpose|differential\s+equation|linear\s+algebra|arithmetic\s+progression|geometric\s+progression|combinatorics|permutation|combination|fibonacci|pythagorean|quadratic|cubic|standard\s+deviation|variance|normal\s+distribution|bayes\s+theorem|binomial\s+distribution|hypotenuse|right\s+triangle|irrational\s+number|rational\s+number|probability|set\s+theory|union\s+of\s+set|intersection\s+of\s+set|subset\s+of|venn\s+diagram|cardinality)\b",
+        # Explicit matrix/vector operation terms
+        r"\bmatrix\s+(?:multiplication|multiplied|addition|determinant|inverse|transpose|equation|space|vector)\b",
+        r"\bvector\s+(?:space|addition|product|multiplication|calculus)\b"
+    ]
+    if any(re.search(pat, query_lower) for pat in math_nouns):
+        highly_specific_math = [
+            "derivative", "integral", "matrices", "calculus", "trigonometry", "theorem", "logarithm", "sine", "cosine", "tangent",
+            "gcd", "lcm", "modular arithmetic", "complex number", "eigenvalue", "eigenvector", "determinant", "differential equation",
+            "linear algebra", "arithmetic progression", "geometric progression", "combinatorics", "permutation", "combination",
+            "pythagorean", "hypotenuse", "right triangle", "irrational number", "rational number", "bayes theorem", "set theory",
+            "union of set", "intersection of set", "subset of", "venn diagram", "cardinality", "probability"
+        ]
+        if any(w in query_lower for w in highly_specific_math):
+            return True
+            
+        if re.search(r"\b(?:solve|calculate|compute|find|what|how|prove|evaluate|value|sum|x|y|z|\d+)\b", query_lower):
+            return True
+
+    # 8. Prime / divisibility / gcd / lcm queries
+    extra_patterns = [
+        r"\bis\s+\d+\s+(?:a\s+)?prime\b",
+        r"\bis\s+\d+\s+divisible\s+by\b",
+        r"\b(?:gcd|lcm)\(\s*\d+\s*,\s*\d+\s*\)",
+        r"\b\d+\s*mod\s*\d+\b"
+    ]
+    if any(re.search(pat, query_lower) for pat in extra_patterns):
+        return True
+
+    return False
+
+
 def classify_task(
     user_query: str, history: List[Dict[str, str]]
 ) -> Tuple[Optional[TaskType], Optional[str]]:
@@ -37,6 +179,11 @@ def classify_task(
     query_for_classification = re.sub(r'<document>[\s\S]*?</document>', '', user_query, flags=re.IGNORECASE)
     query_for_classification = re.sub(r'\[IMAGE_UPLOADED:[^\]]+\]', '', query_for_classification, flags=re.IGNORECASE)
     query_for_classification = query_for_classification.strip()
+
+    # Deterministic override for math queries: check if it's math before any search intercepts
+    if is_math_query(query_for_classification):
+        logger.info(f"[Triage] Query triggered deterministic MATH route: {query_for_classification!r}")
+        return TaskType.MATH, None
 
     # Deterministic overrides for SEARCH triggers
     query_lower = query_for_classification.lower()
