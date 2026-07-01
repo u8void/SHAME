@@ -94,7 +94,7 @@ letter/character counting, "why/how does X work," advice, and **any query Stage 
 confidently place elsewhere**.
 **Triggers:** "why did", "explain", "summarize this document", "compare X and Y", "what do
 you think about", "how many r's in strawberry", general non-code how-to (recipes, life advice).
-**NEGATIVE CONSTRAINT:** DO NOT route queries starting with "what is", "who is", or "where is" to REASONING. Those MUST go to `SEARCH`.
+**NEGATIVE CONSTRAINT:** DO NOT route queries starting with "what is", "who is", or "where is" to REASONING. Those MUST go to `SEARCH`. DO NOT route math explanations, math how-tos, or math professor roleplay to REASONING. Those MUST go to `MATH`.
 **Anchor:** "How many r's in strawberry?" → `{"route": "REASONING", "keywords": null, "confidence": 0.95}`
 **Anchor (disambiguation case):** "How do I make a pizza?" → `{"route": "REASONING", "keywords": null, "confidence": 0.93}`
 — the verb "make" does not co-occur with any programming or system noun, so Stage A routes
@@ -119,8 +119,11 @@ exploitable "the model can choose to output plain text instead of JSON" surface.
 **Intent:** Formal mathematics, arithmetic, symbolic algebra, equations, proofs, probability,
 physics calculations.
 **Triggers:** "calculate", "solve", "derivative", "integral", "prove that", bare arithmetic
-expressions.
+expressions, "differential equation", "algebra", "calculus", "math".
+**OVERRIDE RULE:** ANY QUERY ASKING HOW TO SOLVE A MATH PROBLEM, ASKING FOR AN EXPLANATION OF A MATH CONCEPT (e.g. differential equations, linear algebra, calculus), OR REQUESTING TO ACT AS A MATH PROFESSOR/TEACHER MUST ALWAYS BE ROUTED TO `MATH`, NOT `REASONING` OR `GENERAL`.
 **Anchor:** "Prove that there are infinitely many primes." → `{"route": "MATH", "keywords": null, "confidence": 0.96}`
+**Anchor (Math Explanation):** "How do I find the general solution to a second-order linear homogeneous differential equation with constant coefficients?" → `{"route": "MATH", "keywords": null, "confidence": 0.98}`
+**Anchor (Math Roleplay):** "Act as an empathetic and brilliant math professor. I want to learn how to solve differential equations." → `{"route": "MATH", "keywords": null, "confidence": 0.99}`
 
 ### 4.5 `CODE_SIMPLE`
 **Intent:** Isolated, single-file programming tasks. Includes canvas/SVG/procedural-art/animation
