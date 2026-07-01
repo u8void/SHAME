@@ -401,7 +401,6 @@ def _run_complex_coding(
 
     
     if isinstance(settings, dict) and settings.get("code_review"):
-        yield {"type": "clear"}
         yield {"type": "status", "content": "Reviewing final code quality..."}
         _rmsgs = optimized + [
             {"role": "assistant", "content": final_output},
@@ -409,17 +408,23 @@ def _run_complex_coding(
         ]
         _rev = ""
         for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris")):
-            if user_lang == "English" or ev["type"] != "token":
-                yield ev
             if ev["type"] == "token":
                 _rev += ev["content"]
         if not _keep_loaded:
             unload_model()
-        _rl = _detect_language(_rev) or lang
-        _rev, _hw = _apply_harness(_rev, _rl)
-        for w in _hw:
-            yield w
-        final_output = _rev
+            
+        if "```" in _rev:
+            yield {"type": "clear"}
+            yield {"type": "status", "content": "Applying final code quality updates..."}
+            if user_lang == "English":
+                yield {"type": "token", "content": _rev}
+            _rl = _detect_language(_rev) or lang
+            _rev, _hw = _apply_harness(_rev, _rl)
+            for w in _hw:
+                yield w
+            final_output = _rev
+        else:
+            yield {"type": "status", "content": "Code quality verified. No modifications needed."}
 
     user_lang = detect_user_language(user_query)
     if user_lang != "English" and final_output:
