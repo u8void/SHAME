@@ -136,34 +136,23 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
     )
     _is_collapsed = (
         len(_visible_no_think) < 5
-        or _EVASION_PHRASES.match(_visible_no_think)
-    ) and len(thought_process.strip()) < 50
+        or bool(_EVASION_PHRASES.match(_visible_no_think))
+    )
     
     if _is_collapsed:
-        logger.warning(f"[Completeness] Evasion-loophole detected. Visible output too thin ({len(_visible)} chars). Attempting recovery.")
-        if len(thought_process) > 100:
-            _recovered = (
-                f"*(Note: The model's visible answer was evaded due to constraints — surfacing internal thought process instead.)*\n\n"
-                f"{thought_process.strip()}\n\n"
-                f"**Final Answer emitted**: {_visible}"
-            )
-            yield {"type": "clear"}
-            yield {"type": "token", "content": _recovered}
-            yield {"type": "raw_response", "content": _recovered}
-            return
-            
+        logger.warning(f"[Completeness] Evasion-loophole detected. Visible output too thin ({len(_visible_no_think)} chars). Attempting recovery.")
         yield {"type": "clear"}
         yield {"type": "status", "content": "Retrying for complete response..."}
         
         _assistant_context = full
         if thought_process.strip():
-            _assistant_context = f"<think>{thought_process}</think>\n{full}"
+            _assistant_context = f"<think>{thought_process}</think>\n{_visible_no_think}"
             
         retry_msgs = optimized + [
             {"role": "assistant", "content": _assistant_context},
             {"role": "user", "content": (
-                "Your previous response was incomplete — it only contained a closing phrase without the actual answer. "
-                "Please provide the FULL, complete explanation now. Do not skip or abbreviate."
+                "Your previous response was incomplete — it only contained a thought process or closing phrase without the actual answer. "
+                "Please provide the FULL, complete explanation now outside of any <think> tags. Do not skip or abbreviate."
             )}
         ]
         retry_full = ""
@@ -172,7 +161,13 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
                 yield ev
             if ev["type"] == "token":
                 retry_full += ev["content"]
-        cleaned = _quality_guard(retry_full)
+                
+        if thought_process.strip():
+            combined = f"<think>\n{thought_process.strip()}\n</think>\n{retry_full}"
+        else:
+            combined = retry_full
+            
+        cleaned = _quality_guard(combined)
 
     if combined and cleaned and cleaned != combined:
         yield {"type": "clear"}

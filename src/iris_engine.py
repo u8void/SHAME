@@ -971,9 +971,9 @@ def _quality_guard(text: str) -> str:
         "", text
     ).strip()
 
-    # --- Repetition loop detection: truncate if a sentence repeats 3+ times ---
+    # --- Repetition loop detection: truncate if a sentence repeats 5+ times ---
     sentences = re.split(r'(?<=[.!?])\s+', text)
-    if len(sentences) > 6:
+    if len(sentences) > 10:
         seen = {}
         cut_idx = None
         for i, s in enumerate(sentences):
@@ -981,13 +981,15 @@ def _quality_guard(text: str) -> str:
             if len(normalized) < 15:
                 continue
             seen[normalized] = seen.get(normalized, 0) + 1
-            if seen[normalized] >= 3:
+            if seen[normalized] >= 5:
                 cut_idx = i
                 break
         if cut_idx is not None:
             text = ' '.join(sentences[:cut_idx])
             if not text.endswith(('.', '!', '?')):
                 text += '.'
+            if '<think>' in text and '</think>' not in text:
+                text += '\n</think>'
 
     return text
 
