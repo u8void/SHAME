@@ -323,7 +323,6 @@ def _run_complex_coding(
     if not _keep_loaded:
         unload_model()
 
-    yield {"type": "clear"}
     yield {"type": "status", "content": "Stage 3 \u2014 Reviewing and optimizing..."}
 
     review_msgs = optimized + [
@@ -337,9 +336,10 @@ def _run_complex_coding(
     ]
     final_output = ""
     for ev in _stream_tokens(ModelRole.REASONING, review_msgs, max_tokens=None, temperature=0.4, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings):
-        yield ev
         if ev["type"] == "token":
             final_output += ev["content"]
+        else:
+            yield ev
     if not _keep_loaded:
         unload_model()
 
@@ -347,6 +347,11 @@ def _run_complex_coding(
     if len(final_output.strip()) < 50 or "```" not in final_output:
         logger.warning("[Complex Coding] Stage 3 final output is empty/invalid. Falling back to Stage 2 code.")
         final_output = full_code
+        yield {"type": "status", "content": "Code quality verified. No modifications needed."}
+    else:
+        yield {"type": "clear"}
+        yield {"type": "status", "content": "Applying code optimizations..."}
+        yield {"type": "token", "content": final_output}
 
     from src.iris_engine import _detect_language
     lang = _detect_language(final_output)
@@ -506,24 +511,29 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
                 yield {"type": "harness_warning", "content": f"Runtime: {rerr[:200]}"}
 
         if isinstance(settings, dict) and settings.get("code_review"):
-            yield {"type": "clear"}
             yield {"type": "status", "content": "Reviewing code quality..."}
             _rmsgs = optimized + [
                 {"role": "assistant", "content": full},
                 {"role": "user", "content": "Review this code for correctness, edge cases, performance, and best practices. Fix issues inside a code block with filename comment. YOU MUST OUTPUT THE ENTIRE COMPLETE FILE WITH ALL ORIGINAL CONTENT INCLUDED (e.g., if it was an HTML file containing HTML/CSS/JS, output the full HTML file). Never output just a snippet. If there are no issues, just output 'No issues found.'"}
             ]
             _rev = ""
-            for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris")):
-                yield ev
+            for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings, system_prompt_override=get_reviewer_prompt("Iris")):
                 if ev["type"] == "token":
                     _rev += ev["content"]
             if not _keep_loaded:
                 unload_model()
-            _rl = _detect_language(_rev) or lang
-            _rev, _hw = _apply_harness(_rev, _rl)
-            for w in _hw:
-                yield w
-            full = _rev
+                
+            if "```" in _rev:
+                yield {"type": "clear"}
+                yield {"type": "status", "content": "Applying code review updates..."}
+                yield {"type": "token", "content": _rev}
+                _rl = _detect_language(_rev) or lang
+                _rev, _hw = _apply_harness(_rev, _rl)
+                for w in _hw:
+                    yield w
+                full = _rev
+            else:
+                yield {"type": "status", "content": "Code quality verified. No modifications needed."}
 
     user_lang = detect_user_language(user_query)
     if user_lang != "English" and full:
