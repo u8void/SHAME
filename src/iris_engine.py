@@ -943,6 +943,11 @@ def _is_continuation(query: str, history: List[Dict[str, str]]) -> bool:
 
 
 def _quality_guard(text: str) -> str:
+    # Remove empty code blocks (``` ``` with nothing or just whitespace inside)
+    text = re.sub(r'```\w*\s*```', '', text)
+    text = re.sub(r'```\w*\s*\n```', '', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+
     # Scrub LaTeX/math syntax that polluted code blocks at generation time
     def _scrub_latex_in_code(m: re.Match) -> str:
         block = m.group(0)
@@ -1375,8 +1380,8 @@ def _stream_tokens(
                 finish_reason = "escape_hatch"
                 break
 
-            # Repetition Guard: Detect infinite loop collapse on local quantized models (skip if requested or for CODE/REVIEWER roles)
-            if not skip_repetition_guard and role not in (ModelRole.CODE, ModelRole.REVIEWER) and token_count % 10 == 0 and len(loop_content) > 200:
+            # Repetition Guard: Detect infinite loop collapse on local quantized models
+            if not skip_repetition_guard and token_count % 10 == 0 and len(loop_content) > 200:
                 recent = loop_content[-1000:]
                 n = len(recent)
                 is_repetition = False

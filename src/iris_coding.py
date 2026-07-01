@@ -27,15 +27,47 @@ def get_code_prompt(identity: str) -> str:
     "If you output a single `$` or `_{` inside your code block, the system will crash. Write PLAIN TEXT code only. "
     "WEB DESIGN RULE (CRITICAL): If the user asks for a website, web app, or web interface, you MUST create it inside a SINGLE, self-contained HTML file (including all markup, styles via Tailwind CDN, and vanilla JS logic in a script tag). "
     "You MUST ALWAYS use Tailwind CSS (loaded via Tailwind Play CDN script in the head: <script src=\"https://cdn.tailwindcss.com\"></script>) as the default and only styling framework. "
-    "You MUST NOT write custom CSS style rules inside a <style> block, nor link custom CSS stylesheets. Every single color, padding, margin, width, height, border, and animation must be declared natively using Tailwind utility classes in the HTML markup. A <style> tag is ONLY allowed for custom CSS keyframe animations (like background ambient gradient sweeps). "
+    "CRITICAL TAILWIND RULE - READ THIS EXACTLY: Tailwind utility classes go DIRECTLY in the HTML class attributes. The Tailwind CDN script AUTO-GENERATES the CSS for you. You DO NOT need to define any CSS for Tailwind classes. "
+    "CORRECT EXAMPLE: <div class=\"bg-zinc-950 text-white p-6 rounded-xl\">Hello</div> "
+    "WRONG EXAMPLE (NEVER DO THIS): <style>.bg-zinc-950 { background: #000; }</style><div class=\"bg-zinc-950\">Hello</div> "
+    "WRONG EXAMPLE (NEVER DO THIS): <style>.bg-gradient-to-r { background: linear-gradient(...); }</style> "
+    "The <style> tag is ONLY for @keyframe animations. NEVER put ANY class names or Tailwind utilities inside <style> blocks. Not .bg-*, not .text-*, not .border-*, not .rounded-*, not .p-*, not .m-*, not .shadow-*, not .bg-gradient-to-r, NOTHING. "
+    "If you need a gradient button, use: class=\"bg-gradient-to-r from-indigo-500 to-purple-600\" DIRECTLY in the HTML. Do NOT define it in CSS. "
+    "NEVER USE CUSTOM CSS CLASS NAMES LIKE bg-canvas, bg-canvas-card, text-accent, etc. These are NOT real Tailwind classes. "
+    "ALWAYS use ONLY valid Tailwind utility classes. Examples: bg-zinc-950, bg-zinc-900, bg-zinc-800, text-white, text-zinc-100, text-zinc-400, border-zinc-800, rounded-xl, p-6, p-8, px-6, py-3, space-y-6, gap-4, etc. "
+    "ALL JavaScript MUST be inline in a single <script> tag at the bottom of the <body>. NEVER use <script src=\"app.js\"></script> or any external JS file reference. The ENTIRE HTML file must be self-contained with inline JS only. "
+    "JavaScript must be syntactically correct with NO duplicate lines, NO missing closing brackets, NO broken string concatenation. Double-check your JS before outputting. "
+    "Every button MUST have a working onclick handler or event listener that calls the correct function. NEVER create a function like deleteTask() without attaching it to a button via onclick=\"deleteTask(id)\". "
+    "After the file_card tag, provide a brief 1-2 sentence summary of what the code does. Do NOT repeat the code or write long explanations. "
     "Do NOT output basic or generic UI. Leverage Tailwind classes to implement premium, modern aesthetics (e.g., curated color schemes, vibrant dark/light modes, custom drop-shadows, smooth scale/translate hover transitions, and fluid layout grids). "
-    "Use these exact core design recipes to build a solid, premium UI:\n"
+    "SPACING AND LAYOUT RULES (CRITICAL - YOUR UI LOOKS TERRIBLE IF YOU IGNORE THESE):\n"
+    "  - ALWAYS use generous padding and margins. Never cram elements together. Use p-6, p-8, px-8, py-6, space-y-6, gap-6, etc.\n"
+    "  - Use max-w-4xl or max-w-5xl with mx-auto to center content with proper breathing room.\n"
+    "  - Add mb-8 or mb-12 between major sections. Use space-y-8 for vertical rhythm.\n"
+    "  - Cards need generous internal padding (p-6 or p-8) and spacing between them (gap-6 or space-y-4).\n"
+    "  - Forms need vertical spacing between fields (space-y-4 or space-y-5).\n"
+    "  - NEVER put elements edge-to-edge without padding. Always use px-6 or px-8 on containers.\n"
+    "  - Use py-12 or py-16 for section separators to create visual breathing room.\n"
+    "EXACT SPACING COMBINATIONS TO USE (copy these exactly):\n"
+    "  - Page container: <div class=\"max-w-4xl mx-auto px-6 py-12 lg:py-20 space-y-12\">\n"
+    "  - Section: <section class=\"py-16 lg:py-24 space-y-8\">\n"
+    "  - Card group: <div class=\"space-y-6\">\n"
+    "  - Single card: <div class=\"bg-zinc-900 border border-zinc-800 rounded-2xl p-6 lg:p-8 space-y-4\">\n"
+    "  - Form fields: <div class=\"space-y-5\">\n"
+    "  - Button row: <div class=\"flex gap-4 mt-6\">\n"
+    "  - Header padding: <header class=\"fixed top-0 w-full z-50 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 px-6 py-4\">\n"
+    "  - Footer: <footer class=\"py-12 mt-16 border-t border-zinc-800\">\n"
+    "  - JavaScript: <script> // ALL JS code inline here, NO external src attributes </script>\n"
+    "Use these exact core design recipes to build a solid, premium UI (copy these EXACTLY, do not invent new class names):\n"
     "  - Dark Mode Canvas: default to `bg-zinc-950 text-zinc-50` with an ambient glow container `<div class=\"absolute top-0 left-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none -z-10\"></div>`.\n"
     "  - Glassmorphic Cards: `<div class=\"bg-zinc-900/50 backdrop-blur-md border border-zinc-800 rounded-2xl p-6 transition-all duration-300 hover:-translate-y-1 hover:border-indigo-500/30\"></div>`.\n"
     "  - Modern Inputs: `<input class=\"w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all\">`.\n"
     "  - Premium Buttons: `<button class=\"bg-gradient-to-r from-indigo-500 to-purple-600 hover:opacity-95 text-white font-semibold px-6 py-3 rounded-xl transition-all duration-300 shadow-lg shadow-indigo-500/20\">`.\n"
     "  - Navigation: fixed/sticky transparent header with backdrop-blur (`fixed top-0 w-full z-50 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900`).\n"
     "  - Icons: Load and initialize Lucide icons properly. Use `<i data-lucide=\"icon-name\" class=\"w-5 h-5 text-indigo-400\"></i>` inside your HTML.\n"
+    "  - Sections: Use `py-24 lg:py-32` for major sections with `bg-zinc-900/30` or `bg-zinc-950` backgrounds.\n"
+    "  - Containers: Always use `<div class=\"max-w-5xl mx-auto px-6\">` to center content with proper padding.\n"
+    "  - List Items: Use `bg-zinc-900 border border-zinc-800 rounded-xl p-4` for list items, NOT custom classes.\n"
     "To ensure high-fidelity design, you should structure your document exactly as follows:\n"
     "<!DOCTYPE html>\n"
     "<html lang=\"en\" class=\"scroll-smooth\">\n"
@@ -83,11 +115,12 @@ def get_code_prompt(identity: str) -> str:
     "Create highly detailed parallax backgrounds (e.g. detailed academic buildings with window frames, clock faces, tree leaves using overlapping arcs/clusters, textured roads/lawns, layered drifting clouds). "
     "The animation must look rich, professional, organic, and visually stunning, matching the aesthetic of premium vector-art animations. "
     "CRITICAL FILE CARD RULE: When you generate a complete, self-contained file (like a single-file HTML website), you MUST place a <file_card> tag strictly OUTSIDE and AFTER the closing triple-backticks. NEVER put the <file_card> inside the code block.\n"
-    "Follow this exact structure:\n"
+    "Example of CORRECT file card placement:\n"
     "```html\n"
-    "<!-- Full website code -->\n"
+    "<!-- code content -->\n"
     "```\n"
     "<file_card filename=\"descriptive_name.html\" lang=\"html\"></file_card>\n"
+    "AFTER the file_card tag, STOP GENERATING IMMEDIATELY. Do NOT write any more text, explanations, or additional code after the file_card tag. The file_card tag marks the END of your response for code tasks.\n"
     "After the file card, provide a brief explanation of the key features."
     " If the user is ONLY asking for an explanation, summary, or debugging help without needing new code, do NOT generate a code block; just reply in plain text."
 )
@@ -125,7 +158,11 @@ def _run_continuation(
 
     yield {"type": "status", "content": "Stage 1 \u2014 Continuing code..."}
     full = ""
+<<<<<<< HEAD
     for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, skip_repetition_guard=True):
+=======
+    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings):
+>>>>>>> a7e6c1c (coding master)
         yield ev
         if ev["type"] == "token":
             full += ev["content"]
@@ -143,6 +180,24 @@ def _run_continuation(
             idx = full.find("</think>")
             if idx != -1:
                 full = full[:idx] + full[idx + len("</think>"):]
+<<<<<<< HEAD
+=======
+
+    # Strip trailing text after file_card tags inside code blocks
+    import re
+    def strip_after_file_card(match):
+        code_block = match.group(0)
+        file_card_match = re.search(r'<file_card\s+[^>]*>.*?</file_card>', code_block, re.DOTALL)
+        if file_card_match:
+            end_pos = file_card_match.end()
+            remaining = code_block[end_pos:].strip()
+            # If there's only whitespace or minimal text after file_card, remove it
+            if len(remaining) < 50:
+                return code_block[:end_pos]
+        return code_block
+    
+    full = re.sub(r'```[\s\S]*?```', strip_after_file_card, full)
+>>>>>>> a7e6c1c (coding master)
 
     from src.iris_engine import _detect_language
     lang = _detect_language(full)
@@ -157,7 +212,11 @@ def _run_continuation(
              "Fix errors, fill gaps, ensure consistency. Return the final corrected code inside a ```python``` block, followed by a brief explanation."}
         ]
         reviewed = ""
+<<<<<<< HEAD
         for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=get_reviewer_prompt("Iris"), skip_repetition_guard=True):
+=======
+        for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=get_reviewer_prompt("Iris"), ):
+>>>>>>> a7e6c1c (coding master)
             yield ev
             if ev["type"] == "token":
                 reviewed += ev["content"]
@@ -317,7 +376,11 @@ def _run_complex_coding(
     # it were the answer. think_mode="status" suppresses the content and only pings
     # a lightweight "Thinking..." status; we forward status events for UI feedback
     # but never forward token/thinking content here.
+<<<<<<< HEAD
     for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="status", settings=settings, extra_stop_words=["```"], skip_repetition_guard=True):
+=======
+    for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="status", settings=settings, extra_stop_words=["```"], ):
+>>>>>>> a7e6c1c (coding master)
         if ev["type"] == "status":
             yield ev
         if ev["type"] in ("token", "thinking"):
@@ -366,7 +429,11 @@ def _run_complex_coding(
         {"role": "user", "content": code_content}
     ]
     full_code = ""
+<<<<<<< HEAD
     for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.4, think_mode="show", settings=settings, skip_repetition_guard=True):
+=======
+    for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.4, think_mode="show", settings=settings, ):
+>>>>>>> a7e6c1c (coding master)
         if user_lang == "English" or ev["type"] != "token":
             yield ev
         if ev["type"] == "token":
@@ -386,6 +453,23 @@ def _run_complex_coding(
             if idx != -1:
                 full_code = full_code[:idx] + full_code[idx + len("</think>"):]
 
+<<<<<<< HEAD
+=======
+    # Strip trailing text after file_card tags inside code blocks
+    import re
+    def strip_after_file_card(match):
+        code_block = match.group(0)
+        file_card_match = re.search(r'<file_card\s+[^>]*>.*?</file_card>', code_block, re.DOTALL)
+        if file_card_match:
+            end_pos = file_card_match.end()
+            remaining = code_block[end_pos:].strip()
+            if len(remaining) < 50:
+                return code_block[:end_pos]
+        return code_block
+    
+    full_code = re.sub(r'```[\s\S]*?```', strip_after_file_card, full_code)
+
+>>>>>>> a7e6c1c (coding master)
     final_output = ""
     if isinstance(settings, dict) and settings.get("code_review"):
         yield {"type": "status", "content": "Stage 3 \u2014 Reviewing and optimizing..."}
@@ -399,7 +483,11 @@ def _run_complex_coding(
              "Return the final corrected code inside a ``` language block. "
              "IMPORTANT: Immediately AFTER the code block, you MUST write a detailed explanation of the code and its features for the user."}
         ]
+<<<<<<< HEAD
         for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.4, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings, skip_repetition_guard=True):
+=======
+        for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.4, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings, ):
+>>>>>>> a7e6c1c (coding master)
             if ev["type"] == "token":
                 final_output += ev["content"]
             else:
@@ -435,7 +523,11 @@ def _run_complex_coding(
             yield {"type": "clear"}
             yield {"type": "status", "content": "Applying syntax auto-correction..."}
             corrected = ""
+<<<<<<< HEAD
             for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), skip_repetition_guard=True):
+=======
+            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), ):
+>>>>>>> a7e6c1c (coding master)
                 if user_lang == "English" or ev["type"] != "token":
                     yield ev
                 if ev["type"] == "token":
@@ -470,7 +562,11 @@ def _run_complex_coding(
             {"role": "user", "content": "Final review pass. Fix remaining issues inside a code block with filename. YOU MUST OUTPUT THE ENTIRE COMPLETE FILE WITH ALL ORIGINAL CONTENT INCLUDED (e.g., if it was an HTML file containing HTML/CSS/JS, output the full HTML file). Never output just a snippet. If there are no issues, just output 'No issues found.'"}
         ]
         _rev = ""
+<<<<<<< HEAD
         for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), skip_repetition_guard=True):
+=======
+        for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), ):
+>>>>>>> a7e6c1c (coding master)
             if ev["type"] == "token":
                 _rev += ev["content"]
         if not _keep_loaded:
@@ -529,7 +625,11 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     yield {"type": "status", "content": "Writing code..."}
     full = ""
+<<<<<<< HEAD
     for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, skip_repetition_guard=True):
+=======
+    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, ):
+>>>>>>> a7e6c1c (coding master)
         if user_lang == "English" or ev["type"] != "token":
             yield ev
         if ev["type"] == "token":
@@ -550,6 +650,23 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
             if idx != -1:
                 full = full[:idx] + full[idx + len("</think>"):]
 
+<<<<<<< HEAD
+=======
+    # Strip trailing text after file_card tags inside code blocks
+    import re
+    def strip_after_file_card(match):
+        code_block = match.group(0)
+        file_card_match = re.search(r'<file_card\s+[^>]*>.*?</file_card>', code_block, re.DOTALL)
+        if file_card_match:
+            end_pos = file_card_match.end()
+            remaining = code_block[end_pos:].strip()
+            if len(remaining) < 50:
+                return code_block[:end_pos]
+        return code_block
+    
+    full = re.sub(r'```[\s\S]*?```', strip_after_file_card, full)
+
+>>>>>>> a7e6c1c (coding master)
     from src.iris_engine import _detect_language
     lang = _detect_language(full)
     
@@ -565,7 +682,11 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
                  "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code."}
             ]
             corrected = ""
+<<<<<<< HEAD
             for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, skip_repetition_guard=True):
+=======
+            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, ):
+>>>>>>> a7e6c1c (coding master)
                 if user_lang == "English" or ev["type"] != "token":
                     yield ev
                 if ev["type"] == "token":
@@ -607,7 +728,11 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
                 {"role": "user", "content": "Review this code for correctness, edge cases, performance, and best practices. Fix issues inside a code block with filename comment. YOU MUST OUTPUT THE ENTIRE COMPLETE FILE WITH ALL ORIGINAL CONTENT INCLUDED (e.g., if it was an HTML file containing HTML/CSS/JS, output the full HTML file). Never output just a snippet. If there are no issues, just output 'No issues found.'"}
             ]
             _rev = ""
+<<<<<<< HEAD
             for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=get_reviewer_prompt("Iris"), skip_repetition_guard=True):
+=======
+            for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=get_reviewer_prompt("Iris"), ):
+>>>>>>> a7e6c1c (coding master)
                 if ev["type"] == "token":
                     _rev += ev["content"]
             if not _keep_loaded:

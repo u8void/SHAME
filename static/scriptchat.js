@@ -625,6 +625,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                     window.fileCardCache = window.fileCardCache || {};
                     window.fileCardCache[fileCardId] = blocks[codeIndex].content;
+                } else {
+                    // No code block found for this file_card tag, skip creating empty card
+                    return '';
                 }
 
                 const id = `@@@FILECARD_${blocks.length}@@@`;
@@ -836,7 +839,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                 } else if (block.hidden) {
                     // Auto-generate a file card for hidden blocks that weren't claimed by an explicit <file_card> tag
-                    if (block.autoCard && block.content && !block.claimed) {
+                    if (block.autoCard && block.content && block.content.trim().length > 0 && !block.claimed) {
                         const autoLang = block.lang || 'code';
                         const ext = normaliseExt(autoLang);
                         const autoFilename = window.extractFilenameFromCode ? window.extractFilenameFromCode(block.content, ext) : `snippet.${ext}`;
