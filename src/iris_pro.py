@@ -52,6 +52,7 @@ def verify_code_syntax(code: str, lang: str) -> str | None:
     import ast
     import subprocess
     import tempfile
+    import json
     
     lang = lang.lower().strip()
     if lang in ["python", "py"]:
@@ -60,6 +61,14 @@ def verify_code_syntax(code: str, lang: str) -> str | None:
             return None
         except SyntaxError as e:
             return f"SyntaxError: {e}"
+            
+    elif lang in ["json"]:
+        try:
+            json.loads(code)
+            return None
+        except ValueError as e:
+            return f"JSONDecodeError: {e}"
+            
     elif lang in ["html", "js", "javascript"]:
         js_code = code
         if lang == "html":
@@ -77,7 +86,45 @@ def verify_code_syntax(code: str, lang: str) -> str | None:
             except Exception:
                 pass
             finally:
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+                    
+    elif lang in ["bash", "sh"]:
+        with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as f:
+            f.write(code)
+            temp_path = f.name
+        try:
+            res = subprocess.run(["bash", "-n", temp_path], capture_output=True, text=True)
+            if res.returncode != 0:
+                return res.stderr.strip()
+        except Exception:
+            pass
+        finally:
+            try:
                 os.remove(temp_path)
+            except Exception:
+                pass
+                
+    elif lang in ["c", "cpp", "c++", "h", "hpp"]:
+        suffix = ".cpp" if "cpp" in lang or "c++" in lang else ".c"
+        with tempfile.NamedTemporaryFile("w", suffix=suffix, delete=False) as f:
+            f.write(code)
+            temp_path = f.name
+        try:
+            compiler = "g++" if "cpp" in lang or "c++" in lang else "gcc"
+            res = subprocess.run([compiler, "-fsyntax-only", temp_path], capture_output=True, text=True)
+            if res.returncode != 0:
+                return res.stderr.strip()
+        except Exception:
+            pass
+        finally:
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+                
     return None
 
 class Model(str, Enum):
@@ -1414,9 +1461,10 @@ async def ask_stream(
                         yield {"type": "clear"}
                         
                         fix_messages = [
-                            {"role": "system", "content": CODE_REVIEWER_SYSTEM_PROMPT},
-                            {"role": "user", "content": f"The following code you generated has a syntax error:\n\n```\n{err}\n```\n\nCode:\n```\n{code}\n```\n\nFix the error immediately and output the complete, corrected code."}
-                        ]
+                             {"role": "system", "content": CODE_REVIEWER_SYSTEM_PROMPT},
+                             *messages[:-1],
+                             {"role": "user", "content": f"User Query: {user_query}\n\nThe draft code you generated has a syntax error:\n\n```\n{err}\n```\n\nCode:\n```\n{code}\n```\n\nFix the error immediately, maintaining all requested features, and output the complete, corrected code."}
+                         ]
                         raw_review = ""
                         try:
                             last_review_usage = {}
