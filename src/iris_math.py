@@ -47,7 +47,8 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
         )
 
     final_query += _language_directive(user_query, role=ModelRole.MATH)
-    final_query += "\n\nCRITICAL INSTRUCTION: You MUST solve this problem purely analytically. DO NOT write any Python code, sympy scripts, or code blocks. DO NOT use HTML/CSS styling. Use standard LaTeX \\boxed{} for your final answer."
+    final_query += "\n\nCRITICAL INSTRUCTION: You MUST solve this problem purely analytically. DO NOT write any Python code, sympy scripts, or code blocks. DO NOT use HTML/CSS styling or any HTML tags (like <span>). Use standard LaTeX \\boxed{} for your final answer."
+
 
     # 2. History & Compaction
     optimized = [{"role": "user", "content": final_query}]
@@ -79,8 +80,9 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     
     # Strip any rogue markdown code blocks (to prevent file card rendering)
     visible_answer = re.sub(r'```[\s\S]*?```', '', visible_answer, flags=re.IGNORECASE)
-    # Strip any rogue HTML span tags
-    visible_answer = re.sub(r'</?span[^>]*>', '', visible_answer, flags=re.IGNORECASE).strip()
+    # Strip any rogue HTML span tags (both raw and HTML-encoded)
+    visible_answer = re.sub(r'</?span[^>]*>', '', visible_answer, flags=re.IGNORECASE)
+    visible_answer = re.sub(r'&lt;/?span[^>]*&gt;', '', visible_answer, flags=re.IGNORECASE).strip()
 
     from src.iris_engine import _quality_guard
     cleaned = _quality_guard(visible_answer) if visible_answer else ""
