@@ -494,7 +494,7 @@ body.chat-active .center-panel {
 
 .message {
     display: flex;
-    max-width: 100%;
+    max-width: 75%;
     opacity: 0;
     transform: translateY(8px);
     animation: messageIn 0.3s var(--ease-out-expo) forwards;
@@ -1822,6 +1822,7 @@ body.chat-active .footere {
     box-shadow: none !important;
     text-shadow: none !important;
 }
+
 .code-container pre[class*="language-"] {
     padding: 16px !important;
 }
