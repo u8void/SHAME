@@ -39,6 +39,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
             context = retriever.retrieve(user_query, top_k=3, category="math")
 
     final_query = user_query
+    
     if context:
         final_query = (
             f"<retrieved_context>\n{context}\n</retrieved_context>\n\n"
@@ -78,11 +79,11 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     visible_answer = full.strip()
     visible_answer = re.sub(r'</?think>', '', visible_answer, flags=re.IGNORECASE).strip()
     
-    # Strip any rogue markdown code blocks (to prevent file card rendering)
-    visible_answer = re.sub(r'```[\s\S]*?```', '', visible_answer, flags=re.IGNORECASE)
-    # Strip any rogue HTML span tags (both raw and HTML-encoded)
-    visible_answer = re.sub(r'</?span[^>]*>', '', visible_answer, flags=re.IGNORECASE)
-    visible_answer = re.sub(r'&lt;/?span[^>]*&gt;', '', visible_answer, flags=re.IGNORECASE).strip()
+    # Strip any rogue markdown code blocks (to prevent file card rendering), even if unclosed
+    visible_answer = re.sub(r'```[\s\S]*?(?:```|$)', '', visible_answer, flags=re.IGNORECASE)
+    # Strip any rogue HTML span tags (both raw and HTML-encoded), handling typos
+    visible_answer = re.sub(r'</?span[\s\S]*?(?:>|&gt;|$)', '', visible_answer, flags=re.IGNORECASE)
+    visible_answer = re.sub(r'&lt;/?span[\s\S]*?(?:>|&gt;|$)', '', visible_answer, flags=re.IGNORECASE).strip()
 
     from src.iris_engine import _quality_guard
     cleaned = _quality_guard(visible_answer) if visible_answer else ""
