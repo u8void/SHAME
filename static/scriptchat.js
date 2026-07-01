@@ -30,6 +30,8 @@ function triggerDownload(filename, content) {
 document.addEventListener("DOMContentLoaded", () => {
     let chats = JSON.parse(localStorage.getItem('iris_chats')) || [];
     let currentChatId = null;
+    window.getCurrentChats = () => chats;
+    window.getCurrentChatId = () => currentChatId;
     let chatActive = false;
     let currentAbortController = null;
     let isGenerating = false;
@@ -935,7 +937,9 @@ document.addEventListener("DOMContentLoaded", () => {
         // Fallback: Generate a meaningful name from the user's query
         try {
             let activeQuery = "";
-            const chat = typeof chats !== 'undefined' && typeof currentChatId !== 'undefined' ? chats.find(c => c.id === currentChatId) : null;
+            const currentChats = typeof window.getCurrentChats === 'function' ? window.getCurrentChats() : [];
+            const currentChatIdVal = typeof window.getCurrentChatId === 'function' ? window.getCurrentChatId() : null;
+            const chat = currentChats && currentChatIdVal ? currentChats.find(c => c.id === currentChatIdVal) : null;
             if (chat && chat.messages) {
                 for (let i = chat.messages.length - 1; i >= 0; i--) {
                     if (chat.messages[i].role === 'user') {
