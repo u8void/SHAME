@@ -53,6 +53,8 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
 
     # 3. Generation — model thinks and solves, no preemptive interception
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
+    # 3. Generation Stage 1 — model thinks and solves internally
+    user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     math_output = ""
     
     yield {"type": "status", "content": "Calculating math..."}
@@ -64,6 +66,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
         if not _keep_loaded:
             unload_model()
 
+    # 4. Generation Stage 2 — explaining the solution
     yield {"type": "status", "content": "Explaining solution..."}
     explanation_prompt = (
         f"The user asked the following math problem: {user_query}\n\n"
@@ -78,22 +81,42 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
         gen_optimized = [{"role": m["role"], "content": m["content"]} for m in history] + gen_optimized
 
     gen_full = ""
+    thought_process = ""
     try:
-        for ev in _stream_tokens(ModelRole.GENERAL, gen_optimized, max_tokens=4096, temperature=0.4, think_mode="show"):
+        for ev in _stream_tokens(ModelRole.GENERAL, gen_optimized, max_tokens=8192, temperature=0.4, think_mode="show"):
             if user_lang == "English" or ev["type"] != "token":
                 yield ev
             if ev["type"] == "token":
                 gen_full += ev["content"]
+            elif ev["type"] == "thinking":
+                thought_process += ev["content"]
     finally:
         if not _keep_loaded:
             unload_model()
 
-    if user_lang != "English" and gen_full:
+    thought_clean = thought_process.strip()
+    thought_clean = re.sub(r'</?think>', '', thought_clean, flags=re.IGNORECASE).strip()
+    thought_clean = re.sub(r'<\|?/?thought(?:_(?:start|end))?\|?>', '', thought_clean, flags=re.IGNORECASE).strip()
+
+    visible_answer = gen_full.strip()
+    visible_answer = re.sub(r'</?think>', '', visible_answer, flags=re.IGNORECASE).strip()
+
+    from src.iris_engine import _quality_guard
+    cleaned = _quality_guard(visible_answer) if visible_answer else ""
+
+    if user_lang != "English" and cleaned:
         from src.iris_engine import translate_text
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
-        translated = translate_text(gen_full, user_lang)
-        gen_full = translated
-        yield {"type": "clear"}
-        yield {"type": "token", "content": gen_full}
+        cleaned = translate_text(cleaned, user_lang)
 
-    yield {"type": "raw_response", "content": gen_full}
+    display_content = ""
+    if thought_clean:
+        display_content = f"<think>\n{thought_clean}\n</think>\n\n{cleaned}"
+    else:
+        display_content = cleaned
+
+    if display_content:
+        yield {"type": "clear"}
+        yield {"type": "token", "content": display_content}
+
+    yield {"type": "raw_response", "content": display_content}
