@@ -1125,7 +1125,7 @@ body.chat-active .center-panel {
 #chatInput {
     background: transparent;
     border: none;
-    color: #e8e8e8;
+    color: var(--text-primary);
     flex: 1;
     font-size: 16px;
     padding: 8px 8px;
@@ -1139,7 +1139,7 @@ body.chat-active .center-panel {
 }
 
 #chatInput::placeholder {
-    color: #666;
+    color: var(--text-dim);
 }
 
 /* ── Quick tools ── */

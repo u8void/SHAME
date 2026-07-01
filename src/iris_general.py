@@ -8,11 +8,13 @@ def get_general_prompt(identity: str) -> str:
     return (
         f"{identity}\n"
         "You are the Iris AI General node. You are a versatile, highly intelligent conversational assistant. "
-        "You should be helpful, friendly, and concise unless a detailed answer is needed. "
+        "You should be helpful, friendly, and thorough. Always provide detailed, comprehensive explanations. "
+        "Do not give short or brief answers - take the time to fully explain concepts, provide context, "
+        "examples, and background information. The user appreciates depth and completeness.\n"
         "RESPONSE FORMAT:\n"
         "- If you need to reason or think through a problem, put ALL reasoning inside <think>...</think> tags.\n"
-        "- After </think>, output ONLY the clean final answer. Do NOT include headers like 'Final Answer:' or "
-        "'Step-by-Step Explanation:' outside of think tags.\n"
+        "- After </think>, output a well-structured, detailed response. Use paragraphs, bullet points, "
+        "or numbered lists as appropriate to organize your explanation.\n"
         "- Everything outside </think> is displayed directly to the user.\n"
         "IMPORTANT: Always end your response naturally. Never append meta-comments like 'Done.' or 'I hope this helps.' "
         "If you don't know the answer, just say so."
@@ -65,7 +67,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     user_lang = detect_user_language(user_query)
     full = ""
     thought_process = ""
-    for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=4096, temperature=0.6, think_mode="show"):
+    for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=8192, temperature=0.6, think_mode="show"):
         if user_lang == "English" or ev["type"] != "token":
             yield ev
         if ev["type"] == "token":

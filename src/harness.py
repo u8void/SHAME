@@ -355,7 +355,7 @@ def separate_math_code_blocks(text: str, language: str='') -> Tuple[str, List[st
     return (text, warnings)
 _MATH_PASSES = [('normalize_math_fences', normalize_math_fences), ('deduplicate_math_steps', deduplicate_math_steps), ('normalize_math_notation', normalize_math_notation), ('normalize_math_steps', normalize_math_steps), ('redact_hallucinated_refs', redact_hallucinated_refs), ('separate_math_code_blocks', separate_math_code_blocks), ('extract_math_answer', extract_math_answer), ('clean_whitespace', clean_whitespace)]
 
-_PASSES = [('normalize_fences', normalize_fences), ('normalize_math_fences', normalize_math_fences), ('redact_secrets', redact_secrets), ('repair_truncation', repair_truncation), ('inject_imports', inject_imports), ('normalize_header', normalize_header), ('deduplicate_blocks', deduplicate_blocks), ('clean_whitespace', clean_whitespace)]
+_PASSES = [('normalize_fences', normalize_fences), ('redact_secrets', redact_secrets), ('repair_truncation', repair_truncation), ('inject_imports', inject_imports), ('normalize_header', normalize_header), ('deduplicate_blocks', deduplicate_blocks), ('clean_whitespace', clean_whitespace)]
 _OPTIONAL_PASSES = {'strip_comments': strip_comments}  
 
 def apply_all(text: str, language: str='python', enabled: Optional[List[str]]=None) -> Tuple[str, List[dict]]:
