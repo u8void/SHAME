@@ -522,7 +522,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // Auto-wrap raw HTML in backticks if the model forgot them (Browser Markdown Chokehold prevention)
         if (!work.includes("```html") && !work.includes("```\n<!DOCTYPE") && !work.includes("```\n<html") && !work.includes("```\n<div") && !work.includes("```\n<nav")) {
             // Find raw HTML blocks that appear on a new line and wrap them to the end of the text
-            work = work.replace(/(?:^|\n)(?:html\s*\n|CODE\s*\n|CODE\s*\nhtml\s*\n)?((?:<!DOCTYPE|<html|<body|<nav|<div|<main|<header|<footer|<section|<canvas|<svg|<style|<script|<h1|<h2|<h3)[\s\S]*)$/i, '\n```html\n$1\n```\n');
+            work = work.replace(/(?:^|\n)(?:html\s*\n|CODE\s*\n|CODE\s*\nhtml\s*\n)?((?:<!--|<!DOCTYPE|<html|<body|<head|<title|<meta|<link|<nav|<header|<footer|<main|<section|<aside|<article|<div|<span|<p|<a|<button|<form|<input|<textarea|<select|<label|<ul|<ol|<li|<h[1-6]|<img|<canvas|<svg|<style|<script|<table|<tr|<td|<th|<thead|<tbody|<iframe|<video|<audio)[\s\S]*)$/i, '\n```html\n$1\n```\n');
         }
 
         work = work.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
