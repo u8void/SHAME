@@ -53,41 +53,14 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
 
     # 3. Generation — model thinks and solves, no preemptive interception
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
-    # 3. Generation Stage 1 — model thinks and solves internally
-    user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
-    math_output = ""
-    
-    yield {"type": "status", "content": "Calculating math..."}
-    try:
-        for ev in _stream_tokens(ModelRole.MATH, optimized, max_tokens=4096, temperature=0.2, think_mode="pass"):
-            if ev["type"] == "token":
-                math_output += ev["content"]
-    finally:
-        if not _keep_loaded:
-            unload_model()
-
-    # 4. Generation Stage 2 — explaining the solution
-    yield {"type": "status", "content": "Explaining solution..."}
-    explanation_prompt = (
-        f"The user asked the following math problem: {user_query}\n\n"
-        f"The math core calculated the following step-by-step solution:\n{math_output}\n\n"
-        f"Please explain this solution to the user clearly and in a friendly way. "
-        f"Do NOT use bounding boxes (like \\boxed{{}}) as they cause formatting conflicts. "
-        f"Use clean LaTeX for math. Put your reasoning inside <think>...</think> tags, and your final explanation outside."
-    )
-    
-    gen_optimized = [{"role": "user", "content": explanation_prompt}]
-    if history:
-        gen_optimized = [{"role": m["role"], "content": m["content"]} for m in history] + gen_optimized
-
-    gen_full = ""
+    full = ""
     thought_process = ""
     try:
-        for ev in _stream_tokens(ModelRole.GENERAL, gen_optimized, max_tokens=8192, temperature=0.4, think_mode="show"):
+        for ev in _stream_tokens(ModelRole.MATH, optimized, max_tokens=8192, temperature=0.2, think_mode="show"):
             if user_lang == "English" or ev["type"] != "token":
                 yield ev
             if ev["type"] == "token":
-                gen_full += ev["content"]
+                full += ev["content"]
             elif ev["type"] == "thinking":
                 thought_process += ev["content"]
     finally:
@@ -98,7 +71,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     thought_clean = re.sub(r'</?think>', '', thought_clean, flags=re.IGNORECASE).strip()
     thought_clean = re.sub(r'<\|?/?thought(?:_(?:start|end))?\|?>', '', thought_clean, flags=re.IGNORECASE).strip()
 
-    visible_answer = gen_full.strip()
+    visible_answer = full.strip()
     visible_answer = re.sub(r'</?think>', '', visible_answer, flags=re.IGNORECASE).strip()
 
     from src.iris_engine import _quality_guard
