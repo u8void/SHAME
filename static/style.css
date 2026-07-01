@@ -554,15 +554,27 @@ body.chat-active .center-panel {
 
 /* Right-to-Left (RTL) / Left-to-Right (LTR) handling for multilingual content */
 .message-content:dir(rtl),
-.message-content :dir(rtl):not(.code-container):not(.code-container *):not(.thought-wrapper):not(.thought-wrapper *):not(.file-card):not(.file-card *) {
+.message-content :dir(rtl):not(.code-container):not(.code-container *):not(.thought-wrapper):not(.thought-wrapper *):not(.file-card):not(.file-card *):not(.katex):not(.katex *) {
     direction: rtl !important;
-    text-align: right !important;
 }
 
 .message-content:dir(ltr),
-.message-content :dir(ltr):not(.code-container):not(.code-container *):not(.thought-wrapper):not(.thought-wrapper *):not(.file-card):not(.file-card *) {
+.message-content :dir(ltr):not(.code-container):not(.code-container *):not(.thought-wrapper):not(.thought-wrapper *):not(.file-card):not(.file-card *):not(.katex):not(.katex *) {
     direction: ltr !important;
-    text-align: left !important;
+}
+
+/* Apply Lora font and center alignment to model responses */
+.ai-message .message-content,
+.ai-message .message-content :not(.code-container):not(.code-container *):not(.katex):not(.katex *) {
+    font-family: 'Lora', serif !important;
+    text-align: center !important;
+}
+
+/* Keep user message in Inter and start-aligned */
+.user-message .message-content,
+.user-message .message-content :not(.code-container):not(.code-container *):not(.katex):not(.katex *) {
+    font-family: 'Inter', sans-serif !important;
+    text-align: start !important;
 }
 
 .message-content p:first-child {
