@@ -552,6 +552,19 @@ body.chat-active .center-panel {
     max-width: 100%;
 }
 
+/* Right-to-Left (RTL) / Left-to-Right (LTR) handling for multilingual content */
+.message-content:dir(rtl),
+.message-content :dir(rtl):not(.code-container):not(.code-container *):not(.thought-wrapper):not(.thought-wrapper *):not(.file-card):not(.file-card *) {
+    direction: rtl !important;
+    text-align: right !important;
+}
+
+.message-content:dir(ltr),
+.message-content :dir(ltr):not(.code-container):not(.code-container *):not(.thought-wrapper):not(.thought-wrapper *):not(.file-card):not(.file-card *) {
+    direction: ltr !important;
+    text-align: left !important;
+}
+
 .message-content p:first-child {
     margin-top: 0;
 }
@@ -1730,14 +1743,16 @@ body.chat-active .footere {
     font-weight: 700;
 }
 
-.message-content ol {
-    margin: 12px 0 12px 20px;
+.message-content ol,
+.message-content ul {
+    margin: 12px 0;
+    margin-inline-start: 20px;
     padding: 0;
 }
 
 .message-content li {
     margin-bottom: 8px;
-    padding-left: 5px;
+    padding-inline-start: 5px;
 }
 
 .message-content li::marker {

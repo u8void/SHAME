@@ -425,7 +425,26 @@ document.addEventListener("DOMContentLoaded", () => {
         // Strip <coding> tags as they interfere with markdown parsing and shouldn't be rendered
         formatted = formatted.replace(/<\/?coding>/gi, '');
 
-        return _formatRefined(formatted, isStreaming);
+        let html = _formatRefined(formatted, isStreaming);
+
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const elements = doc.body.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, table, blockquote');
+            elements.forEach(el => {
+                if (el.closest('.thought-wrapper') || el.closest('.code-container') || el.closest('.file-card')) {
+                    return;
+                }
+                if (!el.hasAttribute('dir')) {
+                    el.setAttribute('dir', 'auto');
+                }
+            });
+            html = doc.body.innerHTML;
+        } catch (e) {
+            console.error("Error setting dir=auto on elements:", e);
+        }
+
+        return html;
     }
 
     function _formatRefined(text, isStreaming = false) {
