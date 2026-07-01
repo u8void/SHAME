@@ -61,4 +61,14 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     if not _keep_loaded:
         unload_model()
 
+    user_lang = detect_user_language(user_query)
+    if user_lang != "English" and full:
+        from src.iris_engine import translate_text
+        yield {"type": "status", "content": f"Translating to {user_lang}..."}
+        translated = translate_text(full, user_lang)
+        if translated != full:
+            full = translated
+            yield {"type": "clear"}
+            yield {"type": "token", "content": full}
+
     yield {"type": "raw_response", "content": full}

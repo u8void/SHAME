@@ -4,7 +4,7 @@ import logging
 from typing import Dict, List, Any, Generator
 
 logger = logging.getLogger('iris')
-from src.iris_engine import ModelRole, TaskType, load_model, unload_model, _keep_loaded, _stream_tokens, SandboxResult
+from src.iris_engine import ModelRole, TaskType, load_model, unload_model, _keep_loaded, _stream_tokens, SandboxResult, detect_user_language
 from src.harness import apply_smart_harness_code, apply_code_specific as _apply_harness, HermesAgentLoop, build_hermes_text_prompt, HERMES_AGENT_SYSTEM_PROMPT, parse_hermes_tool_call, HermesToolRegistry, HermesResultAnalyzer
 from src.syntax_checker import check_syntax
 
@@ -371,6 +371,16 @@ def _run_complex_coding(
             yield w
         final_output = _rev
 
+    user_lang = detect_user_language(user_query)
+    if user_lang != "English" and final_output:
+        from src.iris_engine import translate_text
+        yield {"type": "status", "content": f"Translating to {user_lang}..."}
+        translated = translate_text(final_output, user_lang)
+        if translated != final_output:
+            final_output = translated
+            yield {"type": "clear"}
+            yield {"type": "token", "content": final_output}
+
     yield {"type": "raw_response", "content": final_output}
 
 
@@ -477,6 +487,16 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
             for w in _hw:
                 yield w
             full = _rev
+
+    user_lang = detect_user_language(user_query)
+    if user_lang != "English" and full:
+        from src.iris_engine import translate_text
+        yield {"type": "status", "content": f"Translating to {user_lang}..."}
+        translated = translate_text(full, user_lang)
+        if translated != full:
+            full = translated
+            yield {"type": "clear"}
+            yield {"type": "token", "content": full}
 
     yield {"type": "raw_response", "content": full}
 

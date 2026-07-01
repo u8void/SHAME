@@ -174,6 +174,16 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
         yield {"type": "clear"}
         yield {"type": "token", "content": cleaned}
         
+    user_lang = detect_user_language(user_query)
+    if user_lang != "English" and cleaned:
+        from src.iris_engine import translate_text
+        yield {"type": "status", "content": f"Translating to {user_lang}..."}
+        translated = translate_text(cleaned, user_lang)
+        if translated != cleaned:
+            cleaned = translated
+            yield {"type": "clear"}
+            yield {"type": "token", "content": cleaned}
+        
     if web_context:
         sources = re.findall(r'\[source\]\((.*?)\)', web_context)
         if sources:

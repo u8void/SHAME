@@ -75,7 +75,19 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
         unload_model()
         
     cleaned = _quality_guard(full)
-    if full and cleaned and cleaned != full:
+    
+    # Translate if necessary
+    user_lang = detect_user_language(user_query)
+    if user_lang != "English" and cleaned:
+        from src.iris_engine import translate_text
+        yield {"type": "status", "content": f"Translating to {user_lang}..."}
+        translated = translate_text(cleaned, user_lang)
+        if translated != cleaned:
+            cleaned = translated
+            yield {"type": "clear"}
+            yield {"type": "token", "content": cleaned}
+            
+    if full and cleaned and cleaned != full and user_lang == "English":
         yield {"type": "clear"}
         yield {"type": "token", "content": cleaned}
         
