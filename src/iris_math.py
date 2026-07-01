@@ -12,7 +12,7 @@ def get_math_prompt(identity: str) -> str:
         "- Put ALL your step-by-step reasoning, work, and derivations inside <think>...</think> tags.\n"
         "- After </think>, output ONLY the clean final solution and answer. Do NOT include 'Step-by-Step:' or "
         "reasoning headers outside of think tags. Everything outside </think> is shown directly to the user.\n"
-        "Use precise notation. Put your final answer within \\boxed{}. "
+        "Use precise notation. Always wrap your final answer and mathematical expressions in LaTeX delimiters (e.g., $$ \\boxed{answer} $$ or $ \\boxed{answer} $). Everything outside </think> should be clear, elegant, and well-formatted. "
         "ANTI-POLLUTION RULE: If your solution requires writing code (like Python or C++), "
         "DO NOT use LaTeX or MathJax formatting (like $...$ or _{...}) inside the code block. "
         "Variable names and function names inside code must be plain ASCII identifiers only. "

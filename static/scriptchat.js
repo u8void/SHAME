@@ -425,6 +425,13 @@ document.addEventListener("DOMContentLoaded", () => {
         // Strip <coding> tags as they interfere with markdown parsing and shouldn't be rendered
         formatted = formatted.replace(/<\/?coding>/gi, '');
 
+        // Auto-wrap raw \boxed{...} blocks that are not inside math delimiters
+        formatted = formatted.replace(/(\$\$?[\s\S]*?\$?\$\$)|(\\boxed\{[^{}]*\})/g, (match, mathBlock, bareBoxed) => {
+            if (mathBlock) return match;
+            if (bareBoxed) return `$$${bareBoxed}$$`;
+            return match;
+        });
+
         let html = _formatRefined(formatted, isStreaming);
 
         try {
