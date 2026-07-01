@@ -29,6 +29,13 @@ def get_code_prompt(identity: str) -> str:
     "You MUST ALWAYS use Tailwind CSS (loaded via Tailwind Play CDN script in the head: <script src=\"https://cdn.tailwindcss.com\"></script>) as the default and only styling framework. "
     "You MUST NOT write custom CSS style rules inside a <style> block, nor link custom CSS stylesheets. Every single color, padding, margin, width, height, border, and animation must be declared natively using Tailwind utility classes in the HTML markup. A <style> tag is ONLY allowed for custom CSS keyframe animations (like background ambient gradient sweeps). "
     "Do NOT output basic or generic UI. Leverage Tailwind classes to implement premium, modern aesthetics (e.g., curated color schemes, vibrant dark/light modes, custom drop-shadows, smooth scale/translate hover transitions, and fluid layout grids). "
+    "Use these exact core design recipes to build a solid, premium UI:\n"
+    "  - Dark Mode Canvas: default to `bg-zinc-950 text-zinc-50` with an ambient glow container `<div class=\"absolute top-0 left-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none -z-10\"></div>`.\n"
+    "  - Glassmorphic Cards: `<div class=\"bg-zinc-900/50 backdrop-blur-md border border-zinc-800 rounded-2xl p-6 transition-all duration-300 hover:-translate-y-1 hover:border-indigo-500/30\"></div>`.\n"
+    "  - Modern Inputs: `<input class=\"w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all\">`.\n"
+    "  - Premium Buttons: `<button class=\"bg-gradient-to-r from-indigo-500 to-purple-600 hover:opacity-95 text-white font-semibold px-6 py-3 rounded-xl transition-all duration-300 shadow-lg shadow-indigo-500/20\">`.\n"
+    "  - Navigation: fixed/sticky transparent header with backdrop-blur (`fixed top-0 w-full z-50 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900`).\n"
+    "  - Icons: Load and initialize Lucide icons properly. Use `<i data-lucide=\"icon-name\" class=\"w-5 h-5 text-indigo-400\"></i>` inside your HTML.\n"
     "To ensure high-fidelity design, you should structure your document exactly as follows:\n"
     "<!DOCTYPE html>\n"
     "<html lang=\"en\" class=\"scroll-smooth\">\n"
@@ -40,7 +47,7 @@ def get_code_prompt(identity: str) -> str:
     "  <link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap\" rel=\"stylesheet\">\n"
     "  <script src=\"https://cdn.jsdelivr.net/npm/lucide@latest\"></script>\n"
     "</head>\n"
-    "<body class=\"bg-gray-950 text-gray-100 font-sans\">\n"
+    "<body class=\"bg-zinc-950 text-zinc-100 font-sans\">\n"
     "  <!-- Complete body with nav, hero, sections, footer, and scripts -->\n"
     "  <script>\n"
     "    lucide.createIcons();\n"
@@ -532,6 +539,15 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
 
 
 def run_stream(user_query: str, history: list, retriever: Any, settings: dict, is_complex: bool = False) -> Generator[Dict[str, str], None, None]:
+    if settings is None:
+        settings = {}
+    else:
+        # Create a copy of the settings dictionary to avoid side effects
+        settings = dict(settings)
+        
+    q_lower = user_query.lower()
+    if any(k in q_lower for k in ("html", "website", "web page", "web app", "ui", "css", "landing page", "interface")):
+        settings["code_review"] = True
     # 1. RAG
     context = ""
     if retriever is not None and len(user_query.split()) >= 3:
