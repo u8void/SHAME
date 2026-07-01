@@ -86,10 +86,9 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
         from src.iris_engine import translate_text
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
         translated = translate_text(cleaned, user_lang)
-        if translated != cleaned:
-            cleaned = translated
-            yield {"type": "clear"}
-            yield {"type": "token", "content": cleaned}
+        cleaned = translated
+        yield {"type": "clear"}
+        yield {"type": "token", "content": cleaned}
             
     if full and cleaned and cleaned != full and user_lang == "English":
         yield {"type": "clear"}

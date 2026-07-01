@@ -494,10 +494,9 @@ def _run_complex_coding(
         from src.iris_engine import translate_text
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
         translated = translate_text(final_output, user_lang)
-        if translated != final_output:
-            final_output = translated
-            yield {"type": "clear"}
-            yield {"type": "token", "content": final_output}
+        final_output = translated
+        yield {"type": "clear"}
+        yield {"type": "token", "content": final_output}
 
     yield {"type": "raw_response", "content": final_output}
 
@@ -632,10 +631,9 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
         from src.iris_engine import translate_text
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
         translated = translate_text(full, user_lang)
-        if translated != full:
-            full = translated
-            yield {"type": "clear"}
-            yield {"type": "token", "content": full}
+        full = translated
+        yield {"type": "clear"}
+        yield {"type": "token", "content": full}
 
     yield {"type": "raw_response", "content": full}
 

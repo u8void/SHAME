@@ -140,22 +140,5 @@ def ask_stream(
             gen = run_stream(user_query, history, retriever, settings, is_complex=True)
 
     if gen is not None:
-        if not is_translated:
-            yield from gen
-        else:
-            accumulated_response = ""
-            for event in gen:
-                ev_type = event.get("type")
-                if ev_type == "token":
-                    accumulated_response += event.get("content", "")
-                elif ev_type == "raw_response":
-                    pass
-                else:
-                    yield event
-            
-            if accumulated_response:
-                yield {"type": "status", "content": f"Translating to {user_lang}..."}
-                translated = translate_text(accumulated_response, user_lang)
-                yield {"type": "clear"}
-                yield {"type": "token", "content": translated}
-                yield {"type": "raw_response", "content": translated}
+        yield from gen
+
