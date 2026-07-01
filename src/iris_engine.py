@@ -200,13 +200,10 @@ _MODEL_SOURCES: Dict[str, list] = {
         ("Qwen/Qwen2.5-3B-Instruct-GGUF", "qwen2.5-3b-instruct-q4_k_m.gguf"),
     ],
     "iris_004.gguf": [
-        ("Qwen/Qwen2.5-Coder-7B-Instruct-GGUF", "qwen2.5-coder-7b-instruct-q4_k_m.gguf"),
+        ("Qwen/Qwen2.5-Coder-14B-Instruct-GGUF", "qwen2.5-coder-14b-instruct-q4_k_m.gguf"),
     ],
     "iris_003.gguf": [
         ("bartowski/Qwen2.5-Math-7B-Instruct-GGUF", "Qwen2.5-Math-7B-Instruct-Q4_K_M.gguf"),
-    ],
-    "iris_004.gguf": [
-        ("Qwen/Qwen2.5-Coder-14B-Instruct-GGUF", "qwen2.5-coder-14b-instruct-q4_k_m.gguf"),
     ],
     "iris_005.gguf": [
         ("unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF", "DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"),
@@ -461,7 +458,7 @@ def get_size_config_download_info(filename: str) -> Optional[Tuple[str, str]]:
     return None
 
 
-def _is_gguf_valid(path: str, url: Optional[str] = None) -> bool:
+def _is_gguf_valid(path: str) -> bool:
     if not os.path.exists(path):
         return False
     
@@ -477,29 +474,13 @@ def _is_gguf_valid(path: str, url: Optional[str] = None) -> bool:
     except Exception:
         return False
 
-    if url:
-        try:
-            import urllib.request
-            req = urllib.request.Request(url, method='HEAD')
-            with urllib.request.urlopen(req, timeout=3.0) as resp:
-                remote_size = int(resp.headers.get('Content-Length', 0))
-                if remote_size > 0:
-                    if abs(local_size - remote_size) > 1024:
-                        logger.warning(f"[Iris] Size mismatch for {path}: local={local_size}, remote={remote_size}")
-                        return False
-        except Exception as e:
-            logger.debug(f"[Iris] Remote size check skipped for {path}: {e}")
-
     return True
 
 def download_gguf(filename: str, quiet: bool = False) -> bool:
     dest_path = os.path.join(os.path.dirname(_HERE), "models", filename)
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
-    download_info = get_size_config_download_info(filename)
-    expected_url = download_info[0] if download_info else None
-
-    if os.path.exists(dest_path) and _is_gguf_valid(dest_path, expected_url):
+    if os.path.exists(dest_path) and _is_gguf_valid(dest_path):
         if not quiet:
             logger.info(f"[Iris] {filename} already present and valid, skipping download")
         return True
@@ -676,21 +657,12 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> 'Llama'
                 logger.info(f"[Iris] Evicting cached {role.value} model because n_ctx {cached_n_ctx} < {override_n_ctx}")
                 _unload_locked(role.value)
 
-        download_info = get_size_config_download_info(filename)
-        expected_url = download_info[0] if download_info else None
-        
-        if not os.path.exists(path) or not _is_gguf_valid(path, expected_url):
-            if os.path.exists(path):
-                logger.warning(f"[Iris] Model file {filename} at {path} is corrupted, incomplete, or invalid. We will attempt to overwrite it by re-downloading...")
-            
-            logger.info(f"[Iris] Downloading missing/invalid model {filename}...")
-            download_success = download_gguf(filename)
-            if not download_success or not os.path.exists(path):
-                raise FileNotFoundError(
-                    f"GGUF model not found or failed to download for role '{role.value}'.\n"
-                    f"Expected: {path}\n"
-                    f"Please place the GGUF file in {os.path.join(os.path.dirname(_HERE), 'models')}/"
-                )
+        if not os.path.exists(path) or not _is_gguf_valid(path):
+            raise FileNotFoundError(
+                f"GGUF model not found or invalid for role '{role.value}'.\n"
+                f"Expected: {path}\n"
+                f"Please place the GGUF file in {os.path.join(os.path.dirname(_HERE), 'models')}/"
+            )
         cfg = load_generation_config()
         
         # Load active size config profile (e.g. tiny.json, medium.json)
@@ -1100,7 +1072,8 @@ def _stream_tokens(
     think_mode: str = "pass",
     system_prompt_override: Optional[str] = None,
     settings: Optional[dict] = None,
-    extra_stop_words: Optional[List[str]] = None
+    extra_stop_words: Optional[List[str]] = None,
+    skip_repetition_guard: bool = False
 ) -> Generator[Dict[str, str], None, None]:
     global _keep_loaded
 
@@ -1351,8 +1324,8 @@ def _stream_tokens(
                 finish_reason = "escape_hatch"
                 break
 
-            # Repetition Guard: Detect infinite loop collapse on local quantized models (skip for CODE/REVIEWER roles)
-            if role not in (ModelRole.CODE, ModelRole.REVIEWER) and token_count % 10 == 0 and len(loop_content) > 200:
+            # Repetition Guard: Detect infinite loop collapse on local quantized models (skip if requested or for CODE/REVIEWER roles)
+            if not skip_repetition_guard and role not in (ModelRole.CODE, ModelRole.REVIEWER) and token_count % 10 == 0 and len(loop_content) > 200:
                 recent = loop_content[-1000:]
                 n = len(recent)
                 is_repetition = False
@@ -1604,7 +1577,7 @@ def _stream_tokens(
             continuation_buffer = ""
 
         if buffer:
-            if think_mode == "hidden" and in_thinking:
+            if think_mode == "hide" and in_thinking:
                 pass
             elif think_mode == "status" and in_thinking:
                 pass

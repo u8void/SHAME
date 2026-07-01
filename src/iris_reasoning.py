@@ -5,9 +5,9 @@ def get_reasoning_prompt(identity: str) -> str:
         "RESPONSE FORMAT (MANDATORY):\n"
         "1. ALWAYS start your response with <think> and put ALL of your reasoning, analysis, step-by-step breakdown, "
         "explanations of your thought process, intermediate steps, and any internal deliberation inside <think>...</think> tags.\n"
-        "2. After closing </think>, output ONLY the clean, polished final answer for the user. "
-        "The text after </think> must read like a direct, helpful response — NO headers like 'Final Answer:', "
-        "NO 'Step-by-Step Explanation:', NO numbered analysis steps. Just the answer itself.\n"
+        "2. After closing </think>, output a DETAILED, COMPREHENSIVE response for the user. "
+        "Do NOT be brief or concise. Provide thorough explanations with context, background, examples, "
+        "and supporting details. Structure your response with paragraphs, bullet points, or sections as needed.\n"
         "3. NEVER output reasoning, analysis steps, or thought process outside of <think> tags. "
         "Everything outside </think> is shown directly to the user as the response.\n\n"
         "LETTER/CHARACTER COUNTING RULE (HIGHEST PRIORITY):\n"
@@ -20,12 +20,13 @@ def get_reasoning_prompt(identity: str) -> str:
         "2. For factual questions, web search results will be provided in the query. "
         "You MUST base your entire answer EXCLUSIVELY on the provided <search_results>. "
         "DO NOT add unsourced claims, foreign language translations, or unrelated trivia that was not in the search results. "
-        "Answer EXACTLY what the user asked in a concise, direct manner.\n"
+        "Answer EXACTLY what the user asked.\n"
         "3. Prefer saying 'I don't have reliable information on that' over guessing.\n"
         "DEPTH RULES:\n"
         "4. Structure your reasoning inside <think>: problem definition → analysis → approach → solution → verification.\n"
-        "5. For explanations: cover mechanics, context, and real-world examples.\n"
-        "6. Minimum response after </think>: 2-3 solid paragraphs. Maximum: as long as needed to be accurate and complete.\n"
+        "5. For explanations: cover mechanics, context, history, significance, and real-world examples.\n"
+        "6. After </think>, provide a THOROUGH response. Include multiple paragraphs, detailed explanations, "
+        "background context, key facts, dates, names, and any relevant supporting information.\n"
         "7. End with actionable takeaways or a clear conclusion when applicable.\n"
         "8. If you are writing, modifying, or improving code (including HTML/CSS), you MUST output the ENTIRE updated code inside standard markdown triple backticks (```language ... ```). Do NOT output code as plain text or regular markdown lists.\n"
         "9. CRITICAL: Whenever you output code, you MUST ALWAYS provide the FULL, COMPLETE code file. NEVER use abbreviations or placeholders like '...', '<!-- rest of code -->', or '// unchanged'. Provide the entire working script every time."
@@ -99,7 +100,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
     full = ""
     thought_process = ""
     _r_temp = 0.4 if web_context else 0.3
-    _r_tokens = 6144 if web_context else 4096
+    _r_tokens = 8192 if web_context else 6144
     
     user_lang = detect_user_language(user_query)
     for ev in _stream_tokens(ModelRole.REASONING, optimized, max_tokens=_r_tokens, temperature=_r_temp, think_mode="show"):
@@ -190,12 +191,12 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
     if web_context:
         sources = re.findall(r'\[source\]\((.*?)\)', web_context)
         if sources:
-            cleaned += '\n\n<div class="sources-container"><div class="sources-title">Sources:</div><div class="sources-list">'
+            unique_sources = []
             for s in list(dict.fromkeys(sources)):
                 domain = s.split('://')[-1].split('/')[0]
                 if domain.startswith("www."):
                     domain = domain[4:]
-                cleaned += f'<a class="source-chip" href="{s}" target="_blank">{domain}</a>'
-            cleaned += '</div></div>\n'
+                unique_sources.append({"url": s, "domain": domain})
+            yield {"type": "sources", "sources": unique_sources}
                 
     yield {"type": "raw_response", "content": cleaned}

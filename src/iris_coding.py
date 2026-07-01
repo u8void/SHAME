@@ -125,42 +125,60 @@ def _run_continuation(
 
     yield {"type": "status", "content": "Stage 1 \u2014 Continuing code..."}
     full = ""
-    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings):
+    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, skip_repetition_guard=True):
         yield ev
         if ev["type"] == "token":
             full += ev["content"]
     if not _keep_loaded:
         unload_model()
 
-    yield {"type": "clear"}
-    yield {"type": "status", "content": "Stage 2 \u2014 Reviewing..."}
-
-    review_msgs = optimized + [
-        {"role": "assistant", "content": full},
-        {"role": "user", "content": "Review the above continuation of the code project. "
-         "Fix errors, fill gaps, ensure consistency. Return the final corrected code inside a ```python``` block, followed by a brief explanation."}
-    ]
-    reviewed = ""
-    for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings, system_prompt_override=get_reviewer_prompt("Iris")):
-        yield ev
-        if ev["type"] == "token":
-            reviewed += ev["content"]
-    if not _keep_loaded:
-        unload_model()
+    # Safety: close any unclosed <think> block and strip orphaned </think> tags
+    think_open_count = full.count("<think>")
+    think_close_count = full.count("</think>")
+    if think_open_count > think_close_count:
+        full += "\n</think>"
+    elif think_close_count > think_open_count:
+        diff = think_close_count - think_open_count
+        for _ in range(diff):
+            idx = full.find("</think>")
+            if idx != -1:
+                full = full[:idx] + full[idx + len("</think>"):]
 
     from src.iris_engine import _detect_language
-    lang = _detect_language(reviewed)
+    lang = _detect_language(full)
+
     if isinstance(settings, dict) and settings.get("code_review"):
+        yield {"type": "clear"}
+        yield {"type": "status", "content": "Stage 2 — Reviewing..."}
+
+        review_msgs = optimized + [
+            {"role": "assistant", "content": full},
+            {"role": "user", "content": "Review the above continuation of the code project. "
+             "Fix errors, fill gaps, ensure consistency. Return the final corrected code inside a ```python``` block, followed by a brief explanation."}
+        ]
+        reviewed = ""
+        for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=get_reviewer_prompt("Iris"), skip_repetition_guard=True):
+            yield ev
+            if ev["type"] == "token":
+                reviewed += ev["content"]
+        if not _keep_loaded:
+            unload_model()
+
         err = check_syntax(reviewed, lang)
         if err:
             yield {"type": "syntax_error", "content": f"Syntax error in {lang or 'code'}: {err}"}
 
-    rev_lang = _detect_language(reviewed) or "python"
-    reviewed, hwc2 = _apply_harness(reviewed, rev_lang)
-    for w in hwc2:
-        yield w
+        rev_lang = _detect_language(reviewed) or "python"
+        reviewed, hwc2 = _apply_harness(reviewed, rev_lang)
+        for w in hwc2:
+            yield w
 
-    yield {"type": "raw_response", "content": reviewed}
+        yield {"type": "raw_response", "content": reviewed}
+    else:
+        reviewed, hwc2 = _apply_harness(full, lang or "python")
+        for w in hwc2:
+            yield w
+        yield {"type": "raw_response", "content": reviewed}
 
 
 
@@ -294,37 +312,79 @@ def _run_complex_coding(
     reasoning_msgs = [{"role": "system", "content": reasoning_prompt}] + optimized
 
     raw_reasoning = ""
-    for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="pass", settings=settings, extra_stop_words=["```"]):
-        if user_lang == "English" or ev["type"] != "token":
+    # NOTE: Stage 1 is an internal architecture-planning pass only — its raw output
+    # (including any <think> deliberation) must never be streamed to the user as if
+    # it were the answer. think_mode="status" suppresses the content and only pings
+    # a lightweight "Thinking..." status; we forward status events for UI feedback
+    # but never forward token/thinking content here.
+    for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="status", settings=settings, extra_stop_words=["```"], skip_repetition_guard=True):
+        if ev["type"] == "status":
             yield ev
         if ev["type"] in ("token", "thinking"):
             raw_reasoning += ev["content"]
     if not _keep_loaded:
         unload_model()
 
+    # If Stage 1 spent its whole budget deliberating and never produced a real
+    # blueprint, don't hand Stage 2 an empty/near-empty "authoritative" blueprint —
+    # just skip it and let Stage 2 work straight from the user query + context.
+    if len(raw_reasoning.strip()) < 20:
+        raw_reasoning = ""
+
+    # Safety: close any unclosed <think> block and strip orphaned </think> tags
+    think_open_count = raw_reasoning.count("<think>")
+    think_close_count = raw_reasoning.count("</think>")
+    if think_open_count > think_close_count:
+        raw_reasoning += "\n</think>"
+    elif think_close_count > think_open_count:
+        # Strip orphaned </think> tags (extra closing tags without opening)
+        diff = think_close_count - think_open_count
+        for _ in range(diff):
+            idx = raw_reasoning.find("</think>")
+            if idx != -1:
+                raw_reasoning = raw_reasoning[:idx] + raw_reasoning[idx + len("</think>"):]
+
     yield {"type": "status", "content": "Stage 2 \u2014 Writing code..."}
     code_content = f"User Query: {user_query}\n\n"
     if context:
         code_content += f"<retrieved_context>\n{context}\n</retrieved_context>\n\nMake sure your implementation heavily utilizes the instructions, themes, and patterns in the retrieved context above.\n\n"
-    code_content += (
-        f"Structured Architecture Blueprint:\n{raw_reasoning}\n\n"
-        f"You are the expert Code Developer. Using the architectural blueprint above, WRITE THE ACTUAL FULL IMPLEMENTATION yourself. "
-        f"Ensure every file, responsibility, and constraint listed in the blueprint is met. "
-        f"If the plan contains any partial or truncated code snippets, ignore them and write the correct, full code from scratch. "
-        f"Do NOT output any conversational filler. Enclose all final code inside proper ``` language blocks."
-    )
+    if raw_reasoning:
+        code_content += (
+            f"Structured Architecture Blueprint:\n{raw_reasoning}\n\n"
+            f"You are the expert Code Developer. Using the architectural blueprint above, WRITE THE ACTUAL FULL IMPLEMENTATION yourself. "
+            f"Ensure every file, responsibility, and constraint listed in the blueprint is met. "
+            f"If the plan contains any partial or truncated code snippets, ignore them and write the correct, full code from scratch. "
+            f"Do NOT output any conversational filler. Enclose all final code inside proper ``` language blocks."
+        )
+    else:
+        code_content += (
+            f"You are the expert Code Developer. WRITE THE ACTUAL FULL IMPLEMENTATION yourself. "
+            f"Do NOT output any conversational filler. Enclose all final code inside proper ``` language blocks."
+        )
     
     code_msgs = optimized[:-1] + [
         {"role": "user", "content": code_content}
     ]
     full_code = ""
-    for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.4, think_mode="pass", settings=settings):
+    for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.4, think_mode="show", settings=settings, skip_repetition_guard=True):
         if user_lang == "English" or ev["type"] != "token":
             yield ev
         if ev["type"] == "token":
             full_code += ev["content"]
     if not _keep_loaded:
         unload_model()
+
+    # Safety: close any unclosed <think> block and strip orphaned </think> tags
+    think_open_count = full_code.count("<think>")
+    think_close_count = full_code.count("</think>")
+    if think_open_count > think_close_count:
+        full_code += "\n</think>"
+    elif think_close_count > think_open_count:
+        diff = think_close_count - think_open_count
+        for _ in range(diff):
+            idx = full_code.find("</think>")
+            if idx != -1:
+                full_code = full_code[:idx] + full_code[idx + len("</think>"):]
 
     final_output = ""
     if isinstance(settings, dict) and settings.get("code_review"):
@@ -339,7 +399,7 @@ def _run_complex_coding(
              "Return the final corrected code inside a ``` language block. "
              "IMPORTANT: Immediately AFTER the code block, you MUST write a detailed explanation of the code and its features for the user."}
         ]
-        for ev in _stream_tokens(ModelRole.REASONING, review_msgs, max_tokens=None, temperature=0.4, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings):
+        for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.4, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings, skip_repetition_guard=True):
             if ev["type"] == "token":
                 final_output += ev["content"]
             else:
@@ -375,7 +435,7 @@ def _run_complex_coding(
             yield {"type": "clear"}
             yield {"type": "status", "content": "Applying syntax auto-correction..."}
             corrected = ""
-            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris")):
+            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), skip_repetition_guard=True):
                 if user_lang == "English" or ev["type"] != "token":
                     yield ev
                 if ev["type"] == "token":
@@ -410,7 +470,7 @@ def _run_complex_coding(
             {"role": "user", "content": "Final review pass. Fix remaining issues inside a code block with filename. YOU MUST OUTPUT THE ENTIRE COMPLETE FILE WITH ALL ORIGINAL CONTENT INCLUDED (e.g., if it was an HTML file containing HTML/CSS/JS, output the full HTML file). Never output just a snippet. If there are no issues, just output 'No issues found.'"}
         ]
         _rev = ""
-        for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", system_prompt_override=get_reviewer_prompt("Iris")):
+        for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), skip_repetition_guard=True):
             if ev["type"] == "token":
                 _rev += ev["content"]
         if not _keep_loaded:
@@ -470,7 +530,7 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
     user_lang = detect_user_language(user_query)
     yield {"type": "status", "content": "Writing code..."}
     full = ""
-    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings):
+    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, skip_repetition_guard=True):
         if user_lang == "English" or ev["type"] != "token":
             yield ev
         if ev["type"] == "token":
@@ -478,6 +538,18 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
             
     if not _keep_loaded:
         unload_model()
+
+    # Safety: close any unclosed <think> block and strip orphaned </think> tags
+    think_open_count = full.count("<think>")
+    think_close_count = full.count("</think>")
+    if think_open_count > think_close_count:
+        full += "\n</think>"
+    elif think_close_count > think_open_count:
+        diff = think_close_count - think_open_count
+        for _ in range(diff):
+            idx = full.find("</think>")
+            if idx != -1:
+                full = full[:idx] + full[idx + len("</think>"):]
 
     from src.iris_engine import _detect_language
     lang = _detect_language(full)
@@ -494,7 +566,7 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
                  "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code."}
             ]
             corrected = ""
-            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings):
+            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, skip_repetition_guard=True):
                 if user_lang == "English" or ev["type"] != "token":
                     yield ev
                 if ev["type"] == "token":
@@ -536,7 +608,7 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
                 {"role": "user", "content": "Review this code for correctness, edge cases, performance, and best practices. Fix issues inside a code block with filename comment. YOU MUST OUTPUT THE ENTIRE COMPLETE FILE WITH ALL ORIGINAL CONTENT INCLUDED (e.g., if it was an HTML file containing HTML/CSS/JS, output the full HTML file). Never output just a snippet. If there are no issues, just output 'No issues found.'"}
             ]
             _rev = ""
-            for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=None, temperature=0.2, think_mode="pass", settings=settings, system_prompt_override=get_reviewer_prompt("Iris")):
+            for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=get_reviewer_prompt("Iris"), skip_repetition_guard=True):
                 if ev["type"] == "token":
                     _rev += ev["content"]
             if not _keep_loaded:
@@ -575,9 +647,6 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
         # Create a copy of the settings dictionary to avoid side effects
         settings = dict(settings)
         
-    q_lower = user_query.lower()
-    if any(k in q_lower for k in ("html", "website", "web page", "web app", "ui", "css", "landing page", "interface")):
-        settings["code_review"] = True
     # 1. RAG
     context = ""
     if retriever is not None and len(user_query.split()) >= 3:

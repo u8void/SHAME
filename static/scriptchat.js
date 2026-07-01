@@ -141,6 +141,9 @@ document.addEventListener("DOMContentLoaded", () => {
     function regenerateTitle(chat, debounceMs) {
         if (debounceMs === undefined) debounceMs = 3000;
         const key = chat.id;
+        if (chat.title && chat.title !== "New Conversation") {
+            return;
+        }
         if (!regenerateTitle._pending) regenerateTitle._pending = {};
         if (regenerateTitle._pending[key]) return;
         regenerateTitle._pending[key] = true;
@@ -745,6 +748,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const safeFilename = escapeHtml(block.filename);
                 const safeLang = escapeHtml(block.lang);
                 const safeId = escapeHtml(block.fileCardId || '');
+                const isHtml = block.lang && block.lang.toLowerCase() === 'html';
                 html = `
                     <div class="file-card"
                          onclick="window.openCodeViewer(this)"
@@ -767,6 +771,21 @@ document.addEventListener("DOMContentLoaded", () => {
                             <div class="file-card-name">${safeFilename}</div>
                             <div class="file-card-sub">${safeLang} file</div>
                         </div>
+                        ${isHtml ? `
+                        <button class="file-card-download"
+                                onclick="event.stopPropagation(); window.previewFileCard(this)"
+                                data-filename="${safeFilename}"
+                                data-filecard-id="${safeId}"
+                                style="background: rgba(var(--accent-rgb), 0.1); border-color: rgba(var(--accent-rgb), 0.25); color: var(--iris-purple);">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                                 stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                            Preview
+                        </button>
+                        ` : ''}
                         <button class="file-card-download"
                                 onclick="event.stopPropagation(); window.downloadFileCard(this)"
                                 data-filename="${safeFilename}"
@@ -834,6 +853,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         window.fileCardCache[fcId] = block.content;
                         const safeFilename = escapeHtml(autoFilename);
                         const safeLang = escapeHtml(autoLang);
+                        const isAutoHtml = autoLang && autoLang.toLowerCase() === 'html';
                         html = `
                             <div class="file-card"
                                  onclick="window.openCodeViewer(this)"
@@ -856,6 +876,21 @@ document.addEventListener("DOMContentLoaded", () => {
                                     <div class="file-card-name">${safeFilename}</div>
                                     <div class="file-card-sub">${safeLang} file</div>
                                 </div>
+                                ${isAutoHtml ? `
+                                <button class="file-card-download"
+                                        onclick="event.stopPropagation(); window.previewFileCard(this)"
+                                        data-filename="${safeFilename}"
+                                        data-filecard-id="${fcId}"
+                                        style="background: rgba(var(--accent-rgb), 0.1); border-color: rgba(var(--accent-rgb), 0.25); color: var(--iris-purple);">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                                         stroke="currentColor" stroke-width="2"
+                                         stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path>
+                                        <circle cx="12" cy="12" r="3"></circle>
+                                    </svg>
+                                    Preview
+                                </button>
+                                ` : ''}
                                 <button class="file-card-download"
                                         onclick="event.stopPropagation(); window.downloadFileCard(this)"
                                         data-filename="${safeFilename}"
@@ -881,7 +916,7 @@ document.addEventListener("DOMContentLoaded", () => {
                                 <span class="code-lang">${escapeHtml(block.lang)}</span>
                                 <div style="display: flex; gap: 8px;">
                                     ${block.lang && block.lang.toLowerCase() === 'html' ? `
-                                    <button class="copy-btn" onclick="previewHtml(this)" style="background-color: rgba(163, 133, 255, 0.15); border-color: rgba(163, 133, 255, 0.3); color: #a385ff; display: flex; align-items: center; gap: 4px;">
+                                    <button class="copy-btn" onclick="previewHtml(this)" style="background-color: rgba(var(--accent-rgb), 0.1); border-color: rgba(var(--accent-rgb), 0.25); color: var(--iris-purple); display: flex; align-items: center; gap: 4px;">
                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                                         Preview
                                     </button>
@@ -1156,6 +1191,7 @@ document.addEventListener("DOMContentLoaded", () => {
             let lastRenderTime = 0;
             let renderTimer = null;
             let firstTokenReceived = false;
+            window._pendingSources = null;
 
             // Throttle accumulated tokens to the DOM to max 15fps
             // This prevents "The Browser Markdown Chokehold" where marked.parse+DOMPurify freezes the main thread
@@ -1266,6 +1302,7 @@ document.addEventListener("DOMContentLoaded", () => {
                             lastRenderTime = 0;
                             currentResponseText = "";
                             rawResponseText = "";
+                            window._pendingSources = null;
                             firstTokenReceived = false;
                             window._inThinkingStream = false;
                             aiContentDiv.innerHTML = "";
@@ -1273,6 +1310,8 @@ document.addEventListener("DOMContentLoaded", () => {
                             showTypingIndicator();
                         } else if (event.type === "raw_response") {
                             rawResponseText = event.content;
+                        } else if (event.type === "sources") {
+                            window._pendingSources = event.sources;
                         } else if (event.type === "compact_history") {
                             chat.messages = event.messages;
                             savePersist();
@@ -1328,7 +1367,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
             // Final render to apply non-streaming fallback logic (like stripping unclosed <think> tags)
             if (aiContentDiv) {
-                aiContentDiv.innerHTML = formatMessage(cleanResponse, false);
+                let finalHtml = formatMessage(cleanResponse, false);
+                if (window._pendingSources && window._pendingSources.length > 0) {
+                    finalHtml += '<div class="sources-container"><div class="sources-title">Sources</div><div class="sources-list">';
+                    window._pendingSources.forEach(s => {
+                        finalHtml += `<a class="source-chip" href="${s.url}" target="_blank" rel="noopener noreferrer">${s.domain}</a>`;
+                    });
+                    finalHtml += '</div></div>';
+                    window._pendingSources = null;
+                }
+                aiContentDiv.innerHTML = finalHtml;
                 setTimeout(() => { if (typeof Prism !== 'undefined') Prism.highlightAll(); }, 50);
             }
 
@@ -1668,6 +1716,10 @@ document.addEventListener("DOMContentLoaded", () => {
             <div class="code-viewer-filename" id="cvFilename">file.txt</div>
             <span class="code-viewer-lang-badge" id="cvLang">text</span>
             <div class="code-viewer-actions">
+                <button class="code-viewer-btn primary" id="cvPreviewBtn" style="display: none;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    Preview
+                </button>
                 <button class="code-viewer-btn primary" id="cvDownloadBtn">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                          stroke="currentColor" stroke-width="2"
@@ -1733,10 +1785,114 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     let currentCardEl = null;
+    let currentViewerCode = '';
+
+    document.getElementById('cvPreviewBtn').addEventListener('click', () => {
+        if (currentViewerCode) {
+            previewHtmlFromCode(currentViewerCode);
+        }
+    });
+
+    function previewHtmlFromCode(htmlCode) {
+        if (!document.getElementById('preview-modal-styles')) {
+            const style = document.createElement('style');
+            style.id = 'preview-modal-styles';
+            style.textContent = `
+                @keyframes preview-fade-in {
+                    from { opacity: 0; transform: scale(0.98); }
+                    to { opacity: 1; transform: scale(1); }
+                }
+                @keyframes preview-fade-out {
+                    from { opacity: 1; transform: scale(1); }
+                    to { opacity: 0; transform: scale(0.98); }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        const modal = document.createElement('div');
+        modal.className = 'html-preview-modal';
+        modal.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:var(--overlay-bg, rgba(10,10,12,0.85));backdrop-filter:blur(16px);z-index:99999;display:flex;flex-direction:column;animation:preview-fade-in 0.25s cubic-bezier(0.16,1,0.3,1);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+
+        const header = document.createElement('div');
+        header.style.cssText = 'height:64px;background:var(--body-bg, rgba(15,15,20,0.9));border-bottom:1px solid var(--panel-border, rgba(255,255,255,0.08));display:flex;align-items:center;justify-content:space-between;padding:0 24px;color:var(--text-primary, #fff);';
+
+        const title = document.createElement('div');
+        title.textContent = 'Live Webpage Preview';
+        title.style.cssText = 'font-weight:600;font-size:15px;letter-spacing:-0.01em;';
+        header.appendChild(title);
+
+        const controls = document.createElement('div');
+        controls.style.cssText = 'display:flex;gap:8px;';
+
+        const devices = [
+            { name: 'Desktop', width: '100%', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>' },
+            { name: 'Tablet', width: '768px', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>' },
+            { name: 'Mobile', width: '375px', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>' }
+        ];
+
+        const buttons = [];
+        devices.forEach(device => {
+            const devBtn = document.createElement('button');
+            devBtn.innerHTML = `${device.icon} <span style="margin-left:6px;">${device.name}</span>`;
+            devBtn.style.cssText = `background:${device.name === 'Desktop' ? 'var(--iris-purple, #a385ff)' : 'var(--input-bg, rgba(255,255,255,0.05))'};color:${device.name === 'Desktop' ? 'var(--btn-text, #fff)' : 'var(--text-primary, #fff)'};border:none;padding:8px 16px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;transition:all 0.2s;`;
+            devBtn.onclick = () => {
+                iframeWrapper.style.width = device.width;
+                buttons.forEach(b => {
+                    b.style.backgroundColor = 'var(--input-bg, rgba(255,255,255,0.05))';
+                    b.style.color = 'var(--text-primary, #fff)';
+                });
+                devBtn.style.backgroundColor = 'var(--iris-purple, #a385ff)';
+                devBtn.style.color = 'var(--btn-text, #fff)';
+            };
+            buttons.push(devBtn);
+            controls.appendChild(devBtn);
+        });
+        header.appendChild(controls);
+
+        const closeBtn = document.createElement('button');
+        closeBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+        closeBtn.style.cssText = 'background:none;border:none;color:var(--text-primary, #fff);cursor:pointer;opacity:0.7;transition:opacity 0.2s;';
+        closeBtn.onmouseenter = () => closeBtn.style.opacity = '1';
+        closeBtn.onmouseleave = () => closeBtn.style.opacity = '0.7';
+        closeBtn.onclick = () => {
+            modal.style.animation = 'preview-fade-out 0.2s ease';
+            setTimeout(() => modal.remove(), 180);
+        };
+        header.appendChild(closeBtn);
+        modal.appendChild(header);
+
+        const bodyArea = document.createElement('div');
+        bodyArea.style.cssText = 'flex:1;display:flex;justify-content:center;align-items:center;padding:24px;overflow:hidden;';
+
+        const iframeWrapper = document.createElement('div');
+        iframeWrapper.style.cssText = 'width:100%;height:100%;max-width:100%;max-height:100%;background:#fff;border-radius:16px;box-shadow:0 25px 60px rgba(0,0,0,0.6);overflow:hidden;transition:width 0.4s cubic-bezier(0.16,1,0.3,1);';
+
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'width:100%;height:100%;border:none;';
+        iframe.sandbox = 'allow-scripts allow-modals allow-same-origin';
+        iframe.srcdoc = htmlCode;
+
+        iframeWrapper.appendChild(iframe);
+        bodyArea.appendChild(iframeWrapper);
+        modal.appendChild(bodyArea);
+
+        document.body.appendChild(modal);
+    }
 
     function openViewer(filename, lang, code) {
         document.getElementById('cvFilename').textContent = filename;
         document.getElementById('cvLang').textContent = lang;
+        currentViewerCode = code;
+
+        const previewBtn = document.getElementById('cvPreviewBtn');
+        if (lang && lang.toLowerCase() === 'html') {
+            previewBtn.style.display = 'flex';
+            previewBtn.style.alignItems = 'center';
+            previewBtn.style.gap = '6px';
+        } else {
+            previewBtn.style.display = 'none';
+        }
 
         const escaped = code
             .replace(/&/g, '&amp;')
@@ -1780,6 +1936,16 @@ document.addEventListener("DOMContentLoaded", () => {
         openViewer(filename, lang, codeText);
     };
 
+    // Called from the Preview button inside the file card
+    window.previewFileCard = function (btn) {
+        const card = btn.closest('.file-card');
+        const fcId = card.dataset.filecardId;
+        const codeText = window.fileCardCache[fcId] || '';
+        if (codeText) {
+            previewHtmlFromCode(codeText);
+        }
+    };
+
     // Called from the Download button inside the file card
     window.downloadFileCard = function (btn) {
         const card = btn.closest('.file-card');
@@ -1817,7 +1983,7 @@ document.addEventListener("DOMContentLoaded", () => {
         modal.style.left = '0';
         modal.style.width = '100vw';
         modal.style.height = '100vh';
-        modal.style.backgroundColor = 'rgba(10, 10, 12, 0.85)';
+        modal.style.backgroundColor = 'var(--overlay-bg, rgba(10, 10, 12, 0.85))';
         modal.style.backdropFilter = 'blur(16px)';
         modal.style.zIndex = '99999';
         modal.style.display = 'flex';
@@ -1827,13 +1993,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const header = document.createElement('div');
         header.style.height = '64px';
-        header.style.backgroundColor = 'rgba(15, 15, 20, 0.9)';
-        header.style.borderBottom = '1px solid rgba(255, 255, 255, 0.08)';
+        header.style.backgroundColor = 'var(--body-bg, rgba(15, 15, 20, 0.9))';
+        header.style.borderBottom = '1px solid var(--panel-border, rgba(255, 255, 255, 0.08))';
         header.style.display = 'flex';
         header.style.alignItems = 'center';
         header.style.justifyContent = 'space-between';
         header.style.padding = '0 24px';
-        header.style.color = '#fff';
+        header.style.color = 'var(--text-primary, #fff)';
 
         const title = document.createElement('div');
         title.textContent = 'Live Webpage Preview';
@@ -1856,8 +2022,8 @@ document.addEventListener("DOMContentLoaded", () => {
         devices.forEach(device => {
             const devBtn = document.createElement('button');
             devBtn.innerHTML = `${device.icon} <span style="margin-left: 6px;">${device.name}</span>`;
-            devBtn.style.backgroundColor = device.name === 'Desktop' ? '#a385ff' : 'rgba(255, 255, 255, 0.05)';
-            devBtn.style.color = '#fff';
+            devBtn.style.backgroundColor = device.name === 'Desktop' ? 'var(--iris-purple, #a385ff)' : 'var(--input-bg, rgba(255, 255, 255, 0.05))';
+            devBtn.style.color = device.name === 'Desktop' ? 'var(--btn-text, #fff)' : 'var(--text-primary, #fff)';
             devBtn.style.border = 'none';
             devBtn.style.padding = '8px 16px';
             devBtn.style.borderRadius = '20px';
@@ -1870,8 +2036,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
             devBtn.onclick = () => {
                 iframeWrapper.style.width = device.width;
-                buttons.forEach(b => b.style.backgroundColor = 'rgba(255, 255, 255, 0.05)');
-                devBtn.style.backgroundColor = '#a385ff';
+                buttons.forEach(b => {
+                    b.style.backgroundColor = 'var(--input-bg, rgba(255, 255, 255, 0.05))';
+                    b.style.color = 'var(--text-primary, #fff)';
+                });
+                devBtn.style.backgroundColor = 'var(--iris-purple, #a385ff)';
+                devBtn.style.color = 'var(--btn-text, #fff)';
             };
 
             buttons.push(devBtn);
@@ -1883,7 +2053,7 @@ document.addEventListener("DOMContentLoaded", () => {
         closeBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
         closeBtn.style.background = 'none';
         closeBtn.style.border = 'none';
-        closeBtn.style.color = '#fff';
+        closeBtn.style.color = 'var(--text-primary, #fff)';
         closeBtn.style.cursor = 'pointer';
         closeBtn.style.opacity = '0.7';
         closeBtn.style.transition = 'opacity 0.2s';
