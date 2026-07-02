@@ -550,6 +550,100 @@ document.addEventListener("DOMContentLoaded", () => {
             }
             return false;
         }
+
+        function stripTrailingTextFromCode(content, lang) {
+            const l = (lang || '').toLowerCase();
+            const lines = content.split('\n');
+            let lastCode = lines.length - 1;
+
+            // HTML: strip after last </html>
+            if (l === 'html') {
+                const idx = content.lastIndexOf('</html>');
+                if (idx !== -1) return content.substring(0, idx + 7).trim();
+            }
+
+            // CSS/SCSS/LESS: strip after last } at column 0
+            if (['css', 'scss', 'less'].includes(l)) {
+                while (lastCode >= 0 && !lines[lastCode].trim().endsWith('}')) lastCode--;
+                if (lastCode >= 0) return lines.slice(0, lastCode + 1).join('\n').trim();
+            }
+
+            // Shell: strip after last return/exit/exec
+            if (['bash', 'sh', 'shell', 'zsh'].includes(l)) {
+                while (lastCode >= 0) {
+                    const s = lines[lastCode].trim().toLowerCase();
+                    if (s.startsWith('return ') || s.startsWith('exit ') || s.startsWith('exec ')) break;
+                    lastCode--;
+                }
+                if (lastCode >= 0) return lines.slice(0, lastCode + 1).join('\n').trim();
+            }
+
+            // Python: strip after last def/class/if-__name__/return at indent 0
+            if (['python', 'py'].includes(l)) {
+                while (lastCode >= 0) {
+                    const s = lines[lastCode];
+                    if (s.startsWith('def ') || s.startsWith('class ') || s.startsWith('if __name__') ||
+                        s.startsWith('return ') || s.trim() === 'return') break;
+                    lastCode--;
+                }
+                if (lastCode >= 0) return lines.slice(0, lastCode + 1).join('\n').trim();
+            }
+
+            // JS/TS/JSX/TSX/Vue: strip after last }; } export/module.exports
+            if (['javascript', 'js', 'typescript', 'ts', 'jsx', 'tsx', 'vue'].includes(l)) {
+                while (lastCode >= 0) {
+                    const s = lines[lastCode].trim();
+                    if (s.endsWith('};') || s === '}' || s === '};' || s.endsWith("';") || s.endsWith('";') ||
+                        s.startsWith('export ') || s.startsWith('module.exports')) break;
+                    lastCode--;
+                }
+                if (lastCode >= 0) return lines.slice(0, lastCode + 1).join('\n').trim();
+            }
+
+            // Generic fallback: strip trailing lines that look like English prose
+            lastCode = lines.length - 1;
+            while (lastCode >= 0) {
+                const s = lines[lastCode].trim();
+                if (!s || s.length < 10) break;
+                if (s.endsWith((';', '}', ']', ')', '>', ','))) break;
+                if (/^(def |class |function |const |let |var |import |from |return |if |for |while |try |catch |switch |case |export |module\.|require\(|#include|<!DOCTYPE|<html|<div|<script|<style|import )/.test(s)) break;
+                if (/[.!?]\s*$/.test(s) && /\s{2,}[A-Z]/.test(s)) { lastCode--; continue; }
+                break;
+            }
+            if (lastCode >= 0) return lines.slice(0, lastCode + 1).join('\n').trim();
+
+            return content;
+        }
+
+        // SAFETY NET: Close unclosed code blocks before <file_card> tags, remove orphaned ```
+        // 1. If a <file_card> appears and the nearest preceding ``` has no closing ```, add one
+        work = work.replace(/<file_card\s/gi, (match, offset) => {
+            const before = work.substring(0, offset);
+            const lastOpen = before.lastIndexOf('```');
+            if (lastOpen === -1) return match;
+            const afterOpen = work.substring(lastOpen + 3);
+            const nextClosing = afterOpen.indexOf('```');
+            const nextFileCard = afterOpen.indexOf('<file_card');
+            if (nextClosing === -1 || (nextFileCard !== -1 && nextClosing > nextFileCard)) {
+                return '```' + match.slice(1);
+            }
+            return match;
+        });
+        // 2. Remove orphaned ``` (empty code fences with no content inside and nothing meaningful after)
+        work = work.replace(/```\s*```/g, '');
+        work = work.replace(/```\s*$/gm, (match, offset) => {
+            const after = work.substring(offset + 3).trimStart();
+            if (!after || after.length < 3) return '';
+            return match;
+        });
+        // 3. If a <file_card> exists but no code block precedes it, remove the orphaned file_card
+        if (/<file_card\s/i.test(work)) {
+            const parts = work.split(/<file_card\s/i);
+            if (parts.length > 1 && !/```[\s\S]*?```/.test(parts[0])) {
+                work = work.replace(/<file_card\s[^>]*?(?:\/>|>\s*<\/file_card>)/gi, '');
+            }
+        }
+
         // Auto-wrap raw HTML in backticks if the model forgot them (Browser Markdown Chokehold prevention)
         if (!work.includes("```html") && !work.includes("```\n<!DOCTYPE") && !work.includes("```\n<html") && !work.includes("```\n<div") && !work.includes("```\n<nav")) {
             // Find raw HTML blocks that appear on a new line and wrap them to the end of the text
@@ -578,6 +672,16 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             let cleanContent = (extraCode + (extraCode && !codeContent.startsWith('\n') ? '\n' : '') + codeContent).replace(/@@@THOUGHT_\d+@@@/g, '').trim();
+            // Extract description after <file_card> inside code block, emit as visible text outside
+            let extractedFileCardDesc = '';
+            const fcInsideMatch = cleanContent.match(/<file_card\s+[^>]*?>[\s\S]*?<\/file_card>\s*\n?([\s\S]*?)$/i);
+            if (fcInsideMatch && fcInsideMatch[1].trim()) {
+                extractedFileCardDesc = fcInsideMatch[1].trim();
+            }
+            // Strip any <file_card> tags that leaked inside the code block
+            cleanContent = cleanContent.replace(/<file_card\s+[^>]*?>[\s\S]*?<\/file_card>/gi, '').replace(/<file_card\s+[^>]*?\/>/gi, '').trim();
+            // Strip trailing natural-language text from inside code blocks (all languages)
+            cleanContent = stripTrailingTextFromCode(cleanContent, detectedLang);
             const isCmdOrShort = isCommandOrShortBlock(detectedLang, cleanContent);
             const isFinished = match.endsWith('```');
 
@@ -590,8 +694,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 claimed: false,
                 finished: isFinished
             });
-            // Inject thoughts outside the code block placeholder
-            return id + extractedThoughts;
+            // Inject thoughts and file_card description outside the code block placeholder
+            return id + extractedThoughts + (extractedFileCardDesc ? '\n\n' + extractedFileCardDesc : '');
         });
 
         // Extract explicit file_card tags emitted by the AI — they override the auto-generated card
@@ -661,6 +765,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 return id;
             }
         );
+
+        // Strip trailing text after file_card placeholders (the one-sentence description the model adds)
+        work = work.replace(/@@@FILECARD_\d+@@@\s*\n?(.*?)(?=\n\n|@@@|\n#|\n<|$)/gs, (match, trailing) => {
+            // Keep only the placeholder, discard the trailing description text
+            const placeholder = match.match(/@@@FILECARD_\d+@@@/)[0];
+            return placeholder + '\n';
+        });
 
         if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
             if (typeof markedKatex !== 'undefined') {

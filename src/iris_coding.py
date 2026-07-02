@@ -8,123 +8,162 @@ from src.iris_engine import ModelRole, TaskType, load_model, unload_model, _keep
 from src.harness import apply_smart_harness_code, apply_code_specific as _apply_harness, HermesAgentLoop, build_hermes_text_prompt, HERMES_AGENT_SYSTEM_PROMPT, parse_hermes_tool_call, HermesToolRegistry, HermesResultAnalyzer
 from src.syntax_checker import check_syntax
 
+PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts")
+
+
+def _load_prompt(filename: str) -> str:
+    path = os.path.join(PROMPTS_DIR, filename)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        logger.warning(f"Prompt file not found: {path}")
+        return ""
+
+def _fix_unclosed_code_blocks(text: str) -> str:
+    """Safety net: close unclosed code blocks before <file_card> tags, remove orphaned ```."""
+    if not text:
+        return text
+
+    # 1. If a <file_card> appears and the nearest preceding ``` has no closing ```, add one
+    def _close_before_file_card(m):
+        tag = m.group(0)
+        pos = m.start()
+        before = text[:pos]
+        last_open = before.rfind('```')
+        if last_open == -1:
+            return tag
+        after_open = text[last_open + 3:]
+        next_close = after_open.find('```')
+        next_fc = after_open.find('<file_card')
+        if next_close == -1 or (next_fc != -1 and next_close > next_fc):
+            return '```' + tag
+        return tag
+
+    text = re.sub(r'<file_card\s', _close_before_file_card, text, flags=re.IGNORECASE)
+
+    # 2. Remove empty code fences (``` with only whitespace/newlines then another ```)
+    text = re.sub(r'```\s*```', '', text)
+
+    # 3. Remove trailing orphaned ``` at end of string (nothing meaningful after)
+    text = re.sub(r'```\s*$', '', text)
+
+    # 4. If a <file_card> exists but no code block precedes it, remove the orphaned file_card
+    if re.search(r'<file_card\s', text, re.IGNORECASE):
+        parts = re.split(r'<file_card\s', text, maxsplit=1, flags=re.IGNORECASE)
+        if len(parts) > 1 and not re.search(r'```[\s\S]*?```', parts[0]):
+            text = re.sub(r'<file_card\s[^>]*?(?:/>|>\s*</file_card>)', '', text, flags=re.IGNORECASE)
+
+    # 5. Strip trailing natural-language text from inside code blocks (universal, all languages)
+    #    Also extract descriptions after <file_card> tags inside code blocks and move them outside.
+    def _strip_trailing_text(match):
+        block = match.group(0)
+        # Find the opening ``` line to detect language
+        lang_match = re.match(r'```(\w*)', block)
+        lang = (lang_match.group(1) if lang_match else '').lower()
+
+        # Extract description after <file_card> inside code block, move outside
+        fc_match = re.search(r'<file_card\s+[^>]*?>.*?</file_card>\s*\n?([\s\S]*?)$', block, re.IGNORECASE)
+        desc_after_fc = ''
+        if fc_match and fc_match.group(1).strip():
+            desc_after_fc = fc_match.group(1).strip()
+        # Remove <file_card> tags from inside the code block
+        block = re.sub(r'\s*<file_card\s+[^>]*?>.*?</file_card>', '', block, flags=re.DOTALL | re.IGNORECASE)
+        block = re.sub(r'\s*<file_card\s+[^>]*/>', '', block, flags=re.IGNORECASE)
+
+        # --- HTML: strip after last </html>
+        if lang == 'html':
+            idx = block.rfind('</html>')
+            if idx != -1:
+                block = block[:idx + 7]
+
+        # --- CSS: strip after last closing brace at column 0
+        elif lang in ('css', 'scss', 'less'):
+            lines = block.split('\n')
+            last_code = len(lines) - 1
+            while last_code >= 0 and not lines[last_code].rstrip().endswith('}'):
+                last_code -= 1
+            if last_code >= 0:
+                block = '\n'.join(lines[:last_code + 1])
+
+        # --- Shell: strip after last return/exit/exec
+        elif lang in ('bash', 'sh', 'shell', 'zsh'):
+            lines = block.split('\n')
+            last_code = len(lines) - 1
+            while last_code >= 0:
+                stripped = lines[last_code].strip().lower()
+                if stripped.startswith('return ') or stripped.startswith('exit ') or stripped.startswith('exec '):
+                    break
+                last_code -= 1
+            if last_code >= 0:
+                block = '\n'.join(lines[:last_code + 1])
+
+        # --- Python: strip after last def/class/if-__name__/return at indent 0
+        elif lang in ('python', 'py'):
+            lines = block.split('\n')
+            last_code = len(lines) - 1
+            while last_code >= 0:
+                s = lines[last_code].rstrip()
+                if (s.startswith('def ') or s.startswith('class ') or
+                    s.startswith('if __name__') or
+                    s.startswith('return ') or s == 'return'):
+                    break
+                last_code -= 1
+            if last_code >= 0:
+                block = '\n'.join(lines[:last_code + 1])
+
+        # --- JS/TS/JSX/TSX/Vue: strip after last closing brace + optional semicolon
+        elif lang in ('javascript', 'js', 'typescript', 'ts', 'jsx', 'tsx', 'vue'):
+            lines = block.split('\n')
+            last_code = len(lines) - 1
+            while last_code >= 0:
+                s = lines[last_code].rstrip()
+                if s.endswith('};') or s.endswith('};') or s.endswith("';") or s.endswith('";'):
+                    break
+                if s == '}' or s == '};':
+                    break
+                if s.startswith('export ') or s.startswith('module.exports'):
+                    break
+                last_code -= 1
+            if last_code >= 0:
+                block = '\n'.join(lines[:last_code + 1])
+
+        # --- Generic fallback: strip trailing lines that look like English prose
+        else:
+            lines = block.split('\n')
+            last_code = len(lines) - 1
+            while last_code >= 0:
+                s = lines[last_code].strip()
+                if not s or len(s) < 10:
+                    break
+                if s.endswith((';', '}', ']', ')', '>', ',')):
+                    break
+                if re.match(r'^(def |class |function |const |let |var |import |from |return |if |for |while |try |catch |switch |case |export |module\.|require\(|#include|<!DOCTYPE|<html|<div|<script|<style|import )', s):
+                    break
+                if re.search(r'[.!?]\s*$', s) and re.search(r'\s{2,}[A-Z]', s):
+                    last_code -= 1
+                    continue
+                break
+            if last_code >= 0:
+                block = '\n'.join(lines[:last_code + 1])
+
+        # Append extracted description outside the code block
+        if desc_after_fc:
+            block = block + '\n\n' + desc_after_fc
+        return block
+    text = re.sub(r'```[\s\S]*?```', _strip_trailing_text, text)
+
+    # 6. Strip trailing text after </file_card> (the one-sentence description the model adds)
+    text = re.sub(r'(</file_card>)\s*\n?(.*?)(?=\n\n|```|<file_card|\n#|$)', r'\1\n', text, flags=re.DOTALL | re.IGNORECASE)
+
+    return text
+
 
 def get_code_prompt(identity: str) -> str:
-    return (
-        f"{identity}\n"
-    "You are the Iris AI Coding Specialist. Generate clean, fully working, production-quality code. "
-    "Ensure correctness, edge-case handling, and error-free syntax. "
-    "EXCEPTION: If the user explicitly asks 'who are you', 'who made you', or 'who created you', you MUST provide a concise, direct answer about your identity without listing your capabilities or generating code.\n"
-    "CRITICAL RULE: Whenever you write or modify code, you MUST ALWAYS output the ENTIRE, COMPLETE file contents. "
-    "NEVER use abbreviations, placeholders like '...', or comments like '// rest of the code'. You must provide the full working code from top to bottom every single time. "
-    "If you are writing or modifying code, you MUST wrap all code inside standard markdown triple backticks (```language ... ```). "
-    "CRITICAL: If you write a code block, the very first line inside the code block MUST be a comment containing ONLY the intended filename (e.g. // main.cpp or # app.py). "
-    "Do NOT include explanatory comments inside the code block other than the filename. "
-    "NO LATEX OR MATHJAX ALLOWED IN CODE (CRITICAL FATAL ERROR IF VIOLATED): "
-    "You are writing literal programming code. You MUST NOT use ANY mathematical typography, LaTeX, MathJax, or subscript/superscript syntax inside your code. "
-    "NEVER use `$_{...}$`, `_{...}`, `$^{...}$`, or `^{...}` for variable names or math (e.g., `temp$_{celsius}$` is strictly forbidden). "
-    "NEVER use `$` or `$$` for anything inside the code. "
-    "ALWAYS use plain ASCII alphanumeric characters and regular underscores for variable names (e.g., `temp_celsius`). "
-    "If you output a single `$` or `_{` inside your code block, the system will crash. Write PLAIN TEXT code only. "
-    "WEB DESIGN RULE (CRITICAL): If the user asks for a website, web app, or web interface, you MUST create it inside a SINGLE, self-contained HTML file (including all markup, styles via Tailwind CDN, and vanilla JS logic in a script tag). "
-    "You MUST ALWAYS use Tailwind CSS (loaded via Tailwind Play CDN script in the head: <script src=\"https://cdn.tailwindcss.com\"></script>) as the default and only styling framework. "
-    "CRITICAL TAILWIND RULE - READ THIS EXACTLY: Tailwind utility classes go DIRECTLY in the HTML class attributes. The Tailwind CDN script AUTO-GENERATES the CSS for you. You DO NOT need to define any CSS for Tailwind classes. "
-    "CORRECT EXAMPLE: <div class=\"bg-zinc-950 text-white p-6 rounded-xl\">Hello</div> "
-    "WRONG EXAMPLE (NEVER DO THIS): <style>.bg-zinc-950 { background: #000; }</style><div class=\"bg-zinc-950\">Hello</div> "
-    "WRONG EXAMPLE (NEVER DO THIS): <style>.bg-gradient-to-r { background: linear-gradient(...); }</style> "
-    "The <style> tag is ONLY for @keyframe animations. NEVER put ANY class names or Tailwind utilities inside <style> blocks. Not .bg-*, not .text-*, not .border-*, not .rounded-*, not .p-*, not .m-*, not .shadow-*, not .bg-gradient-to-r, NOTHING. "
-    "If you need a gradient button, use: class=\"bg-gradient-to-r from-indigo-500 to-purple-600\" DIRECTLY in the HTML. Do NOT define it in CSS. "
-    "NEVER USE CUSTOM CSS CLASS NAMES LIKE bg-canvas, bg-canvas-card, text-accent, etc. These are NOT real Tailwind classes. "
-    "ALWAYS use ONLY valid Tailwind utility classes. Examples: bg-zinc-950, bg-zinc-900, bg-zinc-800, text-white, text-zinc-100, text-zinc-400, border-zinc-800, rounded-xl, p-6, p-8, px-6, py-3, space-y-6, gap-4, etc. "
-    "ALL JavaScript MUST be inline in a single <script> tag at the bottom of the <body>. NEVER use <script src=\"app.js\"></script> or any external JS file reference. The ENTIRE HTML file must be self-contained with inline JS only. "
-    "JavaScript must be syntactically correct with NO duplicate lines, NO missing closing brackets, NO broken string concatenation. Double-check your JS before outputting. "
-    "Every button MUST have a working onclick handler or event listener that calls the correct function. NEVER create a function like deleteTask() without attaching it to a button via onclick=\"deleteTask(id)\". "
-    "After the file_card tag, provide a brief 1-2 sentence summary of what the code does. Do NOT repeat the code or write long explanations. "
-    "Do NOT output basic or generic UI. Leverage Tailwind classes to implement premium, modern aesthetics (e.g., curated color schemes, vibrant dark/light modes, custom drop-shadows, smooth scale/translate hover transitions, and fluid layout grids). "
-    "SPACING AND LAYOUT RULES (CRITICAL - YOUR UI LOOKS TERRIBLE IF YOU IGNORE THESE):\n"
-    "  - ALWAYS use generous padding and margins. Never cram elements together. Use p-6, p-8, px-8, py-6, space-y-6, gap-6, etc.\n"
-    "  - Use max-w-4xl or max-w-5xl with mx-auto to center content with proper breathing room.\n"
-    "  - Add mb-8 or mb-12 between major sections. Use space-y-8 for vertical rhythm.\n"
-    "  - Cards need generous internal padding (p-6 or p-8) and spacing between them (gap-6 or space-y-4).\n"
-    "  - Forms need vertical spacing between fields (space-y-4 or space-y-5).\n"
-    "  - NEVER put elements edge-to-edge without padding. Always use px-6 or px-8 on containers.\n"
-    "  - Use py-12 or py-16 for section separators to create visual breathing room.\n"
-    "EXACT SPACING COMBINATIONS TO USE (copy these exactly):\n"
-    "  - Page container: <div class=\"max-w-4xl mx-auto px-6 py-12 lg:py-20 space-y-12\">\n"
-    "  - Section: <section class=\"py-16 lg:py-24 space-y-8\">\n"
-    "  - Card group: <div class=\"space-y-6\">\n"
-    "  - Single card: <div class=\"bg-zinc-900 border border-zinc-800 rounded-2xl p-6 lg:p-8 space-y-4\">\n"
-    "  - Form fields: <div class=\"space-y-5\">\n"
-    "  - Button row: <div class=\"flex gap-4 mt-6\">\n"
-    "  - Header padding: <header class=\"fixed top-0 w-full z-50 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 px-6 py-4\">\n"
-    "  - Footer: <footer class=\"py-12 mt-16 border-t border-zinc-800\">\n"
-    "  - JavaScript: <script> // ALL JS code inline here, NO external src attributes </script>\n"
-    "Use these exact core design recipes to build a solid, premium UI (copy these EXACTLY, do not invent new class names):\n"
-    "  - Dark Mode Canvas: default to `bg-zinc-950 text-zinc-50` with an ambient glow container `<div class=\"absolute top-0 left-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none -z-10\"></div>`.\n"
-    "  - Glassmorphic Cards: `<div class=\"bg-zinc-900/50 backdrop-blur-md border border-zinc-800 rounded-2xl p-6 transition-all duration-300 hover:-translate-y-1 hover:border-indigo-500/30\"></div>`.\n"
-    "  - Modern Inputs: `<input class=\"w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all\">`.\n"
-    "  - Premium Buttons: `<button class=\"bg-gradient-to-r from-indigo-500 to-purple-600 hover:opacity-95 text-white font-semibold px-6 py-3 rounded-xl transition-all duration-300 shadow-lg shadow-indigo-500/20\">`.\n"
-    "  - Navigation: fixed/sticky transparent header with backdrop-blur (`fixed top-0 w-full z-50 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900`).\n"
-    "  - Icons: Load and initialize Lucide icons properly. Use `<i data-lucide=\"icon-name\" class=\"w-5 h-5 text-indigo-400\"></i>` inside your HTML.\n"
-    "  - Sections: Use `py-24 lg:py-32` for major sections with `bg-zinc-900/30` or `bg-zinc-950` backgrounds.\n"
-    "  - Containers: Always use `<div class=\"max-w-5xl mx-auto px-6\">` to center content with proper padding.\n"
-    "  - List Items: Use `bg-zinc-900 border border-zinc-800 rounded-xl p-4` for list items, NOT custom classes.\n"
-    "To ensure high-fidelity design, you should structure your document exactly as follows:\n"
-    "<!DOCTYPE html>\n"
-    "<html lang=\"en\" class=\"scroll-smooth\">\n"
-    "<head>\n"
-    "  <meta charset=\"UTF-8\">\n"
-    "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
-    "  <title>DESCRIPTIVE TITLE</title>\n"
-    "  <script src=\"https://cdn.tailwindcss.com\"></script>\n"
-    "  <link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap\" rel=\"stylesheet\">\n"
-    "  <script src=\"https://cdn.jsdelivr.net/npm/lucide@latest\"></script>\n"
-    "</head>\n"
-    "<body class=\"bg-zinc-950 text-zinc-100 font-sans\">\n"
-    "  <!-- Complete body with nav, hero, sections, footer, and scripts -->\n"
-    "  <script>\n"
-    "    lucide.createIcons();\n"
-    "  </script>\n"
-    "</body>\n"
-    "</html>\n"
-    "Deliver a 'WOW' factor. Write complete, realistic copy — never 'Lorem Ipsum'. "
-    "SELF-CONTAINED ANIMATION / CANVAS RULE (ABSOLUTE — applies whenever the task is a visual animation, canvas sketch, SVG graphic, or procedural art): "
-    "RULE 1 — NO EXTERNAL ASSETS WHATSOEVER: You MUST NOT reference any external file, URL, or resource. "
-    "This includes: src=\"*.svg\", src=\"*.png\", src=\"*.jpg\", url(...), fetch(...), XMLHttpRequest, or any network call. "
-    "Every visual element MUST be drawn procedurally with code. "
-    "RULE 2 — SINGLE RENDERING PARADIGM: You MUST choose exactly ONE rendering approach for the entire output and stick to it exclusively. "
-    "Either: (a) 100% HTML5 Canvas — use ctx.beginPath(), ctx.arc(), ctx.moveTo(), ctx.lineTo(), ctx.quadraticCurveTo(), ctx.bezierCurveTo(), ctx.fillRect(), etc. to draw everything. Do not use CSS animation classes alongside Canvas. "
-    "Or: (b) 100% CSS/SVG/DOM — use only CSS keyframes, SVG <path>, <circle>, <polygon> elements, or DOM manipulation. Do not mix a <canvas> context into a CSS-animated page. "
-    "NEVER split rendering between Canvas context calls and CSS animation classes in the same output. Pick one and use it exclusively. "
-    "RULE 3 — SAFE requestAnimationFrame LOOP: If you use requestAnimationFrame, ALL resource instantiation (new Image(), new Audio(), new Worker(), array precomputation, geometry constants) MUST happen ONCE outside the animation loop, typically in a setup() function called before the loop starts. "
-    "Inside the loop body you may ONLY read pre-computed values, mutate state variables (position, angle, time), and issue draw calls. "
-    "NEVER write `new Image()`, `document.createElement(...)`, or any constructor call inside the requestAnimationFrame callback. "
-    "RULE 4 — RICH PROCEDURAL DETAILS AND GRAPHICS (ABSOLUTE): You MUST NEVER generate basic geometric placeholder shapes (like simple plain circles for characters/dogs, or basic plain rectangles for buildings/trees/clouds). "
-    "All characters, backgrounds, and objects must be drawn using high-fidelity procedural art. "
-    "To animate multi-jointed walking legs, you MUST use pivot-joint matrices with nested ctx.save(), translate, rotate, draw, and restore. For example:\n"
-    "  // Back leg walk cycle:\n"
-    "  const legAngle = Math.sin(time) * 0.4;\n"
-    "  ctx.save();\n"
-    "  ctx.translate(hipX, hipY);\n"
-    "  ctx.rotate(legAngle);\n"
-    "  ctx.ellipse(0, 20, 10, 25, 0, 0, Math.PI * 2); // Thigh\n"
-    "  ctx.translate(0, 35);\n"
-    "  ctx.rotate(-legAngle * 0.5);\n"
-    "  ctx.ellipse(0, 15, 7, 18, 0, 0, Math.PI * 2); // Lower leg\n"
-    "  ctx.restore();\n"
-    "Draw detailed multi-segment body parts (legs with joints, fluffy coat textures, detailed face with nose, eyes, ears, wagging tail) using complex curves (quadraticCurveTo/bezierCurveTo) and smooth color gradients. "
-    "Create highly detailed parallax backgrounds (e.g. detailed academic buildings with window frames, clock faces, tree leaves using overlapping arcs/clusters, textured roads/lawns, layered drifting clouds). "
-    "The animation must look rich, professional, organic, and visually stunning, matching the aesthetic of premium vector-art animations. "
-    "CRITICAL FILE CARD RULE: When you generate a complete, self-contained file (like a single-file HTML website), you MUST place a <file_card> tag strictly OUTSIDE and AFTER the closing triple-backticks. NEVER put the <file_card> inside the code block.\n"
-    "Example of CORRECT file card placement:\n"
-    "```html\n"
-    "<!-- code content -->\n"
-    "```\n"
-    "<file_card filename=\"descriptive_name.html\" lang=\"html\"></file_card>\n"
-    "AFTER the file_card tag, STOP GENERATING IMMEDIATELY. Do NOT write any more text, explanations, or additional code after the file_card tag. The file_card tag marks the END of your response for code tasks.\n"
-    "After the file card, provide a brief explanation of the key features."
-    " If the user is ONLY asking for an explanation, summary, or debugging help without needing new code, do NOT generate a code block; just reply in plain text."
-)
+    prompt = _load_prompt("coding_prompt.txt")
+    return f"{identity}\n{prompt}"
+
+
 def get_reviewer_prompt(identity: str) -> str:
     return (
         f"{identity}\n"
@@ -136,12 +175,23 @@ def get_reviewer_prompt(identity: str) -> str:
     "If you provide corrected code, you MUST wrap your final corrected code inside standard markdown triple backticks. "
     "CRITICAL: If you write a code block, the very first line inside the code block MUST be a comment containing ONLY the intended filename (e.g. // main.cpp or # app.py). "
     "VISUAL ANIMATION REVIEW RULE (CRITICAL): If the code under review is a visual animation, canvas sketch, or procedural art, you MUST ensure that it DOES NOT use simple geometric placeholders (like basic circles for characters, or plain rectangles for buildings/trees). It must feature rich procedural details, gradients, complex curves (bezierCurveTo, quadraticCurveTo), and detailed multi-layered backgrounds. If the code is basic or generic, you MUST fully implement and expand the visual elements, adding rich textures, curves, and high-fidelity rendering, outputting the complete revised code file. "
-    "WEB DESIGN REVIEW RULE (CRITICAL): If the code under review is a website, web app, or UI interface, you MUST ensure that it is implemented inside a SINGLE, complete HTML file and ALWAYS uses Tailwind CSS (via Tailwind CDN). You MUST ensure it contains NO custom CSS styling stylesheet links and NO custom CSS rule definitions inside <style> tags (only keyframe animation animations are allowed). If the code is basic, uses custom styling styles/classes, doesn't use Tailwind, or is generic, you MUST fully rewrite and expand it to be a gorgeous, premium website using modern Tailwind classes, layout grid systems, card designs, and vector icons/SVGs, outputting the entire revised code file. "
+    "WEB DESIGN REVIEW RULE (CRITICAL): If the code under review is a website, web app, or UI interface, you MUST ensure that it is implemented inside a SINGLE, complete HTML file and ALWAYS uses Tailwind CSS (via Tailwind CDN). Custom CSS is fine WHEN it's a well-defined helper class or tailwind.config theme extension that's actually used and actually defined (e.g. a gradient text-clip helper, a glassmorphism helper, custom brand colors/fonts, custom keyframes) — but flag and fix any class referenced in the HTML that is NEVER defined anywhere (a dead class that does nothing), and flag and fix any CSS rule that redefines a real Tailwind utility's own name (e.g. `.bg-gradient-to-r {...}`), since that shadows Tailwind's generated CSS. If the code is basic, generic, visually thin, or looks like an unstyled default, you MUST fully rewrite and expand it to be a gorgeous, premium website using modern Tailwind classes, layout grid systems, card designs, and vector icons/SVGs, outputting the entire revised code file. "
+    "FLAT HERO/NAV REVIEW (CRITICAL): a nav that's just bare text links with no logo mark and no CTA button is unfinished — add a logo/wordmark on the left and a CTA button on the right. A hero that's just a big headline plus one line of subtext on a flat background is unfinished — add a soft background glow orb, a small eyebrow/badge above the headline, a gradient-highlighted phrase in the headline via `bg-gradient-to-r ... bg-clip-text text-transparent` (pure Tailwind, no custom CSS needed), and at least one CTA button. If you see this flat pattern, treat it the same as any other incompleteness bug and fix it. "
+    "DEPTH AND COMPLETENESS REVIEW (CRITICAL): If the page under review is a marketing site/landing page, count its content sections between the hero and the footer — it needs a hero, THREE different content sections (features/benchmarks/how-it-works/testimonials/pricing/FAQ), and a closing CTA section; fewer than that is NOT complete and you must add more until it reads like a real, thorough product site. If any feature/about/benchmark content is a bare `<ul><li>` bullet list, OR a bordered title bar sitting above plain unstyled paragraphs/`<strong>Label:</strong> text` lines (that's the same problem with different markup — a decorated heading is not a finished section), convert it to a card grid (Glassmorphic Card recipe, icon + heading + description per card, content inside the card container itself) for a handful of distinct features, or a compact table for benchmark/comparison data with many rows or metrics. If the original request enumerated specific items (e.g. 5 tiers, a named list of competitors) and the code only implemented one example followed by a comment like `<!-- Add more as needed -->`, that comment is a placeholder — remove it and write out every enumerated item as a real card or table row. Check every `href=\"#id\"` actually has a matching `id=\"...\"` somewhere on the page; fix or remove any that don't. This does not apply to single-purpose tools/apps (to-do list, calculator, dashboard, game) — for those, judge completeness by whether the tool itself is fully-featured and handles real edge cases, not by section count. Also scan for and fill in any leftover undecided values (bracketed stand-ins, 'TBD', vague filler phrases, Lorem ipsum) AND any comparison/performance claim left unquantified (e.g. 'outperforms X' with no number) — commit to a specific, concrete, invented-but-plausible number for every claim. Also remove any HTML comment that merely notes a customization is 'optional' rather than containing real code or nothing at all. "
+    "UI CORRECTNESS REVIEW (CRITICAL): Actively scan for and fix these specific bugs if present: "
+    "(1) Low-contrast text — any background/text color pair from the same family within 400 shade-steps of each other (e.g. bg-zinc-900 with text-zinc-800, or bg-white with text-zinc-200) is broken; fix it by moving the text color to the opposite end of the lightness scale (light text — text-white/zinc-50/zinc-100 — on dark backgrounds shade 700+, dark text — text-zinc-900/zinc-800 — on light backgrounds shade 100 or lighter). Never fix a 'disabled' look by darkening text toward its background; use `disabled` + `disabled:opacity-50 disabled:cursor-not-allowed` instead. "
+    "(2) Modals/dialogs visible on page load without a user action — add the `hidden` class and correct the JS toggle so they only appear on a real user trigger. "
+    "(3) Buttons or controls with no working event listener behind them — wire them up so they do something real. "
+    "(4) Missing responsive breakpoints causing overflow on small screens — add `sm:`/`md:`/`lg:` classes and collapse multi-column grids to a single column on mobile. "
+    "When fixing these (or any other) issues, make TARGETED, MINIMAL corrections — do NOT redesign, restructure, or rewrite sections that are already working correctly. Preserve the original layout, copy, and structure; change only what is actually broken. "
+    "TABLE ALIGNMENT RULE (CRITICAL): All data cells in a column MUST use the same text alignment as that column's <th> header. If a <th> has text-center, every <td> in that column MUST also have text-center. If a <th> has text-left, every <td> in that column MUST also have text-left. Never mix horizontal alignments within a single column. Additionally, EVERY <th> and <td> MUST include the align-middle class — without it, the header's smaller text-xs font size causes the header and data rows to sit at different vertical positions. Before outputting, verify every cell has align-middle and that column alignments are consistent. "
+    "NO CONTENT DUPLICATION RULE (CRITICAL): Each piece of content (feature, stat, benchmark, description) must appear in EXACTLY ONE section. Never repeat the same information across multiple sections — for example, do NOT list the same features in both an About card AND a separate Features section, and do NOT duplicate benchmark data in both a table and a card grid. Before outputting, mentally scan all sections and remove any content that appears in more than one location. "
     "CRITICAL FILE CARD RULE: When you generate corrected code files, you MUST place a <file_card> tag strictly OUTSIDE and AFTER the closing triple-backticks. Follow this structure:\n"
     "```html\n"
     "<!-- Full website code -->\n"
     "```\n"
     "<file_card filename=\"descriptive_name.html\" lang=\"html\"></file_card>\n"
+    "After the file_card tag, write EXACTLY ONE short sentence about what you changed, then stop — no bulleted recap, no headers, no multi-paragraph explanation. "
     "If no code changes are needed, or if you are just summarizing, just explain your review in plain text without code blocks."
 )
 
@@ -178,19 +228,18 @@ def _run_continuation(
             if idx != -1:
                 full = full[:idx] + full[idx + len("</think>"):]
 
-    # Strip trailing text after file_card tags inside code blocks
+    # Strip <file_card> tags and trailing text from inside code blocks
     def strip_after_file_card(match):
         code_block = match.group(0)
-        file_card_match = re.search(r'<file_card\s+[^>]*>.*?</file_card>', code_block, re.DOTALL)
-        if file_card_match:
-            end_pos = file_card_match.end()
-            remaining = code_block[end_pos:].strip()
-            # If there's only whitespace or minimal text after file_card, remove it
-            if len(remaining) < 50:
-                return code_block[:end_pos]
-        return code_block
+        # Remove any <file_card ...>...</file_card> or <file_card .../> from inside the code block
+        cleaned = re.sub(r'\s*<file_card\s+[^>]*?>.*?</file_card>', '', code_block, flags=re.DOTALL)
+        cleaned = re.sub(r'\s*<file_card\s+[^>]*/>', '', cleaned, flags=re.DOTALL)
+        # Also strip any trailing text after a standalone ``` that was part of file_card
+        cleaned = re.sub(r'\s*```\s*$', '', cleaned)
+        return cleaned.strip() if cleaned.strip() else code_block
     
     full = re.sub(r'```[\s\S]*?```', strip_after_file_card, full)
+    full = _fix_unclosed_code_blocks(full)
 
     from src.iris_engine import _detect_language
     lang = _detect_language(full)
@@ -434,18 +483,16 @@ def _run_complex_coding(
             if idx != -1:
                 full_code = full_code[:idx] + full_code[idx + len("</think>"):]
 
-    # Strip trailing text after file_card tags inside code blocks
+    # Strip <file_card> tags and trailing text from inside code blocks
     def strip_after_file_card(match):
         code_block = match.group(0)
-        file_card_match = re.search(r'<file_card\s+[^>]*>.*?</file_card>', code_block, re.DOTALL)
-        if file_card_match:
-            end_pos = file_card_match.end()
-            remaining = code_block[end_pos:].strip()
-            if len(remaining) < 50:
-                return code_block[:end_pos]
-        return code_block
+        cleaned = re.sub(r'\s*<file_card\s+[^>]*?>.*?</file_card>', '', code_block, flags=re.DOTALL)
+        cleaned = re.sub(r'\s*<file_card\s+[^>]*/>', '', cleaned, flags=re.DOTALL)
+        cleaned = re.sub(r'\s*```\s*$', '', cleaned)
+        return cleaned.strip() if cleaned.strip() else code_block
     
     full_code = re.sub(r'```[\s\S]*?```', strip_after_file_card, full_code)
+    full_code = _fix_unclosed_code_blocks(full_code)
 
     final_output = ""
     if isinstance(settings, dict) and settings.get("code_review"):
@@ -610,18 +657,16 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
             if idx != -1:
                 full = full[:idx] + full[idx + len("</think>"):]
 
-    # Strip trailing text after file_card tags inside code blocks
+    # Strip <file_card> tags and trailing text from inside code blocks
     def strip_after_file_card(match):
         code_block = match.group(0)
-        file_card_match = re.search(r'<file_card\s+[^>]*>.*?</file_card>', code_block, re.DOTALL)
-        if file_card_match:
-            end_pos = file_card_match.end()
-            remaining = code_block[end_pos:].strip()
-            if len(remaining) < 50:
-                return code_block[:end_pos]
-        return code_block
+        cleaned = re.sub(r'\s*<file_card\s+[^>]*?>.*?</file_card>', '', code_block, flags=re.DOTALL)
+        cleaned = re.sub(r'\s*<file_card\s+[^>]*/>', '', cleaned, flags=re.DOTALL)
+        cleaned = re.sub(r'\s*```\s*$', '', cleaned)
+        return cleaned.strip() if cleaned.strip() else code_block
     
     full = re.sub(r'```[\s\S]*?```', strip_after_file_card, full)
+    full = _fix_unclosed_code_blocks(full)
 
     from src.iris_engine import _detect_language
     lang = _detect_language(full)

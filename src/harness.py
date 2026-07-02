@@ -228,6 +228,90 @@ def clean_whitespace(text: str, language: str='') -> Tuple[str, List[str]]:
         warnings.append('Whitespace: stripped trailing spaces and excess blank lines')
     return (text, warnings)
 
+_VOID_TAGS = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
+
+def _tw_shade_score(token: str) -> Optional[int]:
+    if token == 'white':
+        return 0
+    if token == 'black':
+        return 1000
+    m = re.match(r'^[a-zA-Z]+-(\d{2,3})$', token)
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            return None
+    return None
+
+def enforce_contrast(text: str, language: str='') -> Tuple[str, List[str]]:
+    """Heuristic safety net for the classic 'invisible text' bug: a text color too
+    close in lightness to its own (or inherited) background. Walks tags in document
+    order, tracking a stack of effective background scores so it also catches text
+    that looks fine on its own tag but sits on a too-similar ANCESTOR background —
+    this deliberately also matches inside JS template-literal strings that build
+    HTML dynamically (e.g. list items rendered via innerHTML +=), since that's a
+    common place for this bug to hide. Best-effort regex heuristic, not a real CSS
+    engine — wrapped by apply_all's try/except, so any edge case just no-ops."""
+    warnings: List[str] = []
+    if 'class' not in text:
+        return (text, warnings)
+
+    class_re = re.compile(r'(class(?:Name)?)\s*=\s*(["\'])([^"\']*)\2')
+    tag_re = re.compile(r'<(/?)([a-zA-Z][a-zA-Z0-9]*)((?:[^>"\']|"[^"]*"|\'[^\']*\')*)>')
+
+    out: List[str] = []
+    last_end = 0
+    stack: List[Optional[int]] = []
+
+    for m in tag_re.finditer(text):
+        out.append(text[last_end:m.start()])
+        last_end = m.end()
+        slash, tag, attrs = m.group(1), m.group(2).lower(), m.group(3)
+
+        if slash:
+            if stack:
+                stack.pop()
+            out.append(m.group(0))
+            continue
+
+        cm = class_re.search(attrs)
+        own_bg = None
+        fixed_attrs = attrs
+        if cm:
+            tokens = cm.group(3).split()
+            text_idx = None
+            text_score = None
+            for i, t in enumerate(tokens):
+                if ':' in t:
+                    continue
+                if t.startswith('bg-') and own_bg is None:
+                    sc = _tw_shade_score(t[3:].split('/')[0])
+                    if sc is not None:
+                        own_bg = sc
+                elif t.startswith('text-') and text_idx is None:
+                    sc = _tw_shade_score(t[5:].split('/')[0])
+                    if sc is not None:
+                        text_idx, text_score = i, sc
+
+            effective_bg = own_bg if own_bg is not None else (stack[-1] if stack else None)
+            if text_idx is not None and effective_bg is not None and abs(effective_bg - text_score) < 400:
+                safe = 'zinc-50' if effective_bg >= 500 else 'zinc-900'
+                old_tok = tokens[text_idx]
+                tokens[text_idx] = f'text-{safe}'
+                new_class_val = ' '.join(tokens)
+                fixed_attrs = attrs[:cm.start()] + f'{cm.group(1)}={cm.group(2)}{new_class_val}{cm.group(2)}' + attrs[cm.end():]
+                warnings.append(f'Contrast: {old_tok} was too close to its background — changed to text-{safe}')
+
+        is_void = tag in _VOID_TAGS or attrs.rstrip().endswith('/')
+        if not is_void:
+            stack.append(own_bg if own_bg is not None else (stack[-1] if stack else None))
+
+        out.append('<' + slash + m.group(2) + fixed_attrs + '>')
+
+    out.append(text[last_end:])
+    new_text = ''.join(out)
+    return (new_text, warnings)
+
 def normalize_header(text: str, language: str='python') -> Tuple[str, List[str]]:
     warnings: List[str] = []
     if language.lower() not in ('python', 'py', 'bash', 'sh') or '```' in text:
@@ -355,7 +439,7 @@ def separate_math_code_blocks(text: str, language: str='') -> Tuple[str, List[st
     return (text, warnings)
 _MATH_PASSES = [('normalize_math_fences', normalize_math_fences), ('deduplicate_math_steps', deduplicate_math_steps), ('normalize_math_notation', normalize_math_notation), ('normalize_math_steps', normalize_math_steps), ('redact_hallucinated_refs', redact_hallucinated_refs), ('separate_math_code_blocks', separate_math_code_blocks), ('extract_math_answer', extract_math_answer), ('clean_whitespace', clean_whitespace)]
 
-_PASSES = [('normalize_fences', normalize_fences), ('redact_secrets', redact_secrets), ('repair_truncation', repair_truncation), ('inject_imports', inject_imports), ('normalize_header', normalize_header), ('deduplicate_blocks', deduplicate_blocks), ('clean_whitespace', clean_whitespace)]
+_PASSES = [('normalize_fences', normalize_fences), ('redact_secrets', redact_secrets), ('repair_truncation', repair_truncation), ('enforce_contrast', enforce_contrast), ('inject_imports', inject_imports), ('normalize_header', normalize_header), ('deduplicate_blocks', deduplicate_blocks), ('clean_whitespace', clean_whitespace)]
 _OPTIONAL_PASSES = {'strip_comments': strip_comments}  
 
 def apply_all(text: str, language: str='python', enabled: Optional[List[str]]=None) -> Tuple[str, List[dict]]:

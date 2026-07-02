@@ -1187,16 +1187,32 @@ def _stream_tokens(
     except Exception as e:
         logger.warning(f"Failed to load session contract: {e}")
 
-    # Inject current local time system directive to keep the model aware of live time/date
-    import datetime
-    try:
-        now = datetime.datetime.now().astimezone()
-        time_str = now.strftime("%A, %B %d, %Y, %H:%M:%S %Z")
-        offset_str = now.strftime("%z")
-        formatted_offset = f"{offset_str[:3]}:{offset_str[3:]}" if len(offset_str) >= 5 else offset_str
-        sys_prompt += f"\n\nSystem Time Context: The current local time is {time_str} (UTC{formatted_offset}). Use this context to accurately answer any date or time-related queries."
-    except Exception as e:
-        logger.warning(f"Failed to inject local time directive: {e}")
+    # Inject current local time system directive to keep the model aware of live time/date.
+    # The full precise timestamp is deliberately excluded for CODE: a code-generation task
+    # has no legitimate need for the current wall-clock time, and that text sitting right at
+    # the tail of the system prompt — immediately before a "continue exactly where you left
+    # off" retry — is exactly the kind of salient, nearby text a weak model can latch onto and
+    # regurgitate mid-completion when it loses track after a truncation. CODE still gets a
+    # single bare year number (e.g. for copyright footers) since that's short, has none of the
+    # colon-heavy timestamp punctuation that seems to invite copying, and is much less likely
+    # to derail a resumed completion. TRIAGE/ROUTER are excluded too since they already inject
+    # their own time context separately (see iris_triage.py) or don't need it.
+    if role == ModelRole.CODE:
+        import datetime
+        try:
+            sys_prompt += f"\n\n(If you need the current year for a copyright line or similar, it is {datetime.datetime.now().year}.)"
+        except Exception as e:
+            logger.warning(f"Failed to inject year hint: {e}")
+    elif role not in (ModelRole.TRIAGE, ModelRole.ROUTER):
+        import datetime
+        try:
+            now = datetime.datetime.now().astimezone()
+            time_str = now.strftime("%A, %B %d, %Y, %H:%M:%S %Z")
+            offset_str = now.strftime("%z")
+            formatted_offset = f"{offset_str[:3]}:{offset_str[3:]}" if len(offset_str) >= 5 else offset_str
+            sys_prompt += f"\n\nSystem Time Context: The current local time is {time_str} (UTC{formatted_offset}). Use this context to accurately answer any date or time-related queries."
+        except Exception as e:
+            logger.warning(f"Failed to inject local time directive: {e}")
 
     # --- History Sanitization: strip bleed-causing artifacts per agent role ---
     def _sanitize_for_role(msgs: List[Dict[str, str]], target_role: ModelRole) -> List[Dict[str, str]]:
@@ -1406,13 +1422,14 @@ def _stream_tokens(
                 break
 
             # Repetition Guard: Detect infinite loop collapse on local quantized models
-            if not skip_repetition_guard and token_count % 10 == 0 and len(loop_content) > 200:
-                recent = loop_content[-1000:]
+            # Skip repetition guard entirely for CODE role - code naturally has repetitive patterns
+            if not skip_repetition_guard and role != ModelRole.CODE and token_count % 20 == 0 and len(loop_content) > 400:
+                recent = loop_content[-1500:]
                 n = len(recent)
                 is_repetition = False
                 
                 # 1. Exact long string repetition
-                for l in range(150, n // 2 + 1):
+                for l in range(200, n // 2 + 1):
                     suffix = recent[-l:]
                     if suffix in recent[:-l]:
                         logger.warning(f"[Repetition Guard] Detected exact repetition loop of length {l}. Stopping generation early.")
@@ -1420,22 +1437,22 @@ def _stream_tokens(
                         break
                 
                 # 2. Semantic N-gram looping (frequent phrases like 'Wait but according to...')
-                if not is_repetition and len(recent) > 300:
+                if not is_repetition and len(recent) > 400:
                     words = recent.replace("\n", " ").split()
                     if len(words) > 30:
                         for i in range(len(words) - 8):
                             ngram = " ".join(words[i:i+8]).lower()
                             # Only check meaningful n-grams
-                            if len(ngram) > 25 and recent.lower().count(ngram) >= 3:
+                            if len(ngram) > 25 and recent.lower().count(ngram) >= 4:
                                 logger.warning(f"[Repetition Guard] Detected semantic loop '{ngram}'. Stopping generation early.")
                                 is_repetition = True
                                 break
                                 
                 # 3. Deliberation loop (frequent phrases like 'Wait but', 'Alternatively,')
-                if not is_repetition and len(recent) > 500:
+                if not is_repetition and len(recent) > 800:
                     deliberation_phrases = ["wait but", "alternatively,", "hmm.", "on the other hand", "wait,"]
                     for phrase in deliberation_phrases:
-                        if recent.lower().count(phrase) >= 5:
+                        if recent.lower().count(phrase) >= 6:
                             logger.warning(f"[Repetition Guard] Detected deliberation loop ('{phrase}'). Stopping generation early.")
                             is_repetition = True
                             break
