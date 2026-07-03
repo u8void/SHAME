@@ -58,18 +58,56 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     final_query += _language_directive(user_query, role=ModelRole.MATH)
     final_query += "\n\nCRITICAL INSTRUCTION: You MUST solve this problem purely analytically. DO NOT write any Python code, sympy scripts, or code blocks. DO NOT use HTML tags like <span>, CSS styling, or \\boxed{}. Just write your final answer in clean plain LaTeX (e.g. $x = 5$ or $$x = 5$$)."
 
-
     # 2. History & Compaction
     optimized = [{"role": "user", "content": final_query}]
     if history:
         optimized = [{"role": m["role"], "content": m["content"]} for m in history] + optimized
 
-    # 3. Generation — model thinks and solves, no preemptive interception
+    # 3. Silent Generation from Math Model (003)
+    import logging
+    logger = logging.getLogger('iris')
+    
+    math_tokens = []
+    try:
+        for ev in _stream_tokens(ModelRole.MATH, optimized, max_tokens=4096, temperature=0.2, think_mode="show"):
+            if ev["type"] in ("token", "thinking"):
+                math_tokens.append(ev["content"])
+    except Exception as e:
+        logger.warning(f"Math core (003) calculation failed: {e}")
+    finally:
+        if not _keep_loaded:
+            unload_model()
+
+    math_solution = "".join(math_tokens).strip()
+
+    # 4. Fallback if Math model returned nothing
+    if not math_solution:
+        math_solution = "[No mathematical solution calculated by 003]"
+
+    # 5. Explaining with General Model (005)
+    yield {"type": "status", "content": "Explaining solution..."}
+
+    general_query = (
+        f"The math core model (003) solved the following mathematical problem:\n"
+        f"User Query: {user_query}\n\n"
+        f"Here are the calculations and reasoning step-by-step from 003:\n"
+        f"--- START CALCULATIONS ---\n"
+        f"{math_solution}\n"
+        f"--- END CALCULATIONS ---\n\n"
+        f"Now, explain this solution step-by-step clearly and give the final answer with explanation. "
+        f"Use flawless LaTeX for mathematical expressions."
+    )
+
+    general_messages = []
+    if history:
+        general_messages = [{"role": m["role"], "content": m["content"]} for m in history]
+    general_messages.append({"role": "user", "content": general_query})
+
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     full = ""
     thought_process = ""
     try:
-        for ev in _stream_tokens(ModelRole.MATH, optimized, max_tokens=8192, temperature=0.2, think_mode="show"):
+        for ev in _stream_tokens(ModelRole.GENERAL, general_messages, max_tokens=8192, temperature=0.5, think_mode="show"):
             if user_lang == "English" or ev["type"] != "token":
                 yield ev
             if ev["type"] == "token":
