@@ -273,14 +273,14 @@ def _ctx_for_ram(
         base = 32768
 
     return {
-        "ctx_triage":    min(4096, base),
+        "ctx_triage":    min(base, 8192),
         "ctx_control":   min(base, 8192),
         "ctx_math":      min(base, 8192),
         "ctx_code":      base,
         "ctx_reasoning": base,
         "ctx_general":   base,
-        "ctx_vision":    min(base, 4096),
-        "ctx_default":   min(base, 4096),
+        "ctx_vision":    min(base, 8192),
+        "ctx_default":   min(base, 8192),
     }
 
 

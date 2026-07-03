@@ -146,13 +146,29 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
             r'^(the final answer is[:\s]*|\[?routing complete\]?\.?|done\.?|answer[:\s]*|result[:\s]*)$',
             re.IGNORECASE
         )
+        # Generic conversational refusals ("I'm sorry, but I can't assist with that request.")
+        # were previously invisible to this check — _EVASION_PHRASES only matches specific
+        # short evasive closers, not an apology/refusal sentence. That meant a refusal from
+        # the model (spontaneous, or from a query that landed here after a routing misclassification)
+        # was passed straight through to the user as the entire response. Kept narrow (anchored at
+        # the start, capped length, no code fence) so a long legitimate answer that happens to
+        # contain "sorry" in passing is never mistaken for a refusal.
+        _REFUSAL_PHRASES = re.compile(
+            r"^(i'?m sorry,?\s*but\s*i\s*(?:can'?t|cannot|won'?t|am unable to)|"
+            r"i\s*(?:can'?t|cannot|won'?t|am unable to)\s*(?:assist|help|comply|continue|do that|fulfill)|"
+            r"as an ai(?:\s*language model)?,?\s*i\s*(?:can'?t|cannot)|"
+            r"i\s*apologi[sz]e,?\s*but)",
+            re.IGNORECASE
+        )
+        _is_refusal = len(cleaned_answer) < 300 and "```" not in cleaned_answer and bool(_REFUSAL_PHRASES.match(cleaned_answer))
         _is_collapsed = (
             len(cleaned_answer) < 5
             or bool(_EVASION_PHRASES.match(cleaned_answer))
+            or _is_refusal
         )
         
         if _is_collapsed:
-            logger.warning(f"[Completeness] Evasion-loophole detected. Visible output too thin ({len(cleaned_answer)} chars). Attempting recovery.")
+            logger.warning(f"[Completeness] {'Refusal' if _is_refusal else 'Evasion-loophole'} detected. Visible output too thin ({len(cleaned_answer)} chars). Attempting recovery.")
             yield {"type": "clear"}
             yield {"type": "status", "content": "Retrying for complete response..."}
             
@@ -160,12 +176,17 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
             if thought_clean:
                 _assistant_context = f"<think>{thought_clean}</think>\n{cleaned_answer}"
                 
+            _retry_nudge = (
+                "Your previous reply was a refusal, but this is an ordinary, benign request with "
+                "nothing sensitive about it. Please provide the actual, complete answer now outside "
+                "of any <think> tags. Do not skip or abbreviate."
+                if _is_refusal else
+                "Your previous response was incomplete — it only contained a thought process or closing phrase without the actual answer. "
+                "Please provide the FULL, complete explanation now outside of any <think> tags. Do not skip or abbreviate."
+            )
             retry_msgs = optimized + [
                 {"role": "assistant", "content": _assistant_context},
-                {"role": "user", "content": (
-                    "Your previous response was incomplete — it only contained a thought process or closing phrase without the actual answer. "
-                    "Please provide the FULL, complete explanation now outside of any <think> tags. Do not skip or abbreviate."
-                )}
+                {"role": "user", "content": _retry_nudge}
             ]
             retry_full = ""
             retry_thought = ""

@@ -1,7 +1,7 @@
 import re
 import os
 import logging
-from typing import Dict, List, Any, Generator
+from typing import Dict, List, Any, Generator, Optional
 
 logger = logging.getLogger('iris')
 from src.iris_engine import ModelRole, TaskType, load_model, unload_model, _keep_loaded, _stream_tokens, SandboxResult, detect_user_language
@@ -19,6 +19,37 @@ def _load_prompt(filename: str) -> str:
     except FileNotFoundError:
         logger.warning(f"Prompt file not found: {path}")
         return ""
+
+_REFUSAL_RE = re.compile(
+    r"\b(i'?m sorry,?\s*but\s*i\s*(?:can'?t|cannot|won'?t|am unable to)|"
+    r"i\s*(?:can'?t|cannot|won'?t|am unable to)\s*(?:assist|help|comply|continue|do that|fulfill)|"
+    r"as an ai(?:\s*language model)?,?\s*i\s*(?:can'?t|cannot)|"
+    r"i\s*apologi[sz]e,?\s*but)\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_refusal(text: Optional[str]) -> bool:
+    """Detect a short conversational refusal/apology standing in for an
+    actual blueprint or code block.
+
+    Kept intentionally narrow — short text, no code fence present — so a
+    long, legitimate answer that happens to contain the word "sorry" in
+    passing is never mistaken for a refusal. This exists because the
+    underlying local model occasionally emits a canned refusal instead of
+    a blueprint or code (sometimes touched off by an earlier stage's own
+    refusal being fed back in as if it were authoritative context). Unlike
+    iris_reasoning.run_stream, this pipeline previously had no equivalent
+    safety net, so that refusal text was passed straight through to the
+    user as the final answer.
+    """
+    if not text:
+        return False
+    t = text.strip()
+    if "```" in t or len(t) > 300:
+        return False
+    return bool(_REFUSAL_RE.search(t))
+
 
 def _looks_like_prose_line(s: str) -> bool:
     s = s.strip()
@@ -271,17 +302,7 @@ def _run_continuation(
             if idx != -1:
                 full = full[:idx] + full[idx + len("</think>"):]
 
-    # Strip <file_card> tags and trailing text from inside code blocks
-    def strip_after_file_card(match):
-        code_block = match.group(0)
-        # Remove any <file_card ...>...</file_card> or <file_card .../> from inside the code block
-        cleaned = re.sub(r'\s*<file_card\s+[^>]*?>.*?</file_card>', '', code_block, flags=re.DOTALL)
-        cleaned = re.sub(r'\s*<file_card\s+[^>]*/>', '', cleaned, flags=re.DOTALL)
-        # Also strip any trailing text after a standalone ``` that was part of file_card
-        cleaned = re.sub(r'\s*```\s*$', '', cleaned)
-        return cleaned.strip() if cleaned.strip() else code_block
-    
-    full = re.sub(r'```[\s\S]*?```', strip_after_file_card, full)
+
     full = _fix_unclosed_code_blocks(full)
 
     from src.iris_engine import _detect_language
@@ -470,6 +491,13 @@ def _run_complex_coding(
     # just skip it and let Stage 2 work straight from the user query + context.
     if len(raw_reasoning.strip()) < 20:
         raw_reasoning = ""
+    elif _looks_like_refusal(raw_reasoning):
+        # Stage 1 refused instead of planning. If this poisoned "blueprint" is
+        # handed to Stage 2 as authoritative context, the coding model tends to
+        # mirror the refusal instead of writing code. Discard it and let Stage 2
+        # work directly from the user query, same as when Stage 1 produced nothing.
+        logger.warning(f"[Complex Coding] Stage 1 returned a refusal instead of a blueprint — discarding. Raw: {raw_reasoning[:200]!r}")
+        raw_reasoning = ""
 
     # Safety: close any unclosed <think> block and strip orphaned </think> tags
     think_open_count = raw_reasoning.count("<think>")
@@ -526,15 +554,34 @@ def _run_complex_coding(
             if idx != -1:
                 full_code = full_code[:idx] + full_code[idx + len("</think>"):]
 
-    # Strip <file_card> tags and trailing text from inside code blocks
-    def strip_after_file_card(match):
-        code_block = match.group(0)
-        cleaned = re.sub(r'\s*<file_card\s+[^>]*?>.*?</file_card>', '', code_block, flags=re.DOTALL)
-        cleaned = re.sub(r'\s*<file_card\s+[^>]*/>', '', cleaned, flags=re.DOTALL)
-        cleaned = re.sub(r'\s*```\s*$', '', cleaned)
-        return cleaned.strip() if cleaned.strip() else code_block
-    
-    full_code = re.sub(r'```[\s\S]*?```', strip_after_file_card, full_code)
+    # If Stage 2 refused instead of writing code, retry once with an explicit
+    # nudge before giving up. Without this, a canned refusal (whether spontaneous
+    # or inherited from a poisoned Stage 1 blueprint) was previously passed
+    # straight through to the user as the entire response, with no code at all.
+    if _looks_like_refusal(full_code) and "```" not in full_code:
+        logger.warning(f"[Complex Coding] Stage 2 returned a refusal instead of code. Retrying once. Raw: {full_code[:200]!r}")
+        yield {"type": "clear"}
+        yield {"type": "status", "content": "Retrying code generation..."}
+        retry_msgs = optimized[:-1] + [
+            {"role": "user", "content": code_content},
+            {"role": "assistant", "content": full_code},
+            {"role": "user", "content": (
+                "That reply was a refusal, not code — this is an ordinary, benign request. "
+                "Write the complete, working implementation now, enclosed in a ``` code block."
+            )}
+        ]
+        retry_code = ""
+        for ev in _stream_tokens(ModelRole.CODE, retry_msgs, max_tokens=8192, temperature=0.4, think_mode="show", settings=settings):
+            if user_lang == "English" or ev["type"] != "token":
+                yield ev
+            if ev["type"] == "token":
+                retry_code += ev["content"]
+        if not _keep_loaded:
+            unload_model()
+        if "```" in retry_code:
+            full_code = retry_code
+
+
     full_code = _fix_unclosed_code_blocks(full_code)
 
     final_output = ""
@@ -688,6 +735,31 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
     if not _keep_loaded:
         unload_model()
 
+    # If the model refused instead of writing code, retry once with an explicit
+    # nudge before giving up. Without this, a canned refusal was previously
+    # passed straight through to the user as the entire response, with no code.
+    if _looks_like_refusal(full) and "```" not in full:
+        logger.warning(f"[Simple Coding] Model returned a refusal instead of code. Retrying once. Raw: {full[:200]!r}")
+        yield {"type": "clear"}
+        yield {"type": "status", "content": "Retrying code generation..."}
+        retry_msgs = optimized + [
+            {"role": "assistant", "content": full},
+            {"role": "user", "content": (
+                "That reply was a refusal, not code — this is an ordinary, benign request. "
+                "Write the complete, working implementation now, enclosed in a ``` code block."
+            )}
+        ]
+        retry_full = ""
+        for ev in _stream_tokens(ModelRole.CODE, retry_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings):
+            if user_lang == "English" or ev["type"] != "token":
+                yield ev
+            if ev["type"] == "token":
+                retry_full += ev["content"]
+        if not _keep_loaded:
+            unload_model()
+        if "```" in retry_full:
+            full = retry_full
+
     # Safety: close any unclosed <think> block and strip orphaned </think> tags
     think_open_count = full.count("<think>")
     think_close_count = full.count("</think>")
@@ -700,15 +772,7 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
             if idx != -1:
                 full = full[:idx] + full[idx + len("</think>"):]
 
-    # Strip <file_card> tags and trailing text from inside code blocks
-    def strip_after_file_card(match):
-        code_block = match.group(0)
-        cleaned = re.sub(r'\s*<file_card\s+[^>]*?>.*?</file_card>', '', code_block, flags=re.DOTALL)
-        cleaned = re.sub(r'\s*<file_card\s+[^>]*/>', '', cleaned, flags=re.DOTALL)
-        cleaned = re.sub(r'\s*```\s*$', '', cleaned)
-        return cleaned.strip() if cleaned.strip() else code_block
-    
-    full = re.sub(r'```[\s\S]*?```', strip_after_file_card, full)
+
     full = _fix_unclosed_code_blocks(full)
 
     from src.iris_engine import _detect_language
@@ -816,7 +880,11 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
                 is_contextual = True
         
         if not is_contextual:
-            context = retriever.retrieve(user_query, top_k=3, category="coding")
+            _sz = settings.get("size", "tiny")
+            top_k_val = 1 if _sz in ["tiny", "small"] else 3
+            context = retriever.retrieve(user_query, top_k=top_k_val, category="coding")
+            if context and len(context) > 12000:
+                context = context[:12000] + "\n\n...[TRUNCATED FOR PERFORMANCE]..."
             
     final_query = user_query
     if context:

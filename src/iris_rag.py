@@ -40,7 +40,12 @@ class BookRetriever:
             return
 
         logger.info("[RAG] Loading embedding model (all-MiniLM-L6-v2)...")
-        self.embedder = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
+        try:
+            self.embedder = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
+        except Exception as e:
+            logger.warning(f"[RAG] Online check failed ({e}). Attempting offline load from cache...")
+            os.environ["HF_HUB_OFFLINE"] = "1"
+            self.embedder = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
 
         file_entries: list = []
         abs_root = os.path.abspath(self.raw_data_dir)
@@ -117,7 +122,20 @@ class BookRetriever:
             is_coding_kb = "coding" in path.lower() or category == "coding"
             
             if is_coding_kb:
-                self._add_chunk(raw_text.strip(), path, category)
+                # Chunk with a very large limit (12000 chars) to preserve code examples without blowing up context
+                paragraphs = re.split(r'\n\s*\n', raw_text)
+                current_chunk = ""
+                for para in paragraphs:
+                    para = para.strip()
+                    if not para:
+                        continue
+                    if len(current_chunk) + len(para) > 12000 and current_chunk:
+                        self._add_chunk(current_chunk.strip(), path, category)
+                        current_chunk = para + "\n\n"
+                    else:
+                        current_chunk += para + "\n\n"
+                if current_chunk.strip():
+                    self._add_chunk(current_chunk.strip(), path, category)
             else:
                 paragraphs = re.split(r'\n\s*\n', raw_text)
                 current_chunk = ""

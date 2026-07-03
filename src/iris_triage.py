@@ -92,6 +92,23 @@ def classify_task(
         logger.info(f"[Triage] Query triggered deterministic SEARCH route: {query_for_classification!r} -> keywords: {clean_kw!r}")
         return TaskType.SEARCH, clean_kw
 
+    # Deterministic override for explicit "build/create a website/app" requests.
+    # The routing guide's own worked examples (e.g. "How do I make a pizza?" -> REASONING,
+    # justified as "no programming/system noun co-occurrence") teach a useful disambiguation
+    # in isolation, but the small triage model can over-generalize from it: when a build verb
+    # co-occurs with BOTH an unambiguous digital-artifact noun ("website"/"app"/"page") AND a
+    # food/business-domain noun ("pizza restaurant", "Italian restaurant", "bakery", etc.), the
+    # model sometimes latches onto the domain noun and misroutes to REASONING — even though the
+    # guide explicitly lists "create a website" / "build an app" as unambiguous CODE_COMPLEX
+    # triggers. What the site/app is ABOUT (a restaurant, a bakery, a law firm) never changes
+    # what's being asked FOR (a website/app), so this is resolved deterministically in Stage A
+    # instead of leaving an unambiguous case to the neural pass.
+    _BUILD_VERBS = r"(?:build|create|make|design|develop|generate|code(?:\s+up)?|whip up|put together|spin up|write)"
+    _WEBAPP_NOUNS = r"(?:web\s?site|web\s?app(?:lication)?s?|landing\s?page|home\s?page|web\s?page|portfolio\s?site|e-?commerce\s?(?:site|store)|single[- ]page\s?app)"
+    if re.search(rf"\b{_BUILD_VERBS}\b(?:\s+\S+){{0,4}}\s+{_WEBAPP_NOUNS}\b", query_lower):
+        logger.info(f"[Triage] Deterministic CODE_COMPLEX route (explicit website/app build request): {query_for_classification!r}")
+        return TaskType.CODING_COMPLEX, None
+
     # If previous message was an OBSERVATION (agent loop), continue as CONTROL
     if history and history[-1].get("role") == "user" and history[-1].get("content", "").strip().startswith("OBSERVATION:"):
         return TaskType.CONTROL, None
