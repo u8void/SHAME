@@ -60,6 +60,7 @@ from typing import Optional
 OI_AVAILABLE = False
 _oi = None
 _oi_initialized = False
+_oi_step_counter = 0
 
 def _init_oi():
     global _oi, OI_AVAILABLE, _oi_initialized
@@ -86,6 +87,21 @@ def _init_oi():
         
         def _iris_native_oi_llm(*args, **kwargs):
             from src.iris_engine import _model_pool, load_model, ModelRole
+            
+            global _oi_step_counter
+            _oi_step_counter += 1
+            if _oi_step_counter > 5:
+                yield {
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": "I have executed 5 steps but cannot complete the task. Stopping to prevent an infinite loop."
+                            },
+                            "finish_reason": "stop"
+                        }
+                    ]
+                }
+                return
             
             if not _model_pool:
                 load_model(ModelRole.CONTROL)
@@ -200,6 +216,8 @@ def _exec_shell_cmd(cmd: str) -> str:
 
 
 def _run_oi_task(task: str) -> str:
+    global _oi_step_counter
+    _oi_step_counter = 0
     _init_oi()
     if not OI_AVAILABLE:
         return "Open Interpreter unavailable. Install: pip install open-interpreter"
