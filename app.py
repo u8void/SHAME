@@ -1,27 +1,7 @@
 import os, sys
-os.environ["GGML_CUDA_NO_VMM"] = "1"
 
 
-def _ensure_open_interpreter():
-    if os.environ.get("SKIP_OPEN_INTERPRETER") == "1":
-        return
-    try:
-        import json
-        with open("config/iris.conf", "r", encoding="utf-8") as f:
-            if json.load(f).get("skip_open_interpreter", False):
-                return
-    except Exception:
-        pass
 
-    try:
-        import interpreter  
-    except ImportError:
-        import subprocess as _sp
-        print("\n[Iris] Installing open-interpreter — one-time setup...", flush=True)
-        _sp.run([sys.executable, "-m", "pip", "install", "-q",
-                 "--upgrade", "open-interpreter"], check=True)
-        print("[Iris] open-interpreter installed ✓\n", flush=True)
-# _ensure_open_interpreter() is now deferred in controller.py
 
 
 import os
@@ -42,8 +22,6 @@ from src.logger import get_logger
 
 logger = get_logger("app")
 
-from src.iris_rag import BookRetriever
-from src.iris_vision import analyze_image
 global_generation_lock = threading.Lock()
 
 parser = argparse.ArgumentParser(description="Run the Iris AI Flask App")
@@ -66,8 +44,8 @@ MLX_MODEL_ID = os.environ.get("IRIS_MODEL_ID", "iris_001.gguf")
 
 app = Flask(__name__)
 
-LOGS_DIR          = "logs"
-TRAIN_LOG_FILE    = "outputs/train_output.txt"
+LOGS_DIR          = os.path.join(os.path.dirname(__file__), "logs")
+TRAIN_LOG_FILE    = os.path.join(os.path.dirname(__file__), "outputs", "train_output.txt")
 UPLOAD_DIR        = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "gif", "bmp"}
 
@@ -112,6 +90,7 @@ def get_retriever():
             return retriever
         logger.info("[INFO] Lazy-loading RAG Knowledge Base...")
         try:
+            from src.iris_rag import BookRetriever
             retriever = BookRetriever(raw_data_dir="raw_data")
             retriever.load_and_index()
         except Exception as e:
@@ -242,53 +221,7 @@ def chat():
         role = "assistant" if msg.get("role") == "bot" else "user"
         agent_history.append({"role": role, "content": msg.get("content", "")})
 
-    
-    use_pro = str(data.get("use_pro", "")).lower() in ("true", "1", "yes")
-    if PRO_MODE or use_pro:
-        import asyncio
-        import time
-        import src.iris_pro as iris_pro
-        def pro_generate():
-            import queue
-            import threading
-            q = queue.Queue()
-            
-            def run_async():
-                async def task():
-                    mode = data.get("mode", "smart")
-                    workspace_root = data.get("workspace_root", "")
-                    try:
-                        agen = iris_pro.ask_stream(user_message, agent_history, mode=mode, workspace_root=workspace_root)
-                        async for event in agen:
-                            q.put(event)
-                    except Exception as e:
-                        q.put(e)
-                    finally:
-                        q.put(None)
-                asyncio.run(task())
-                
-            t = threading.Thread(target=run_async)
-            t.start()
-            
-            try:
-                while True:
-                    item = q.get()
-                    if item is None:
-                        break
-                    if isinstance(item, Exception):
-                        raise item
-                    yield f"data: {json.dumps(item)}\n\n"
-            except Exception as e:
-                err_msg = str(e)
-                if not err_msg or "Timeout" in e.__class__.__name__:
-                    err_msg = f"{e.__class__.__name__}: The API request took too long or dropped connection."
-                yield f"data: {json.dumps({'type': 'text', 'content': f'Iris Pro Error: {err_msg}'})}\n\n"
-        
-        resp = Response(pro_generate(), mimetype='text/event-stream')
-        resp.headers['X-Accel-Buffering'] = 'no'
-        resp.headers['Cache-Control']     = 'no-cache'
-        resp.headers['Connection']        = 'keep-alive'
-        return resp
+
 
     from src import controller
     controller.IS_INTERACTIVE = False
@@ -349,7 +282,8 @@ def chat():
                     
             except Exception as e:
                 err_msg = str(e)
-                yield f"data: {json.dumps({'type': 'token', 'content': f'\\n\\n> [ERROR] **Iris Error:** {err_msg}'})}\n\n"
+                error_content = "\n\n> [ERROR] **Iris Error:** " + err_msg
+                yield f"data: {json.dumps({'type': 'token', 'content': error_content})}\n\n"
 
     resp = Response(generate(), mimetype='text/event-stream')
     resp.headers['X-Accel-Buffering'] = 'no'
@@ -383,6 +317,7 @@ def analyze_image_route():
             reply = f"[Preview Mode] Would analyse '{filename}' with prompt: {prompt}"
         else:
             with global_generation_lock:
+                from src.iris_vision import analyze_image
                 reply = analyze_image(save_path, prompt)
     except Exception as e:
         reply = f"Image analysis failed: {e}"
@@ -809,17 +744,8 @@ def model_status():
     })
 
 def warmup_models():
-    # Prefetch GGUF files into OS page cache at startup (zero VRAM overhead)
-    try:
-        from src.iris_engine import prefetch_model_file, _get_model_filename, ModelRole
-        for role in [ModelRole.TRIAGE, ModelRole.GENERAL, ModelRole.CODE, ModelRole.CONTROL]:
-            try:
-                filename = _get_model_filename(role)
-                prefetch_model_file(filename)
-            except Exception:
-                pass
-    except Exception:
-        pass
+    # Warmup disabled as requested to prevent loading/locking models in RAM on startup.
+    pass
 
 @app.route("/api/unload_models", methods=["POST"])
 def unload_models_endpoint():
@@ -856,3 +782,62 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", "5050"))
     app.run(debug=False, host="0.0.0.0", port=port)
+
+
+def start_server():
+    import threading
+    import traceback
+
+    def run_flask():
+        try:
+            # ── Android path bootstrap ─────────────────────────────────────
+            # Tell logger.py where it can safely write log files.
+            # On Chaquopy, Context.getFilesDir() is available as the env
+            # variable IRIS_FILES_DIR when set from Kotlin before Python
+            # starts.  If it was not set, derive a reasonable default from
+            # ANDROID_DATA (always present on Android).
+            if not os.environ.get("IRIS_FILES_DIR"):
+                android_data = os.environ.get("ANDROID_DATA", "")
+                if android_data:
+                    # e.g. /data/data/com.ahmedbarakat.irisai/files
+                    pkg = "com.ahmedbarakat.irisai"
+                    files_dir = f"/data/data/{pkg}/files"
+                    os.makedirs(files_dir, exist_ok=True)
+                    os.environ["IRIS_FILES_DIR"] = files_dir
+
+            # ── Crash-log file (always writable) ──────────────────────────
+            crash_log_path = None
+            try:
+                files_dir = os.environ.get("IRIS_FILES_DIR", "")
+                if files_dir:
+                    crash_log_path = os.path.join(files_dir, "logs", "flask_crash.log")
+                    os.makedirs(os.path.dirname(crash_log_path), exist_ok=True)
+            except Exception:
+                pass
+
+            logger.info("[Chaquopy] Starting Flask on 127.0.0.1:5000")
+            print("[Iris] Flask thread starting on 127.0.0.1:5000", flush=True)
+            app.run(debug=False, host="127.0.0.1", port=5000, use_reloader=False)
+
+        except Exception as e:
+            tb = traceback.format_exc()
+            # 1. Print to stdout — Chaquopy forwards this to Android logcat
+            print(f"[Iris] FLASK STARTUP FAILED: {e}\n{tb}", flush=True)
+            # 2. Try the python logger (may or may not work)
+            try:
+                logger.error(f"[Chaquopy] Flask failed to start: {e}")
+                logger.error(tb)
+            except Exception:
+                pass
+            # 3. Write to crash file as last resort
+            if crash_log_path:
+                try:
+                    with open(crash_log_path, "w", encoding="utf-8") as f:
+                        f.write(f"FLASK STARTUP FAILED\n{tb}\n")
+                except Exception:
+                    pass
+
+    t = threading.Thread(target=run_flask, daemon=True)
+    t.start()
+    return "Server started"
+

@@ -551,6 +551,38 @@ document.addEventListener("DOMContentLoaded", () => {
             return false;
         }
 
+        function looksLikeProseLine(s) {
+            s = s.trim();
+            if (!s || s.length < 10) return false;
+            if (/^(#|\/\/|\/\*|\*|<!--)/.test(s)) return false;
+            if (/^(def |class |function |const |let |var |import |from |return |if |for |while |try |catch |elif |else:|print\(|@\w)/.test(s)) return false;
+            const codeSuffixes = [';', '}', ']', ')', '>', ','];
+            if (codeSuffixes.some(suf => s.endsWith(suf))) return false;
+            if (/^[a-zA-Z_][\w]*\s*[=(\[]/.test(s)) return false;
+            if (/[;=<>{}[\]()]/.test(s) && !/[.!?]\s*$/.test(s)) return false;
+            if (/^[A-Z"'(]/.test(s) && /[a-z]/.test(s) && /\s/.test(s)) {
+                const wordCount = s.split(/\s+/).length;
+                if (wordCount >= 4 && (/[.!?]\s*$/.test(s) || wordCount >= 8)) return true;
+            }
+            return false;
+        }
+
+        function stripTrailingProseLines(content) {
+            const lines = content.split('\n');
+            let end = lines.length;
+            while (end > 0) {
+                const trimmed = lines[end - 1].trim();
+                if (!trimmed) { end--; continue; }
+                if (looksLikeProseLine(trimmed)) { end--; continue; }
+                break;
+            }
+            const proseLines = lines.slice(end).map(l => l.trim()).filter(Boolean);
+            return {
+                content: lines.slice(0, end).join('\n').trim(),
+                prose: proseLines.join(' ')
+            };
+        }
+
         function stripTrailingTextFromCode(content, lang) {
             const l = (lang || '').toLowerCase();
             const lines = content.split('\n');
@@ -559,13 +591,15 @@ document.addEventListener("DOMContentLoaded", () => {
             // HTML: strip after last </html>
             if (l === 'html') {
                 const idx = content.lastIndexOf('</html>');
-                if (idx !== -1) return content.substring(0, idx + 7).trim();
+                if (idx !== -1) content = content.substring(0, idx + 7).trim();
+                return stripTrailingProseLines(content);
             }
 
             // CSS/SCSS/LESS: strip after last } at column 0
             if (['css', 'scss', 'less'].includes(l)) {
                 while (lastCode >= 0 && !lines[lastCode].trim().endsWith('}')) lastCode--;
-                if (lastCode >= 0) return lines.slice(0, lastCode + 1).join('\n').trim();
+                if (lastCode >= 0) content = lines.slice(0, lastCode + 1).join('\n').trim();
+                return stripTrailingProseLines(content);
             }
 
             // Shell: strip after last return/exit/exec
@@ -575,7 +609,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     if (s.startsWith('return ') || s.startsWith('exit ') || s.startsWith('exec ')) break;
                     lastCode--;
                 }
-                if (lastCode >= 0) return lines.slice(0, lastCode + 1).join('\n').trim();
+                if (lastCode >= 0) content = lines.slice(0, lastCode + 1).join('\n').trim();
+                return stripTrailingProseLines(content);
             }
 
             // Python: strip after last def/class/if-__name__/return at indent 0
@@ -586,7 +621,8 @@ document.addEventListener("DOMContentLoaded", () => {
                         s.startsWith('return ') || s.trim() === 'return') break;
                     lastCode--;
                 }
-                if (lastCode >= 0) return lines.slice(0, lastCode + 1).join('\n').trim();
+                if (lastCode >= 0) content = lines.slice(0, lastCode + 1).join('\n').trim();
+                return stripTrailingProseLines(content);
             }
 
             // JS/TS/JSX/TSX/Vue: strip after last }; } export/module.exports
@@ -597,22 +633,24 @@ document.addEventListener("DOMContentLoaded", () => {
                         s.startsWith('export ') || s.startsWith('module.exports')) break;
                     lastCode--;
                 }
-                if (lastCode >= 0) return lines.slice(0, lastCode + 1).join('\n').trim();
+                if (lastCode >= 0) content = lines.slice(0, lastCode + 1).join('\n').trim();
+                return stripTrailingProseLines(content);
             }
 
             // Generic fallback: strip trailing lines that look like English prose
             lastCode = lines.length - 1;
+            const codeSuffixes = [';', '}', ']', ')', '>', ','];
             while (lastCode >= 0) {
                 const s = lines[lastCode].trim();
                 if (!s || s.length < 10) break;
-                if (s.endsWith((';', '}', ']', ')', '>', ','))) break;
+                if (codeSuffixes.some(suf => s.endsWith(suf))) break;
                 if (/^(def |class |function |const |let |var |import |from |return |if |for |while |try |catch |switch |case |export |module\.|require\(|#include|<!DOCTYPE|<html|<div|<script|<style|import )/.test(s)) break;
-                if (/[.!?]\s*$/.test(s) && /\s{2,}[A-Z]/.test(s)) { lastCode--; continue; }
+                if (looksLikeProseLine(s)) { lastCode--; continue; }
                 break;
             }
-            if (lastCode >= 0) return lines.slice(0, lastCode + 1).join('\n').trim();
+            if (lastCode >= 0) content = lines.slice(0, lastCode + 1).join('\n').trim();
 
-            return content;
+            return stripTrailingProseLines(content);
         }
 
         // SAFETY NET: Close unclosed code blocks before <file_card> tags, remove orphaned ```
@@ -640,7 +678,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (/<file_card\s/i.test(work)) {
             const parts = work.split(/<file_card\s/i);
             if (parts.length > 1 && !/```[\s\S]*?```/.test(parts[0])) {
-                work = work.replace(/<file_card\s[^>]*?(?:\/>|>\s*<\/file_card>)/gi, '');
+                work = work.replace(/<file_card\s[^>]*?(?:\/>|>\s*<\/file_card>|>)/gi, '');
             }
         }
 
@@ -672,6 +710,15 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             let cleanContent = (extraCode + (extraCode && !codeContent.startsWith('\n') ? '\n' : '') + codeContent).replace(/@@@THOUGHT_\d+@@@/g, '').trim();
+
+            // Infer language from filename comment when the fence has no lang tag (e.g. ```\n# app.py)
+            if (detectedLang === 'code') {
+                const fnMatch = cleanContent.match(/^#\s*([\w.-]+\.(py|js|ts|html|css|sh|bash|json|yaml|yml|rs|go|java|cpp|c|rb|php|vue|jsx|tsx))\s*$/m);
+                if (fnMatch) {
+                    detectedLang = fnMatch[2] === 'py' ? 'python' : fnMatch[2];
+                }
+            }
+
             // Extract description after <file_card> inside code block, emit as visible text outside
             let extractedFileCardDesc = '';
             const fcInsideMatch = cleanContent.match(/<file_card\s+[^>]*?>[\s\S]*?<\/file_card>\s*\n?([\s\S]*?)$/i);
@@ -679,9 +726,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 extractedFileCardDesc = fcInsideMatch[1].trim();
             }
             // Strip any <file_card> tags that leaked inside the code block
-            cleanContent = cleanContent.replace(/<file_card\s+[^>]*?>[\s\S]*?<\/file_card>/gi, '').replace(/<file_card\s+[^>]*?\/>/gi, '').trim();
+            cleanContent = cleanContent.replace(/<file_card\s+[^>]*>[\s\S]*?<\/file_card>/gi, '').replace(/<file_card\s+[^>]*?\/>/gi, '').replace(/<file_card\s+[^>]*?>/gi, '').trim();
             // Strip trailing natural-language text from inside code blocks (all languages)
-            cleanContent = stripTrailingTextFromCode(cleanContent, detectedLang);
+            const stripResult = stripTrailingTextFromCode(cleanContent, detectedLang);
+            cleanContent = stripResult.content;
+            if (stripResult.prose && !extractedFileCardDesc) {
+                extractedFileCardDesc = stripResult.prose;
+            }
             const isCmdOrShort = isCommandOrShortBlock(detectedLang, cleanContent);
             const isFinished = match.endsWith('```');
 
@@ -699,25 +750,26 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         // Extract explicit file_card tags emitted by the AI — they override the auto-generated card
-        work = work.replace(/<file_card\s+([^>]*?)(?:\/>|>\s*<\/file_card>)/gi,
+        // Match: <file_card ...></file_card>, <file_card .../>, and bare <file_card ...> (unclosed)
+        work = work.replace(/<file_card\s+([^>]*?)(?:\/>|>\s*<\/file_card>|>)/gi,
             (match, attrsStr, offset) => {
                 const filenameMatch = attrsStr.match(/filename=["']([^"']+)["']/i);
                 const langMatch = attrsStr.match(/lang=["']([^"']+)["']/i);
                 const filename = filenameMatch ? filenameMatch[1] : 'file.txt';
                 const lang = langMatch ? langMatch[1] : 'text';
 
-                // Find the closest unclaimed code block physically succeeding this tag in the string
-                const afterSub = work.substring(offset);
+                // Find the closest unclaimed code block physically preceding this tag in the string
+                const beforeSub = work.substring(0, offset);
                 const placeholderRegex = /@@@CODE_(\d+)@@@/g;
                 let matchPlaceholder;
                 const blockIndices = [];
-                while ((matchPlaceholder = placeholderRegex.exec(afterSub)) !== null) {
+                while ((matchPlaceholder = placeholderRegex.exec(beforeSub)) !== null) {
                     blockIndices.push(parseInt(matchPlaceholder[1], 10));
                 }
 
                 let codeIndex = -1;
-                // 1. Try to find a non-command/non-short block first
-                for (let j = 0; j < blockIndices.length; j++) {
+                // 1. Try to find a non-command/non-short block first (search from closest preceding)
+                for (let j = blockIndices.length - 1; j >= 0; j--) {
                     const idx = blockIndices[j];
                     const block = blocks[idx];
                     if (block && block.type === 'code' && !block.claimed) {
@@ -729,9 +781,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                 }
 
-                // 2. Fallback to the closest unclaimed code block if no non-command block is found
+                // 2. Fallback to the closest unclaimed preceding code block
                 if (codeIndex === -1) {
-                    for (let j = 0; j < blockIndices.length; j++) {
+                    for (let j = blockIndices.length - 1; j >= 0; j--) {
                         const idx = blockIndices[j];
                         const block = blocks[idx];
                         if (block && block.type === 'code' && !block.claimed) {
@@ -765,13 +817,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 return id;
             }
         );
-
-        // Strip trailing text after file_card placeholders (the one-sentence description the model adds)
-        work = work.replace(/@@@FILECARD_\d+@@@\s*\n?(.*?)(?=\n\n|@@@|\n#|\n<|$)/gs, (match, trailing) => {
-            // Keep only the placeholder, discard the trailing description text
-            const placeholder = match.match(/@@@FILECARD_\d+@@@/)[0];
-            return placeholder + '\n';
-        });
 
         if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
             if (typeof markedKatex !== 'undefined') {

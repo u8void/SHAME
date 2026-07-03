@@ -436,6 +436,83 @@
 
     </aside>
 
+    <!-- ═══════════════════════════════════════════
+         SETUP MODAL (shown when no models found)
+    ════════════════════════════════════════════ -->
+    <div id="setupModal" class="setup-modal" style="display:none;">
+        <div class="setup-modal-content">
+            <h2 class="setup-title">Welcome to Iris AI</h2>
+            <p class="setup-subtitle">No GGUF models found. Choose how to proceed:</p>
+
+            <div class="setup-options">
+                <button class="setup-option" id="setupDownload">
+                    <div class="setup-option-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                    </div>
+                    <div class="setup-option-text">
+                        <span class="setup-option-title">Download Models</span>
+                        <span class="setup-option-desc">Download recommended GGUF models (~2GB)</span>
+                    </div>
+                </button>
+
+                <button class="setup-option" id="setupFolder">
+                    <div class="setup-option-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                    </div>
+                    <div class="setup-option-text">
+                        <span class="setup-option-title">Load from Folder</span>
+                        <span class="setup-option-desc">Select a folder containing GGUF files</span>
+                    </div>
+                </button>
+
+                <button class="setup-option" id="setupRemote">
+                    <div class="setup-option-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                            <line x1="8" y1="21" x2="16" y2="21"></line>
+                            <line x1="12" y1="17" x2="12" y2="21"></line>
+                        </svg>
+                    </div>
+                    <div class="setup-option-text">
+                        <span class="setup-option-title">Remote Access</span>
+                        <span class="setup-option-desc">Connect to another device running Iris AI</span>
+                    </div>
+                </button>
+
+                <button class="setup-option" id="setupContinue">
+                    <div class="setup-option-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                        </svg>
+                    </div>
+                    <div class="setup-option-text">
+                        <span class="setup-option-title">Continue Anyway</span>
+                        <span class="setup-option-desc">Use Iris AI without local models (limited features)</span>
+                    </div>
+                </button>
+            </div>
+
+            <div id="setupDownloadProgress" class="setup-progress" style="display:none;">
+                <div class="setup-progress-text">Downloading models...</div>
+                <div class="setup-progress-bar">
+                    <div class="setup-progress-fill" id="setupProgressFill"></div>
+                </div>
+                <div class="setup-progress-status" id="setupProgressStatus">0%</div>
+            </div>
+
+            <div id="setupRemoteInput" class="setup-remote-input" style="display:none;">
+                <input type="text" id="remoteUrlInput" class="setup-remote-url" placeholder="http://192.168.1.x:5000">
+                <button class="setup-remote-connect" id="remoteConnectBtn">Connect</button>
+            </div>
+        </div>
+    </div>
+
     <div id="voiceModal" class="voice-modal">
         <div class="voice-modal-content">
             <h2 id="voiceStatusText">Connecting...</h2>
@@ -492,6 +569,7 @@
     <script src="/static/scriptchat.js?v=15"></script>
     <script src="/static/voice.js?v=15"></script>
     <script src="{{ url_for('static', filename='settings.js') }}?v=15"></script>
+    <script src="{{ url_for('static', filename='setup.js') }}?v=15"></script>
 </body>
 
 </html>

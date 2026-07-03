@@ -20,6 +20,43 @@ def _load_prompt(filename: str) -> str:
         logger.warning(f"Prompt file not found: {path}")
         return ""
 
+def _looks_like_prose_line(s: str) -> bool:
+    s = s.strip()
+    if not s or len(s) < 10:
+        return False
+    if re.match(r'^(#|//|/\*|\*|<!--)', s):
+        return False
+    if re.match(r'^(def |class |function |const |let |var |import |from |return |if |for |while |try |catch |elif |else:|print\(|@\w)', s):
+        return False
+    if s.endswith((';', '}', ']', ')', '>', ',')):
+        return False
+    if re.match(r'^[a-zA-Z_][\w]*\s*[=(\[]', s):
+        return False
+    if re.search(r'[;=<>{}[\]()]', s) and not re.search(r'[.!?]\s*$', s):
+        return False
+    if re.match(r'^[A-Z"\'(]', s) and re.search(r'[a-z]', s) and re.search(r'\s', s):
+        word_count = len(s.split())
+        if word_count >= 4 and (re.search(r'[.!?]\s*$', s) or word_count >= 8):
+            return True
+    return False
+
+
+def _strip_trailing_prose_lines(content: str) -> tuple:
+    lines = content.split('\n')
+    end = len(lines)
+    while end > 0:
+        trimmed = lines[end - 1].strip()
+        if not trimmed:
+            end -= 1
+            continue
+        if _looks_like_prose_line(trimmed):
+            end -= 1
+            continue
+        break
+    prose_lines = [l.strip() for l in lines[end:] if l.strip()]
+    return '\n'.join(lines[:end]).strip(), ' '.join(prose_lines)
+
+
 def _fix_unclosed_code_blocks(text: str) -> str:
     """Safety net: close unclosed code blocks before <file_card> tags, remove orphaned ```."""
     if not text:
@@ -147,14 +184,20 @@ def _fix_unclosed_code_blocks(text: str) -> str:
             if last_code >= 0:
                 block = '\n'.join(lines[:last_code + 1])
 
+        # Universal: strip trailing prose from code body and move outside the fence
+        inner_match = re.match(r'(```[^\n]*\n)([\s\S]*?)(```\s*$)', block)
+        if inner_match:
+            opening, body, _closing = inner_match.groups()
+            clean_body, stripped_prose = _strip_trailing_prose_lines(body.rstrip())
+            block = opening + clean_body + '\n```'
+            if not desc_after_fc and stripped_prose:
+                desc_after_fc = stripped_prose
+
         # Append extracted description outside the code block
         if desc_after_fc:
             block = block + '\n\n' + desc_after_fc
         return block
     text = re.sub(r'```[\s\S]*?```', _strip_trailing_text, text)
-
-    # 6. Strip trailing text after </file_card> (the one-sentence description the model adds)
-    text = re.sub(r'(</file_card>)\s*\n?(.*?)(?=\n\n|```|<file_card|\n#|$)', r'\1\n', text, flags=re.DOTALL | re.IGNORECASE)
 
     return text
 
@@ -504,8 +547,8 @@ def _run_complex_coding(
              "content": f"Review the above code against the original architecture blueprint:\n\n{raw_reasoning}\n\n"
              "1. Verify that every file, function, and constraint in the blueprint was implemented correctly.\n"
              "2. Fix all syntax errors, logical bugs, and edge cases.\n"
-             "Return the final corrected code inside a ``` language block. "
-             "IMPORTANT: Immediately AFTER the code block, you MUST write a detailed explanation of the code and its features for the user."}
+             "Return the final corrected code inside a ``` language block followed by a <file_card> tag. "
+             "After the file_card tag, write EXACTLY ONE short sentence about what you changed, then stop — no bulleted recap, no headers, no multi-paragraph explanation."}
         ]
         for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.4, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings):
             if ev["type"] == "token":
