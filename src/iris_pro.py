@@ -71,12 +71,8 @@ def verify_code_syntax(code: str, lang: str) -> str | None:
         except ValueError as e:
             return f"JSONDecodeError: {e}"
             
-    elif lang in ["html", "js", "javascript"]:
+    elif lang in ["js", "javascript"]:
         js_code = code
-        if lang == "html":
-            import re
-            scripts = re.findall(r'<script\b[^>]*>(.*?)</script>', code, re.DOTALL | re.IGNORECASE)
-            js_code = "\n".join(scripts)
         if js_code.strip():
             with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
                 f.write(js_code)
@@ -1463,8 +1459,8 @@ async def ask_stream(
                             break
                         
                         log.warning("Syntax verification failed: %s", err)
-                        yield {"type": "status", "content": "Stage 4 — Fixing syntax errors..."}
                         yield {"type": "clear"}
+                        yield {"type": "status", "content": "Stage 4 — Fixing syntax errors..."}
                         
                         fix_messages = [
                              {"role": "system", "content": CODE_REVIEWER_SYSTEM_PROMPT},

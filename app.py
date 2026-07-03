@@ -31,10 +31,31 @@ parser.add_argument("--pro", action="store_true",
                     help="Use Iris Pro multi-agent API pipeline")
 parser.add_argument("--skip-control", action="store_true",
                     help="Skip loading the control model and routing to it")
+parser.add_argument("--status", action="store_true",
+                    help="Open a full-screen TUI to monitor Iris AI models and RAM")
 args, _ = parser.parse_known_args()
 
 PREVIEW_MODE = args.preview_only
 PRO_MODE = args.pro
+STATUS_MODE = args.status
+
+import collections
+import logging
+tui_log_queue = collections.deque(maxlen=50)
+
+class StatusLogHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            tui_log_queue.append(msg)
+        except Exception:
+            pass
+
+if STATUS_MODE:
+    status_handler = StatusLogHandler()
+    status_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-8s %(message)s", "%H:%M:%S"))
+    logger.addHandler(status_handler)
+
 
 if args.skip_control:
     os.environ["SKIP_CONTROL"] = "1"
@@ -781,8 +802,143 @@ if __name__ == "__main__":
     threading.Thread(target=warmup_models, daemon=True).start()
 
     port = int(os.environ.get("PORT", "5050"))
-    app.run(debug=False, host="0.0.0.0", port=port)
-
+    
+    if STATUS_MODE:
+        def flask_thread():
+            import logging
+            log = logging.getLogger('werkzeug')
+            log.setLevel(logging.ERROR) # Suppress standard flask logs in TUI
+            app.run(debug=False, host="0.0.0.0", port=port, use_reloader=False)
+            
+        t = threading.Thread(target=flask_thread, daemon=True)
+        t.start()
+        
+        import curses
+        import time
+        import resource
+        
+        def tui_main(stdscr):
+            curses.start_color()
+            curses.use_default_colors()
+            curses.init_pair(1, curses.COLOR_GREEN, -1)
+            curses.init_pair(2, curses.COLOR_RED, -1)
+            curses.init_pair(3, curses.COLOR_CYAN, -1)
+            curses.init_pair(4, curses.COLOR_YELLOW, -1)
+            
+            stdscr.nodelay(1)
+            
+            try:
+                from src.iris_engine import _model_pool, ROLE_CTX, ModelRole
+                from src.iris_vision import _vision_cache
+            except ImportError:
+                _model_pool = {}
+                ROLE_CTX = {}
+                _vision_cache = {}
+            
+            while True:
+                c = stdscr.getch()
+                if c == ord('q'):
+                    break
+                
+                stdscr.erase()
+                max_y, max_x = stdscr.getmaxyx()
+                
+                # Title
+                title = " Iris AI Status Monitor (Press 'q' to quit) "
+                stdscr.addstr(0, max(0, (max_x - len(title)) // 2), title, curses.A_REVERSE)
+                
+                # IPs
+                try:
+                    import socket
+                    ips = set()
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.settimeout(0)
+                    try:
+                        s.connect(('10.254.254.254', 1))
+                        ips.add(s.getsockname()[0])
+                    except Exception:
+                        pass
+                    finally:
+                        s.close()
+                    try:
+                        ips.add(socket.gethostbyname(socket.gethostname()))
+                    except Exception:
+                        pass
+                    ip_str = ", ".join(ips) if ips else "127.0.0.1"
+                except Exception:
+                    ip_str = "127.0.0.1"
+                    
+                stdscr.addstr(1, 2, f" Server IPs: {ip_str}:{port} ", curses.color_pair(4) | curses.A_BOLD)
+                
+                # Memory usage
+                rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+                import sys
+                if sys.platform == "darwin":
+                    rss_mb = rss / (1024 * 1024)
+                else:
+                    rss_mb = rss / 1024
+                
+                mem_str = f" Total Process Memory (RSS): {rss_mb:.2f} MB "
+                stdscr.addstr(2, 2, mem_str, curses.color_pair(3) | curses.A_BOLD)
+                
+                # Models Panel
+                stdscr.addstr(4, 2, " Active Models: ", curses.A_UNDERLINE)
+                row = 5
+                
+                roles = ["triage", "router", "control", "math", "code", "reasoning", "general", "vision"]
+                
+                for role_str in roles:
+                    if row >= max_y - 15:
+                        break
+                    
+                    if role_str == "vision":
+                        is_running = bool(_vision_cache)
+                    else:
+                        is_running = role_str in _model_pool
+                        
+                    status_text = "RUNNING" if is_running else "NOT RUNNING"
+                    color = curses.color_pair(1) if is_running else curses.color_pair(2)
+                    
+                    stdscr.addstr(row, 4, f"{role_str.upper():<10}: ", curses.A_BOLD)
+                    stdscr.addstr(row, 16, f"[{status_text}]", color)
+                    
+                    if is_running:
+                        try:
+                            if role_str == "vision":
+                                ctx = "Dynamic (Vision)"
+                            else:
+                                m_role = ModelRole(role_str)
+                                ctx = ROLE_CTX.get(m_role, "Unknown")
+                            stdscr.addstr(row, 30, f"(Context: {ctx})", curses.color_pair(4))
+                        except Exception:
+                            pass
+                        
+                    row += 1
+                
+                # Logs Panel
+                log_start_y = max(row + 2, max_y - 20)
+                if log_start_y < max_y - 2:
+                    stdscr.addstr(log_start_y - 1, 2, " Live Logs: ", curses.A_UNDERLINE)
+                    
+                    current_logs = list(tui_log_queue)
+                    display_logs = current_logs[-(max_y - log_start_y - 1):]
+                    
+                    for i, log_line in enumerate(display_logs):
+                        if log_start_y + i < max_y - 1:
+                            clean_line = log_line.replace('\n', ' ')[:max_x-4]
+                            stdscr.addstr(log_start_y + i, 4, clean_line)
+                
+                stdscr.refresh()
+                time.sleep(0.5)
+        
+        try:
+            curses.wrapper(tui_main)
+        except KeyboardInterrupt:
+            pass
+        print("TUI closed. Exiting.")
+        sys.exit(0)
+    else:
+        app.run(debug=False, host="0.0.0.0", port=port)
 
 def start_server():
     import threading

@@ -163,12 +163,8 @@ def _check_rust(code: str) -> Optional[str]:
             pass
 
 def _check_html(code: str) -> Optional[str]:
-    scripts = re.findall(r'<script\b[^>]*>([\s\S]*?)<\/script>', code, re.IGNORECASE)
-    for script_content in scripts:
-        if script_content.strip():
-            err = _check_javascript(script_content)
-            if err:
-                return f"JavaScript syntax error in HTML: {err}"
+    # LLMs frequently use template variables or pseudo-code in HTML scripts.
+    # Strict JS checking causes false-positive auto-correction loops.
     return None
 
 CHECKERS = {
