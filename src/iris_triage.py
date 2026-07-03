@@ -31,6 +31,31 @@ from src.iris_engine import ModelRole, TaskType, load_model, unload_model, _keep
 logger = logging.getLogger('iris')
 
 
+# Deterministic small-talk routing: greetings and identity questions are handled here,
+# bypassing the LLM triage classifier entirely. This is both faster (no model call needed)
+# and more reliable — small trivial inputs like "Hi" are exactly the kind of query a
+# reasoning-trained model can misclassify or over-think, leading to odd, unrelated output.
+_GREETING_PHRASES = {
+    "hi", "hii", "hiii", "hiiii", "hello", "helloo", "hey", "heyy", "heyyy", "yo", "sup",
+    "howdy", "hiya", "ahoy", "greetings", "hi there", "hello there", "hey there",
+    "good morning", "good afternoon", "good evening", "good night", "morning", "evening",
+    "whats up", "what's up", "wassup", "sup dude", "yo iris", "hey iris", "hi iris", "hello iris",
+    "hows it going", "how's it going", "how is it going", "how's things", "hows things",
+    "how are you", "how are you doing", "how r u", "how are u", "how're you", "how you doing",
+}
+_IDENTITY_PHRASES = {
+    "who are you", "what are you", "who made you", "who created you", "who built you",
+    "who trained you", "who developed you", "whats your name", "what's your name",
+    "what is your name", "are you an ai", "are you a bot", "are you a robot", "are you human",
+    "are you real", "tell me about yourself", "what are you exactly", "what exactly are you",
+    "are you chatgpt", "are you gpt", "are you sentient", "are you alive",
+}
+
+def _normalize_for_smalltalk(text: str) -> str:
+    t = text.strip().lower()
+    t = re.sub(r"[!?.,]+$", "", t).strip()
+    t = re.sub(r"\s+", " ", t)
+    return t
 
 
 
@@ -42,6 +67,12 @@ def classify_task(
     query_for_classification = re.sub(r'\[IMAGE_UPLOADED:[^\]]+\]', '', query_for_classification, flags=re.IGNORECASE)
     query_for_classification = query_for_classification.strip()
 
+    # Deterministic overrides for greetings / identity small talk — handled before anything
+    # else touches the query, so they never depend on the LLM triage call or the routing guide.
+    _norm_smalltalk = _normalize_for_smalltalk(query_for_classification)
+    if _norm_smalltalk in _GREETING_PHRASES or _norm_smalltalk in _IDENTITY_PHRASES:
+        logger.info(f"[Triage] Deterministic GREETING/IDENTITY route: {query_for_classification!r}")
+        return TaskType.GENERAL, None
 
     # Deterministic overrides for SEARCH triggers
     query_lower = query_for_classification.lower()

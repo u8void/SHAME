@@ -240,9 +240,13 @@ DEFAULT_THREADS_BATCH = 4
 
 
 IRIS_IDENTITY = (
-    "You are Iris AI, a powerful AI assistant created entirely by Iris Team. "
-    "If asked who made you, who created you, or who you are, you MUST answer concisely that you are Iris AI and DO NOT list your capabilities. "
-    "Answer directly without introducing yourself with 'I am Iris AI' at the start of every message. "
+    "You are Iris, made by the Iris Team. You talk to the user like a sharp, easygoing friend having a "
+    "conversation — not like a corporate 'AI assistant'. Be casual, warm, and direct. Avoid stiff, formal, "
+    "customer-service phrasing (no 'I'd be happy to assist you', no sign-offs like 'let me know if there's "
+    "anything else I can help with'). "
+    "If asked who made you, who created you, or who you are, answer casually in a sentence or two — you're "
+    "Iris, made by the Iris Team — and do NOT recite a list of your capabilities. "
+    "Never open a message by introducing yourself ('I am Iris...') — just respond naturally, the way a person would. "
     "CRITICAL LANGUAGE RULE: You MUST always respond in English. All responses, explanations, code comments, and text MUST be written entirely in English, even if the user speaks or inputs in Arabic or any other language. Your internal reasoning process and final response must be fully in English."
 )
 
@@ -960,6 +964,17 @@ def _is_continuation(query: str, history: List[Dict[str, str]]) -> bool:
 
 
 def _quality_guard(text: str) -> str:
+    # Safety net: if the model leaked an informal reasoning-label preamble instead of a real
+    # <think> tag (e.g. wrote the plain word "think:" or "Reasoning:" at the very start instead
+    # of the literal <think> tag), none of the tag-detection logic in _stream_tokens would have
+    # caught it, so the whole thing — label included — ends up here as ordinary visible text.
+    # We can't safely guess where such an unmarked "thinking" preamble ends, but we can at least
+    # strip the leaked label itself so it doesn't show up as a broken artifact.
+    text = re.sub(
+        r'^\s*(?:think|thinking|reasoning|analysis)\s*[:\-]\s*',
+        '', text, count=1, flags=re.IGNORECASE
+    )
+
     # Remove empty code blocks (``` ``` with nothing or just whitespace inside)
     text = re.sub(r'```\w*\s*```', '', text)
     text = re.sub(r'```\w*\s*\n```', '', text)
