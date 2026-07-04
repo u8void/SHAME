@@ -11,7 +11,8 @@ logger = logging.getLogger('iris')
 RAG_AVAILABLE = True
 try:
     from sentence_transformers import SentenceTransformer, util
-except:
+except Exception as e:
+    logger.warning(f"[RAG] Failed to import sentence-transformers: {e}")
     RAG_AVAILABLE = False
 
 class BookRetriever:
