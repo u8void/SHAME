@@ -5,6 +5,7 @@ from typing import Dict, List, Any, Generator, Optional
 
 logger = logging.getLogger('iris')
 from src.iris_engine import ModelRole, TaskType, load_model, unload_model, _keep_loaded, _stream_tokens, SandboxResult, detect_user_language
+from src.iris_engine import _detect_language, translate_text, _language_directive, ROLE_CTX, DEFAULT_CTX
 from src.harness import apply_smart_harness_code, apply_code_specific as _apply_harness, HermesAgentLoop, build_hermes_text_prompt, HERMES_AGENT_SYSTEM_PROMPT, parse_hermes_tool_call, HermesToolRegistry, HermesResultAnalyzer
 from src.syntax_checker import check_syntax
 
@@ -305,7 +306,6 @@ def _run_continuation(
 
     full = _fix_unclosed_code_blocks(full)
 
-    from src.iris_engine import _detect_language
     lang = _detect_language(full)
 
     if isinstance(settings, dict) and settings.get("code_review"):
@@ -603,7 +603,6 @@ def _run_complex_coding(
     final_output = ""
     if isinstance(settings, dict) and settings.get("code_review"):
         from src.context_compactor import estimate_tokens
-        from src.iris_engine import ROLE_CTX, DEFAULT_CTX
         n_ctx = ROLE_CTX.get(ModelRole.CODE, DEFAULT_CTX)
 
         review_msgs = optimized + [
@@ -642,7 +641,6 @@ def _run_complex_coding(
     else:
         final_output = full_code
 
-    from src.iris_engine import _detect_language
     lang = _detect_language(final_output)
     if isinstance(settings, dict) and settings.get("code_review"):
         err = check_syntax(final_output, lang)
@@ -720,7 +718,6 @@ def _run_complex_coding(
 
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     if user_lang != "English" and final_output:
-        from src.iris_engine import translate_text
         yield {"type": "clear"}
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
         translated = translate_text(final_output, user_lang)
@@ -809,7 +806,6 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
 
     full = _fix_unclosed_code_blocks(full)
 
-    from src.iris_engine import _detect_language
     lang = _detect_language(full)
     
     if isinstance(settings, dict) and settings.get("code_review"):
@@ -887,7 +883,6 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
 
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     if user_lang != "English" and full:
-        from src.iris_engine import translate_text
         yield {"type": "clear"}
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
         translated = translate_text(full, user_lang)
@@ -928,7 +923,6 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
             f"{final_query}"
         )
         
-    from src.iris_engine import _language_directive
     final_query += _language_directive(user_query, role=ModelRole.CODE)
     
     # 2. History & Compaction

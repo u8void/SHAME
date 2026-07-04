@@ -2,7 +2,7 @@ import re
 from typing import Generator, Dict, Optional, Any
 from src.iris_engine import ModelRole, load_model, unload_model, _keep_loaded, _stream_tokens, load_generation_config, _quality_guard
 
-from src.iris_engine import detect_user_language, _language_directive
+from src.iris_engine import detect_user_language, _language_directive, translate_text
 
 def get_general_prompt(identity: str) -> str:
     return (
@@ -116,7 +116,6 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     # Translate only the visible answer (not think blocks)
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     if user_lang != "English" and cleaned:
-        from src.iris_engine import translate_text
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
         cleaned = translate_text(cleaned, user_lang)
 
