@@ -997,6 +997,15 @@ def _is_web_design_request(query: str) -> bool:
     return bool(_WEB_DESIGN_RE.search(query))
 
 
+def _has_explicit_design_choices(query: str) -> bool:
+    """Detect if the user query has explicit color, font, or theme instructions."""
+    design_preference_pattern = re.compile(
+        r'(?i)\b(color|colour|colors|colours|theme|themes|font|fonts|palette|palettes|style|styling|css|custom|hex|rgb|hsl|bg-|text-|border-|'
+        r'red|blue|green|yellow|orange|purple|indigo|teal|cyan|pink|rose|emerald|amber|fuchsia|sky|lime|violet|gray|grey|slate|zinc|black|white|gold|cream|beige|silver)\b'
+    )
+    return bool(design_preference_pattern.search(query))
+
+
 def _generate_design_directive() -> str:
     """Generate a random design directive to inject variety into web design outputs."""
     theme = random.choice(_DESIGN_THEMES)
@@ -1055,8 +1064,8 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
             
     final_query = user_query
 
-    # Inject randomized design directive for web design requests
-    if is_web_design:
+    # Inject randomized design directive for web design requests if user didn't specify custom design choices
+    if is_web_design and not _has_explicit_design_choices(user_query):
         final_query += _generate_design_directive()
 
     if context:
