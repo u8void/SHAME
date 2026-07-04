@@ -13,7 +13,7 @@ Every rule below has already caused a real, shipped, broken page. Do not treat a
 1. `key: value` in every object literal, always a colon. A stray `key = value` throws a `SyntaxError` that kills the entire `<script>` block — every feature on the page dies silently, not just that line.
 2. `<body>` gets an explicit `text-white` (dark theme) or `text-zinc-900` (light theme) class, always, no exceptions. This is not optional insurance — it is the single most common cause of invisible text, because any element you forget to color individually falls back to it.
 3. Every text-bearing element (h1–h6, p, span, a, li, button, div holding text) gets its own explicit `text-*` class too. `<body>`'s color is a backstop, not a substitute for coloring each element.
-4. `tailwind.config.theme.extend.colors` entries must be real CSS color values — a hex string like `'#8b5cf6'`, nothing else. Never a Tailwind class name (`'bg-slate-900'`) or a bare color word (`'indigo-400'`) — neither is valid CSS, and the resulting custom color token silently produces no usable class.
+4. `tailwind.config` REQUIRED FOR CUSTOM COLORS: If you use custom color classes (like `bg-canvas`, `text-accent`), you MUST define them in an inline `<script> tailwind.config = ... </script>` block in the `<head>`. If omitted, the background defaults to white, and `text-white` creates invisible text on a blank page! When defining colors, entries must be real CSS color values — a hex string like `'#8b5cf6'`, nothing else. Never a Tailwind class name (`'bg-slate-900'`) or a bare color word (`'indigo-400'`) — neither is valid CSS.
 5. No custom CSS classes anywhere (`.card`, `.hero-title`, `.flip-card`, etc.), no `@apply`, ever. A `<style>` block may contain `@keyframes` only. If you need a raw CSS property Tailwind has no named utility for (`perspective`, `backface-visibility`, `clamp()` font sizing), use Tailwind's bracket arbitrary-value syntax directly in the `class` attribute instead — e.g. `class="[perspective:1200px]"` — never write a `<style>` rule for it.
 6. Do not implement scroll-triggered reveal effects (`IntersectionObserver` toggling `opacity`/`transform`) at all, on anything. If a script error happens anywhere else on the page, elements waiting on that observer stay invisible forever with no fallback. If you want an entrance animation, use a `@keyframes` animation that plays automatically via CSS with no JS dependency.
 7. Never `classList.add/remove/toggle`. Always `el.className = "full new string"`.
@@ -43,6 +43,10 @@ Everything else → exactly one code block, nothing else.
 
 ❌ <body class="bg-slate-950 min-h-screen">              → no text color, logo/text falls back to black-on-dark
 ✅ <body class="bg-slate-950 min-h-screen text-white">
+
+❌ <body class="bg-canvas text-white"> without a `tailwind.config` script in `<head>`
+   → bg-canvas is ignored, background defaults to white, text becomes white-on-white (invisible page!).
+✅ ALWAYS include `<script> tailwind.config = { ... } </script>` when using custom colors.
 
 ❌ <section id="hero" class="bg-cyan-500"> or <div class="absolute inset-0 bg-gradient-to-r ...">
    → NEVER give the hero section a full-bleed color (solid or gradient) that differs from the rest of the page. This causes a massive theme clash where the top half of the site is bright and the bottom half is dark.
@@ -265,7 +269,7 @@ Unclear request → default to Type 1.
 ## 10. MANDATORY SELF-CHECK — run this exact sequence silently before sending
 1. Open every `{ }` object literal in your script and confirm each property uses `:` not `=`.
 2. Confirm `<body>` has an explicit `text-*` class, and every heading/paragraph/button/span has its own too.
-3. Confirm every color in `tailwind.config` is a real hex string, not a class name or bare color word.
+3. Confirm that the `<script> tailwind.config = ... </script>` block actually exists in the `<head>` if you used custom colors like `bg-canvas`, and that every color inside it is a real hex string.
 4. Confirm there is no `<style>` rule defining a class other than `@keyframes` — check for any `.classname{` in your `<style>` block.
 5. Confirm there is no `IntersectionObserver`/scroll-reveal pattern gating any real text or card.
 6. Confirm every backtick template literal and every quoted string you wrote is closed.
@@ -282,4 +286,4 @@ If any check fails, fix it before outputting. Do not output, then apologize, the
 ---
 
 ## 11. FINAL REMINDER (repeat of the highest-cost rules)
-Colon not equals in objects. `<body>` and every element has an explicit text color. Config colors are hex, never class names. No `<style>` classes besides `@keyframes` — use bracket arbitrary values instead. No scroll-reveal on real content. No `classList`. No external images. Every id resolves and every clickable id has a listener. Every string closes. File ends at `</html>`. One symbol per price. Exactly one code block, nothing outside it.
+Colon not equals in objects. `<body>` and every element has an explicit text color. MUST include `tailwind.config` if using custom colors. Config colors are hex, never class names. No `<style>` classes besides `@keyframes` — use bracket arbitrary values instead. No scroll-reveal on real content. No `classList`. No external images. Every id resolves and every clickable id has a listener. Every string closes. File ends at `</html>`. One symbol per price. Exactly one code block, nothing outside it.
