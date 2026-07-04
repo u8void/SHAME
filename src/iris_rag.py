@@ -31,14 +31,6 @@ class BookRetriever:
         return os.path.join(self.raw_data_dir, ".rag_index_cache.pkl")
 
     def load_and_index(self):
-        try:
-            from src.iris_engine import is_large_or_medium_size
-            if is_large_or_medium_size():
-                logger.info("[RAG] Size is large/medium. RAG is disabled.")
-                return
-        except Exception:
-            pass
-
         if not RAG_AVAILABLE:
             logger.info("[RAG] sentence-transformers not installed. RAG disabled.")
             return
@@ -188,13 +180,6 @@ class BookRetriever:
         self.chunks.append({"text": text, "source_file": source_file, "category": category})
 
     def retrieve(self, query: str, top_k: int = 3, category: Optional[str] = None) -> str:
-        try:
-            from src.iris_engine import is_large_or_medium_size
-            if is_large_or_medium_size():
-                return ""
-        except Exception:
-            pass
-
         if self.embeddings is None or self.embedder is None or not self.chunks:
             return ""
 
