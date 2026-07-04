@@ -27,6 +27,9 @@ def is_large_size(settings: dict = None) -> bool:
     return False
 
 def _load_skill_prompt(skill_path: str) -> str:
+    if is_large_size():
+        logger.info(f"[Iris] Size is large. Disabling skill prompt: {skill_path}")
+        return ""
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills", skill_path)
     try:
         with open(path, "r", encoding="utf-8") as f:
