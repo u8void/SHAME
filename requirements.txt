@@ -22,3 +22,4 @@ sentencepiece
 pyautogui
 pyperclip
 deep-translator
+hf_transfer

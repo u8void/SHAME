@@ -606,6 +606,8 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
     try:
         import time as _time
 
+        import os
+        os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
         from huggingface_hub import hf_hub_download
 
         for repo_id, remote_name in sources:

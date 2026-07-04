@@ -1266,24 +1266,44 @@ def download_all_models(roles_to_train: List[str] = None):
         print(f"  URL: {url}")
         start_time = time.time()
         try:
-            def progress_hook(count, block_size, total_size):
-                duration = time.time() - start_time
-                progress_size = int(count * block_size)
-                speed = int(progress_size / (1024 * 1024 * max(duration, 0.001)))
-                percent = int(count * block_size * 100 / total_size) if total_size > 0 else 0
-                sys.stdout.write(
-                    f"\r  ... {percent}% | {progress_size / (1024*1024):.1f} MB "
-                    f"| {speed} MB/s | {duration:.1f}s"
-                )
-                sys.stdout.flush()
+            downloaded = False
+            if "huggingface.co" in url and "/resolve/" in url:
+                try:
+                    import os
+                    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+                    from huggingface_hub import hf_hub_download
+                    parts = url.split("huggingface.co/")[-1].split("/resolve/")
+                    repo_id = parts[0]
+                    subparts = parts[1].split("/")
+                    remote_name = "/".join(subparts[1:])
+                    print("  Using accelerated hf_transfer...")
+                    dl_path = hf_hub_download(repo_id=repo_id, filename=remote_name, local_dir="./models", local_dir_use_symlinks=False)
+                    if os.path.abspath(dl_path) != os.path.abspath(dest_path):
+                        if os.path.exists(dest_path): os.remove(dest_path)
+                        os.rename(dl_path, dest_path)
+                    downloaded = True
+                except Exception as e:
+                    print(f"  HF transfer failed ({e}), falling back to standard download...")
 
-            urllib.request.urlretrieve(url, temp_path, progress_hook)
+            if not downloaded:
+                def progress_hook(count, block_size, total_size):
+                    duration = time.time() - start_time
+                    progress_size = int(count * block_size)
+                    speed = int(progress_size / (1024 * 1024 * max(duration, 0.001)))
+                    percent = int(count * block_size * 100 / total_size) if total_size > 0 else 0
+                    sys.stdout.write(
+                        f"\r  ... {percent}% | {progress_size / (1024*1024):.1f} MB "
+                        f"| {speed} MB/s | {duration:.1f}s"
+                    )
+                    sys.stdout.flush()
+
+                urllib.request.urlretrieve(url, temp_path, progress_hook)
+                if os.path.exists(dest_path):
+                    os.remove(dest_path)
+                os.rename(temp_path, dest_path)
+
             elapsed = time.time() - start_time
-            size_mb = os.path.getsize(temp_path) / (1024 * 1024)
-            
-            if os.path.exists(dest_path):
-                os.remove(dest_path)
-            os.rename(temp_path, dest_path)
+            size_mb = os.path.getsize(dest_path) / (1024 * 1024)
             print(f"\n  Done → {target_name}: {size_mb:.0f} MB in {elapsed:.0f}s\n")
         except Exception as e:
             print(f"\n  Failed: {e}\n")

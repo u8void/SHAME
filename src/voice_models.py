@@ -36,9 +36,34 @@ _voice_lock = Lock()
 def _download_file(url, dest):
     import urllib.request
     import logging
-    logging.getLogger('iris').info(f"[Voice] Downloading {os.path.basename(dest)}...")
-    urllib.request.urlretrieve(url, dest)
-    logging.getLogger('iris').info(f"[Voice] Downloaded {os.path.basename(dest)}")
+    logger = logging.getLogger('iris')
+    logger.info(f"[Voice] Downloading {os.path.basename(dest)}...")
+    
+    downloaded = False
+    if "huggingface.co" in url and "/resolve/" in url:
+        try:
+            import os
+            os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+            from huggingface_hub import hf_hub_download
+            parts = url.split("huggingface.co/")[-1].split("/resolve/")
+            repo_id = parts[0]
+            subparts = parts[1].split("/")
+            remote_name = "/".join(subparts[1:])
+            logger.info("  [Voice] Using accelerated hf_transfer...")
+            
+            os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+            dl_path = hf_hub_download(repo_id=repo_id, filename=remote_name, local_dir=os.path.dirname(dest) or ".", local_dir_use_symlinks=False)
+            if os.path.abspath(dl_path) != os.path.abspath(dest):
+                if os.path.exists(dest): os.remove(dest)
+                os.rename(dl_path, dest)
+            downloaded = True
+        except Exception as e:
+            logger.info(f"  [Voice] HF transfer failed ({e}), falling back to standard download...")
+
+    if not downloaded:
+        urllib.request.urlretrieve(url, dest)
+        
+    logger.info(f"[Voice] Downloaded {os.path.basename(dest)}")
 
 def load_stt_model():
     global _stt_processor, _stt_model
