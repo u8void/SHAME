@@ -104,7 +104,7 @@ def classify_task(
     # what's being asked FOR (a website/app), so this is resolved deterministically in Stage A
     # instead of leaving an unambiguous case to the neural pass.
     _BUILD_VERBS = r"(?:build|create|make|design|develop|generate|code(?:\s+up)?|whip up|put together|spin up|write)"
-    _WEBAPP_NOUNS = r"(?:web\s?site|web\s?app(?:lication)?s?|landing\s?page|home\s?page|web\s?page|portfolio\s?site|e-?commerce\s?(?:site|store)|single[- ]page\s?app)"
+    _WEBAPP_NOUNS = r"(?:web\s?site|web\s?app(?:lication)?s?|landing\s?page|home\s?page|web\s?page|portfolio\s?site|e-?commerce\s?(?:site|store)|single[- ]page\s?app|\bpage\b)"
     if re.search(rf"\b{_BUILD_VERBS}\b(?:\s+\S+){{0,4}}\s+{_WEBAPP_NOUNS}\b", query_lower):
         logger.info(f"[Triage] Deterministic CODE_COMPLEX route (explicit website/app build request): {query_for_classification!r}")
         return TaskType.CODING_COMPLEX, None

@@ -861,10 +861,10 @@ async def ask_stream(
                         "If the user asks a conversational/general knowledge question, do NOT output any tags; answer directly.\n\n"
                         "Otherwise, output EXACTLY ONE tag and NOTHING ELSE. DO NOT answer the query yourself:\n"
                         "- [TASK_TYPE: coding_simple] (for simple coding questions, explaining code, syntax, basic functions, single script edits)\n"
-                        "- [TASK_TYPE: coding_complex] (for large projects, writing games, custom emulators/drivers, multi-file codebases, or complex logic coding)\n"
+                        "- [TASK_TYPE: coding_complex] (for large projects, writing games, custom emulators/drivers, multi-file codebases, complex logic coding, or generating full websites/web apps/UI pages)\n"
                         "- [TASK_TYPE: math] (for equations, proofs, algorithmic derivations)\n"
                         "- [TASK_TYPE: reasoning] (for deep logic puzzles, architecture design, long analysis)\n\n"
-                        "CRITICAL: If the query mentions writing a complete game (e.g. Pong), building compilers, operating system bootloaders, or complex hardware simulation, output [TASK_TYPE: coding_complex]."
+                        "CRITICAL: If the query mentions writing a complete game (e.g. Pong), building compilers, operating system bootloaders, complex hardware simulation, or creating full websites/UIs/landing pages, output [TASK_TYPE: coding_complex]."
                     )
                     triage_messages = [
                         {"role": "system", "content": triage_prompt + _get_system_time_directive()},

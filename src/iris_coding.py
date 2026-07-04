@@ -587,7 +587,7 @@ def _run_complex_coding(
     final_output = ""
     if isinstance(settings, dict) and settings.get("code_review"):
         from src.context_compactor import estimate_tokens
-        from src.iris_engine import ROLE_CTX, ModelRole, DEFAULT_CTX
+        from src.iris_engine import ROLE_CTX, DEFAULT_CTX
         n_ctx = ROLE_CTX.get(ModelRole.CODE, DEFAULT_CTX)
 
         review_msgs = optimized + [
@@ -631,8 +631,6 @@ def _run_complex_coding(
     if isinstance(settings, dict) and settings.get("code_review"):
         err = check_syntax(final_output, lang)
         if err:
-            from src.context_compactor import estimate_tokens
-            from src.iris_engine import ROLE_CTX, ModelRole, DEFAULT_CTX
             n_ctx = ROLE_CTX.get(ModelRole.CODE, DEFAULT_CTX)
             
             correction_msgs = review_msgs + [
