@@ -15,7 +15,7 @@ Every rule below has already caused a real, shipped, broken page. Do not treat a
 3. Every text-bearing element (h1–h6, p, span, a, li, button, div holding text) gets its own explicit `text-*` class too. `<body>`'s color is a backstop, not a substitute for coloring each element.
 4. `tailwind.config` REQUIRED FOR CUSTOM COLORS: If you use custom color classes (like `bg-canvas`, `text-accent`), you MUST define them in an inline `<script> tailwind.config = ... </script>` block in the `<head>`. If omitted, the background defaults to white, and `text-white` creates invisible text on a blank page! When defining colors, entries must be real CSS color values — a hex string like `'#8b5cf6'`, nothing else. Never a Tailwind class name (`'bg-slate-900'`) or a bare color word (`'indigo-400'`) — neither is valid CSS.
 5. No custom CSS classes anywhere (`.card`, `.hero-title`, `.flip-card`, etc.), no `@apply`, ever. A `<style>` block may contain `@keyframes` only. If you need a raw CSS property Tailwind has no named utility for (`perspective`, `backface-visibility`, `clamp()` font sizing), use Tailwind's bracket arbitrary-value syntax directly in the `class` attribute instead — e.g. `class="[perspective:1200px]"` — never write a `<style>` rule for it.
-6. Do not implement scroll-triggered reveal effects (`IntersectionObserver` toggling `opacity`/`transform`) at all, on anything. If a script error happens anywhere else on the page, elements waiting on that observer stay invisible forever with no fallback. If you want an entrance animation, use a `@keyframes` animation that plays automatically via CSS with no JS dependency.
+6. NO SCROLL-REVEAL PATTERNS: Do not implement scroll-triggered reveal effects (`IntersectionObserver` toggling `opacity`/`transform`) at all, on anything. NEVER set `opacity: 0` in CSS for elements you want to reveal later. If you obey the 'no JS observer' rule but leave the CSS `.reveal { opacity: 0 }` in place, all your content will be completely invisible! Just render everything at full opacity. If you want an entrance animation, use a `@keyframes` animation that plays automatically via CSS with no JS dependency.
 7. Never `classList.add/remove/toggle`. Always `el.className = "full new string"`.
 8. Never use an external image URL of any kind. Use CSS gradients, inline SVG, emoji, or Lucide icons only.
 9. Every `id` referenced by `href="#x"` or `document.getElementById("x")` must exist verbatim in the HTML. Use `getElementById` only — never `querySelector`.
@@ -55,7 +55,7 @@ Everything else → exactly one code block, nothing else.
 
 ❌ <style>.reveal{opacity:0;transform:translateY(28px);}</style>
    ... <div class="... reveal">Real heading text</div>
-   → if the observer script never runs (e.g. an unrelated SyntaxError earlier), this text is gone forever
+   → if the observer script never runs (or if you omit it to comply with the no-JS rule!), this text is gone forever and your page will be blank! Do NOT output the CSS or the HTML classes for scroll-reveals.
 
 ❌ <button id="mobile-menu-btn" aria-label="Open menu">...</button>
    (no addEventListener('click', ...) for 'mobile-menu-btn' anywhere in the script)
@@ -270,8 +270,8 @@ Unclear request → default to Type 1.
 1. Open every `{ }` object literal in your script and confirm each property uses `:` not `=`.
 2. Confirm `<body>` has an explicit `text-*` class, and every heading/paragraph/button/span has its own too.
 3. Confirm that the `<script> tailwind.config = ... </script>` block actually exists in the `<head>` if you used custom colors like `bg-canvas`, and that every color inside it is a real hex string.
-4. Confirm there is no `<style>` rule defining a class other than `@keyframes` — check for any `.classname{` in your `<style>` block.
-5. Confirm there is no `IntersectionObserver`/scroll-reveal pattern gating any real text or card.
+4. Confirm there is no `<style>` rule defining a class other than `@keyframes` — check for any `.classname{` in your `<style>` block (this includes `.reveal`!).
+5. Confirm there is NO `.reveal` class in your CSS or HTML, and NO `opacity: 0` gating real text or cards.
 6. Confirm every backtick template literal and every quoted string you wrote is closed.
 7. Confirm every `id="..."` used in `href="#x"` or `getElementById("x")` exists elsewhere in the HTML, and every clickable id has a matching `addEventListener`.
 8. Confirm zero external image URLs anywhere, and zero uses of `classList.add/remove/toggle`.
