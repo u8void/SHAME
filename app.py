@@ -1,10 +1,25 @@
 import os, sys
+import json
+import warnings
 
+# Suppress unauthenticated HF Hub warning if token is not configured
+warnings.filterwarnings("ignore", message=".*unauthenticated requests.*")
 
+if "HF_TOKEN" not in os.environ:
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "iris.conf")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                hf_token = cfg.get("hf_token") or cfg.get("HF_TOKEN")
+                if hf_token:
+                    os.environ["HF_TOKEN"] = hf_token
+        except Exception:
+            pass
 
+if "HF_TOKEN" not in os.environ and "HF_HUB_VERBOSITY" not in os.environ:
+    os.environ["HF_HUB_VERBOSITY"] = "error"
 
-
-import os
 os.environ["OMP_NUM_THREADS"] = "4"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
 os.environ["MKL_NUM_THREADS"] = "4"
