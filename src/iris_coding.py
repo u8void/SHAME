@@ -586,7 +586,9 @@ def _run_complex_coding(
 
     final_output = ""
     if isinstance(settings, dict) and settings.get("code_review"):
-        yield {"type": "status", "content": "Stage 3 \u2014 Reviewing and optimizing..."}
+        from src.context_compactor import estimate_tokens
+        from src.iris_engine import ROLE_CTX, DEFAULT_CTX
+        n_ctx = ROLE_CTX.get(ModelRole.CODE, DEFAULT_CTX)
 
         review_msgs = optimized + [
             {"role": "assistant", "content": full_code},
@@ -597,23 +599,30 @@ def _run_complex_coding(
              "Return the final corrected code inside a ``` language block followed by a <file_card> tag. "
              "After the file_card tag, write EXACTLY ONE short sentence about what you changed, then stop — no bulleted recap, no headers, no multi-paragraph explanation."}
         ]
-        for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.4, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings):
-            if ev["type"] == "token":
-                final_output += ev["content"]
-            else:
-                yield ev
-        if not _keep_loaded:
-            unload_model()
-
-        # Fallback protection: if final_output is too short or lacks code blocks, fall back to Stage 2 code
-        if len(final_output.strip()) < 50 or "```" not in final_output:
-            logger.warning("[Complex Coding] Stage 3 final output is empty/invalid. Falling back to Stage 2 code.")
+        
+        est_review = estimate_tokens(review_msgs)
+        if est_review + 2048 > n_ctx:
+            logger.warning(f"[Complex Coding] Skipping Stage 3 review due to context limits ({est_review} tokens > {n_ctx}).")
             final_output = full_code
-            yield {"type": "status", "content": "Code quality verified. No modifications needed."}
         else:
-            yield {"type": "clear"}
-            yield {"type": "status", "content": "Applying code optimizations..."}
-            yield {"type": "token", "content": final_output}
+            yield {"type": "status", "content": "Stage 3 \u2014 Reviewing and optimizing..."}
+            for ev in _stream_tokens(ModelRole.CODE, review_msgs, max_tokens=8192, temperature=0.4, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris"), settings=settings):
+                if ev["type"] == "token":
+                    final_output += ev["content"]
+                else:
+                    yield ev
+            if not _keep_loaded:
+                unload_model()
+
+            # Fallback protection: if final_output is too short or lacks code blocks, fall back to Stage 2 code
+            if len(final_output.strip()) < 50 or "```" not in final_output:
+                logger.warning("[Complex Coding] Stage 3 final output is empty/invalid. Falling back to Stage 2 code.")
+                final_output = full_code
+                yield {"type": "status", "content": "Code quality verified. No modifications needed."}
+            else:
+                yield {"type": "clear"}
+                yield {"type": "status", "content": "Applying code optimizations..."}
+                yield {"type": "token", "content": final_output}
     else:
         final_output = full_code
 
@@ -622,30 +631,36 @@ def _run_complex_coding(
     if isinstance(settings, dict) and settings.get("code_review"):
         err = check_syntax(final_output, lang)
         if err:
-            yield {"type": "syntax_error", "content": f"Syntax error in {lang or 'code'}: {err}"}
-            yield {"type": "status", "content": "Auto-correcting syntax..."}
-
+            n_ctx = ROLE_CTX.get(ModelRole.CODE, DEFAULT_CTX)
+            
             correction_msgs = review_msgs + [
                 {"role": "assistant", "content": final_output},
                 {"role": "user",
                  "content": f"Fix ONLY the syntax errors:\n\n{err}\n\nReturn the complete corrected code inside a ```python``` block."}
             ]
-            yield {"type": "clear"}
-            yield {"type": "status", "content": "Applying syntax auto-correction..."}
-            corrected = ""
-            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris")):
-                if user_lang == "English" or ev["type"] != "token":
-                    yield ev
-                if ev["type"] == "token":
-                    corrected += ev["content"]
-            if not _keep_loaded:
-                unload_model()
-
-            second_err = check_syntax(corrected, lang)
-            if second_err:
-                yield {"type": "token", "content": "\n\n> \u26a0\ufe0f Auto-correction attempted but some errors may remain."}
-            if "```" in corrected:
-                final_output = corrected
+            
+            est_syntax = estimate_tokens(correction_msgs)
+            if est_syntax + 2048 > n_ctx:
+                logger.warning(f"[Complex Coding] Skipping syntax auto-correction due to context limits ({est_syntax} tokens).")
+                yield {"type": "syntax_error", "content": f"Syntax error in {lang or 'code'}: {err} (Cannot auto-fix, context full)"}
+            else:
+                yield {"type": "syntax_error", "content": f"Syntax error in {lang or 'code'}: {err}"}
+                yield {"type": "clear"}
+                yield {"type": "status", "content": "Auto-correcting syntax..."}
+                corrected = ""
+                for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris")):
+                    if user_lang == "English" or ev["type"] != "token":
+                        yield ev
+                    if ev["type"] == "token":
+                        corrected += ev["content"]
+                if not _keep_loaded:
+                    unload_model()
+    
+                second_err = check_syntax(corrected, lang)
+                if second_err:
+                    yield {"type": "token", "content": "\n\n> \u26a0\ufe0f Auto-correction attempted but some errors may remain."}
+                if "```" in corrected:
+                    final_output = corrected
 
     
     yield {"type": "status", "content": "Verifying complex code in sandbox..."}
@@ -690,10 +705,10 @@ def _run_complex_coding(
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     if user_lang != "English" and final_output:
         from src.iris_engine import translate_text
+        yield {"type": "clear"}
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
         translated = translate_text(final_output, user_lang)
         final_output = translated
-        yield {"type": "clear"}
         yield {"type": "token", "content": final_output}
 
     yield {"type": "raw_response", "content": final_output}
@@ -854,10 +869,10 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     if user_lang != "English" and full:
         from src.iris_engine import translate_text
+        yield {"type": "clear"}
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
         translated = translate_text(full, user_lang)
         full = translated
-        yield {"type": "clear"}
         yield {"type": "token", "content": full}
 
     yield {"type": "raw_response", "content": full}
