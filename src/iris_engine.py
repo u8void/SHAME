@@ -15,7 +15,7 @@ import pickle
 import platform
 import os
 
-def is_large_size(settings: Optional[dict] = None) -> bool:
+def is_large_size(settings: dict = None) -> bool:
     if settings and settings.get("size") == "large":
         return True
     try:
