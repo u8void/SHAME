@@ -1,11 +1,13 @@
 import logging
 from typing import Generator, Dict, Any
-from src.iris_engine import ModelRole, load_model, unload_model, _keep_loaded
+from src.iris_engine import ModelRole, load_model, unload_model, _keep_loaded, _load_skill_prompt
 
 logger = logging.getLogger('iris')
 
 def get_control_prompt(identity: str = "") -> str:
-    return f"{identity}\nYou are the Iris AI Control node."
+    prompt = _load_skill_prompt("control/control_prompt.txt")
+    return f"{identity}\n{prompt}"
+
 
 def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -> Generator[Dict[str, str], None, None]:
     from src.controller import (
