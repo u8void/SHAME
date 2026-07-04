@@ -32,9 +32,9 @@ class BookRetriever:
 
     def load_and_index(self):
         try:
-            from src.iris_engine import is_large_size
-            if is_large_size():
-                logger.info("[RAG] Size is large. RAG is disabled.")
+            from src.iris_engine import is_large_or_medium_size
+            if is_large_or_medium_size():
+                logger.info("[RAG] Size is large/medium. RAG is disabled.")
                 return
         except Exception:
             pass
@@ -189,8 +189,8 @@ class BookRetriever:
 
     def retrieve(self, query: str, top_k: int = 3, category: Optional[str] = None) -> str:
         try:
-            from src.iris_engine import is_large_size
-            if is_large_size():
+            from src.iris_engine import is_large_or_medium_size
+            if is_large_or_medium_size():
                 return ""
         except Exception:
             pass

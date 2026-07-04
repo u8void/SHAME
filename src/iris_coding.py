@@ -15,9 +15,9 @@ SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 
 def _load_prompt(filename: str) -> str:
     try:
-        from src.iris_engine import is_large_size
-        if is_large_size():
-            logger.info(f"[Iris] Size is large. Disabling coding skill prompt: {filename}")
+        from src.iris_engine import is_large_or_medium_size
+        if is_large_or_medium_size():
+            logger.info(f"[Iris] Size is large/medium. Disabling coding skill prompt: {filename}")
             return ""
     except Exception:
         pass

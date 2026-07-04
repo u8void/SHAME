@@ -15,20 +15,20 @@ import pickle
 import platform
 import os
 
-def is_large_size(settings: dict = None) -> bool:
-    if settings and settings.get("size") == "large":
+def is_large_or_medium_size(settings: dict = None) -> bool:
+    if settings and settings.get("size") in ("large", "medium"):
         return True
     try:
         cfg = load_generation_config()
-        if cfg.get("size") == "large":
+        if cfg.get("size") in ("large", "medium"):
             return True
     except Exception:
         pass
     return False
 
 def _load_skill_prompt(skill_path: str) -> str:
-    if is_large_size():
-        logger.info(f"[Iris] Size is large. Disabling skill prompt: {skill_path}")
+    if is_large_or_medium_size():
+        logger.info(f"[Iris] Size is large/medium. Disabling skill prompt: {skill_path}")
         return ""
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills", skill_path)
     try:
