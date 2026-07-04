@@ -975,12 +975,15 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> "Llama"
         _flash_attn = hw.flash_attn
 
         _main_gpu = cfg.get("main_gpu", 0)
+        _tensor_split = cfg.get("tensor_split", None)
+        if _tensor_split and not isinstance(_tensor_split, list):
+            _tensor_split = None
 
         _pool_size_limit = _get_max_pool_size()
         _evict_from_pool_locked(_pool_size_limit)
 
         logger.info(
-            f"[Iris] Instantiating Llama: model={path}, n_gpu_layers={n_gpu_layers}, n_threads={n_threads}, main_gpu={_main_gpu}"
+            f"[Iris] Instantiating Llama: model={path}, n_gpu_layers={n_gpu_layers}, n_threads={n_threads}, main_gpu={_main_gpu}, tensor_split={_tensor_split}"
         )
         try:
             _new_llm = Llama(
@@ -999,6 +1002,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> "Llama"
                 verbose=False,
                 logits_all=(draft_model is not None),
                 main_gpu=_main_gpu,
+                tensor_split=_tensor_split,
             )
         except Exception as e:
             logger.error(
