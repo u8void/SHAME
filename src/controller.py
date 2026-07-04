@@ -36,6 +36,11 @@ def _ensure_open_interpreter():
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.logger import get_logger
+from src.iris_engine import (
+    detect_user_language, translate_text, 
+    _model_pool, load_model, ModelRole, 
+    get_hardware_profile
+)
 
 logger = get_logger("controller")
 
@@ -86,8 +91,8 @@ def _init_oi():
         _oi.llm.supports_vision = False
         
         def _iris_native_oi_llm(*args, **kwargs):
-            from src.iris_engine import _model_pool, load_model, ModelRole
             
+
             global _oi_step_counter
             _oi_step_counter += 1
             if _oi_step_counter > 5:
@@ -436,7 +441,6 @@ def should_web_search(text: str) -> bool:
 def web_search(query: str, max_results: int = 5) -> str:
     
     try:
-        from src.iris_engine import detect_user_language, translate_text
         lang = detect_user_language(query)
         if lang and lang != "English":
             translated = translate_text(query, "English")
@@ -504,7 +508,7 @@ try:
     from src.iris import ask_stream
     from src.iris_rag import BookRetriever
     from src.iris_vision import analyze_image
-    from src.iris_engine import get_hardware_profile as get_device
+    get_device = get_hardware_profile
 
     IRIS_AVAILABLE = True
 except ImportError:
@@ -963,8 +967,8 @@ def _prime_oi_with_control():
     _init_oi()
     if not OI_AVAILABLE:
         return
-    from src.iris_engine import ModelRole, load_model, _model_pool
     
+
     try:
         load_model(ModelRole.CONTROL)
         logger.info("[OI] Primed with CONTROL model for action.")
@@ -973,9 +977,6 @@ def _prime_oi_with_control():
 
 
 def _generate_control_action(messages: list, user_query: str = "", max_tokens: int = 1024) -> str:
-    
-    from src.iris_engine import ModelRole, load_model
-
     logger.info("[Model] Using CONTROL model for control action")
     llm = load_model(ModelRole.CONTROL)
 

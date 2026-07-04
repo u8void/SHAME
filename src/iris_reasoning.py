@@ -23,6 +23,15 @@ def get_reasoning_prompt(identity: str) -> str:
         "you MUST go through the word letter by letter inside <think> tags, listing each position. "
         "Count ONLY the letters in the exact word given. Do NOT search the web. Do NOT bring up other people or names. "
         "Example: 'how many a in Ahmad' → A-h-m-a-d: positions 1 and 4 are 'a' (case-insensitive) → answer is 2.\n"
+        "COUNTING/ENUMERATION RULE (HIGHEST PRIORITY):\n"
+        "- If asked how many times an event occurs over a time range (e.g. chimes, rings, signals, occurrences), "
+        "you MUST enumerate every individual event chronologically inside <think> tags. Rules:\n"
+        "  1. ONLY use event categories that the problem explicitly defines. NEVER invent new categories.\n"
+        "  2. List every event timestamp one by one: state what happens at that time and how many counts it contributes.\n"
+        "  3. Keep a running tally as you go.\n"
+        "  4. At the end of <think>, re-sum all events from your list to verify the total before writing your answer.\n"
+        "  5. NEVER output a total that you did not derive from a complete, explicit enumeration.\n"
+        "  Generic format: [timestamp/event 1] → [count], [timestamp/event 2] → [count], … → Total = sum.\n"
         "ACCURACY RULES (HIGHEST PRIORITY):\n"
         "1. NEVER invent facts, statistics, names, dates, or specific details you are not certain about.\n"
         "2. For factual questions, web search results will be provided in the query. "
@@ -46,7 +55,7 @@ import logging
 from typing import Generator, Dict, Optional, Any
 from src.iris_engine import ModelRole, load_model, unload_model, _keep_loaded, _stream_tokens, load_generation_config, _quality_guard
 
-from src.iris_engine import detect_user_language, _language_directive
+from src.iris_engine import detect_user_language, _language_directive, translate_text
 
 logger = logging.getLogger('iris')
 
@@ -219,7 +228,6 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
     # --- Translation (only translate the visible answer, not think blocks) ---
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     if user_lang != "English" and cleaned_answer:
-        from src.iris_engine import translate_text
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
         cleaned_answer = translate_text(cleaned_answer, user_lang)
 

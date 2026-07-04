@@ -1,6 +1,22 @@
 import re
+import json
 import logging
 from typing import Generator, Dict
+import threading
+import os
+from src.iris_engine import (
+    TaskType, ModelRole, _keep_loaded, detect_user_language, 
+    translate_text, prefetch_model_file, _get_model_filename, 
+    _quality_guard
+)
+import src.iris_engine
+from src.iris_vision import analyze_image
+from src.iris_triage import classify_task
+from src.iris_control import run_stream as control_run_stream
+from src.iris_reasoning import run_stream as reasoning_run_stream
+from src.iris_general import run_stream as general_run_stream
+from src.iris_math import run_stream as math_run_stream
+from src.iris_coding import run_stream as coding_run_stream
 
 logger = logging.getLogger('iris')
 
@@ -60,8 +76,6 @@ def ask_stream(
         return
     direct_answer = ""
 
-    from src.iris_engine import TaskType, ModelRole, _keep_loaded, detect_user_language, translate_text
-    import src.iris_engine
     src.iris_engine._keep_loaded = keep_loaded
 
     user_lang = detect_user_language(user_query)
@@ -120,7 +134,6 @@ def ask_stream(
 
     elif task_type is None:
         if direct_answer:
-            from src.iris_engine import _quality_guard
             cleaned = _quality_guard(direct_answer)
             if is_translated:
                 cleaned = translate_text(cleaned, user_lang)

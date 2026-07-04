@@ -14,14 +14,17 @@ The router emits **exactly one** JSON object and nothing else:
 
 ```json
 {
-  "route": "SEARCH | REASONING | GENERAL | MATH | CODE_SIMPLE | CODE_COMPLEX | CONTROL | VISION",
-  "keywords": "string | null",
+  "route": "SEARCH | REASONING | GENERAL | MATH | CODE_SIMPLE | CODE_COMPLEX | CONTROL",
+  "keywords": "string",
   "confidence": 0.99
 }
 ```
 
-- `route` — one of the eight enum values below. No freeform text, no markdown fences, no explanation.
-- `keywords` — only populated for `SEARCH`; otherwise `null`.
+- `route` — one of the seven enum values below. No freeform text, no markdown fences, no explanation.
+  `VISION` (Section 4.8) is not part of this enum — see the note there for why.
+- `keywords` — a short search query when `route` is `SEARCH`; an empty string `""` for every
+  other route. Never `null` — keeping every field a primitive string/number (no unions) is what
+  keeps this schema compatible with grammar-constrained decoding across llama.cpp converters.
 - `confidence` — float in `[0.0, 1.0]`, the router's calibrated certainty in this decision.
 
 **Hard constraints:**
@@ -29,9 +32,9 @@ The router emits **exactly one** JSON object and nothing else:
   for greetings or anything else — that logic belongs to the harness layer (Section 8), not
   the classification step. Keeping the contract single-purpose is what prevents the
   injection-prone "sometimes JSON, sometimes a sentence" ambiguity seen in earlier drafts.
-- If the router cannot reach a confident classification (confidence < 0.55 after both
-  filtering stages, see Section 3), it defaults to `REASONING` — never to `CONTROL` or
-  `CODE_COMPLEX`. Defaulting to the lowest-blast-radius role is the safe failure mode.
+- If the router cannot reach a confident classification (confidence < 0.55, see Section 3),
+  it defaults to `REASONING` — never to `CONTROL` or `CODE_COMPLEX`. Defaulting to the
+  lowest-blast-radius role is the safe failure mode.
 - The router does not decide *what downstream models are allowed to say*. It only decides
   *which* model receives the query. Content policy is enforced by each specialist role and
   by the harness (SmartHarness, output normalization) — not by the router pretending those
@@ -53,28 +56,39 @@ The router emits **exactly one** JSON object and nothing else:
 
 ---
 
-## 3. Two-Stage Filtering Process (Section 3)
+## 3. Classification Design: Single-Pass, Grammar-Constrained
 
-### Stage A — Deterministic rule-based pre-filter
-Cheap, regex/keyword pass. Runs first, before any weights load. Catches unambiguous cases:
-explicit code fences, explicit math operators, explicit OS-control verbs aimed at the host
-machine, explicit file/image attachments (→ `VISION` if image present and query references it).
+Two things are resolved *upstream* of `iris_001` and never reach this classification step at
+all: image-attached queries are diverted straight to the vision pipeline by the harness (see
+the `VISION` note in Section 4.8), and continuing an in-flight `CONTROL` agent loop (the
+previous turn was a tool-call `OBSERVATION:`) is treated as session-state continuation rather
+than a fresh decision.
 
-### Stage B — Neural disambiguation pass
-Only triggered when Stage A is inconclusive (multiple categories match, or none do).
-Uses constrained decoding against the enum above — the model is structurally incapable of
-emitting a route outside the eight values, which is what actually prevents hallucinated
-routes (not instructions telling it to "never refuse").
+Every other query gets exactly **one** neural classification pass — there is no separate
+regex/keyword pre-filter stage for content categories like math, search, or code. A rule
+broad enough to "catch everything" in one category reliably ends up mis-catching another: e.g.
+a blanket rule sending any query containing the word "why" to `SEARCH` would also swallow "Why
+did the Roman Empire fall?", which is this document's own `REASONING` anchor (Section 4.2).
+Disambiguation instead lives entirely in the trigger lists, override rules, and anchors below —
+the router reads them fresh on every call, so fixing a misroute means editing this document,
+not adding another regex.
 
-This two-stage design is what the paper calls out as the defense against **routing
-hallucinations** — e.g., "make a pizza" superficially matching `CODE_SIMPLE`/`CODE_COMPLEX`
-on the verb "make," but Stage A's domain co-occurrence check (no programming-language nouns,
-no file/system nouns) routes it to `REASONING` instead. That check only withholds the CODE
-route when NO digital-artifact noun is present at all; the moment an explicit artifact noun
-like "website," "app," "page," or "site" appears — even alongside a food/business word, e.g.
-"a website for a pizza restaurant" — the artifact noun is decisive and the query still routes
-to `CODE_SIMPLE`/`CODE_COMPLEX`. The co-occurrence check is a filter for the absence of any
-build target, not a vote counted against non-technical topic words.
+**Anti-hallucination mechanism:** the call to the model uses **grammar-constrained decoding**
+against the enum in Section 1 — the model is structurally incapable of sampling a token that
+would produce a route outside the seven values. That structural constraint, not an instruction
+telling the model to "never refuse," is what actually prevents hallucinated or malformed
+routes. The second line of defense is the confidence floor in Section 1: below it, the router
+defaults to `REASONING` rather than trusting a low-confidence call on a high-stakes route like
+`CONTROL` or `CODE_COMPLEX`.
+
+**Worked disambiguation ("make a pizza" vs. "make a website for a pizza restaurant"):** the
+verb "make" alone doesn't imply a coding request — "make a pizza" contains no digital-artifact
+noun at all, so it's `REASONING` (a literal recipe request). The moment an explicit artifact
+noun like "website," "app," "page," or "site" appears — even alongside a food/business word,
+e.g. "a website for a pizza restaurant" — that noun is decisive and the query routes to
+`CODE_SIMPLE`/`CODE_COMPLEX` regardless of topic. The test is the absence or presence of a
+build target, never a vote counted against non-technical topic words. See Section 4.6 for the
+full rule.
 
 ---
 
@@ -90,20 +104,20 @@ info, definitions that may be time-sensitive.
 **Anchor (Abstract concept lookup):** "What is bury the light?" → `{"route": "SEARCH", "keywords": "bury the light", "confidence": 0.98}`
 **Anchor (Video Game/Song lookup):** "what is devil trigger" → `{"route": "SEARCH", "keywords": "devil trigger", "confidence": 0.99}`
 **Note:** Static, non-time-sensitive facts that don't require freshness (e.g. "how many
-continents are there") may still route here if Stage A flags them as factual-lookup shaped;
-the downstream search harness (Section 3, three-tier fallback) handles the rest.
+continents are there") may still route here if the query is factual-lookup shaped; the
+downstream search harness handles the rest.
 
 ### 4.2 `REASONING`
 **Intent:** Deep analysis, explanations, comparisons, summarization, document reading,
-letter/character counting, "why/how does X work," advice, and **any query Stage A cannot
-confidently place elsewhere**.
+letter/character counting, "why/how does X work," advice, and **any query that doesn't
+confidently fit one of the other six routes**.
 **Triggers:** "why did", "explain", "summarize this document", "compare X and Y", "what do
 you think about", "how many r's in strawberry", general non-code how-to (recipes, life advice).
 **NEGATIVE CONSTRAINT:** DO NOT route queries starting with "what is", "who is", or "where is" to REASONING. Those MUST go to `SEARCH`. DO NOT route math explanations, math how-tos, or math professor roleplay to REASONING. Those MUST go to `MATH`.
-**Anchor:** "How many r's in strawberry?" → `{"route": "REASONING", "keywords": null, "confidence": 0.95}`
-**Anchor (disambiguation case):** "How do I make a pizza?" → `{"route": "REASONING", "keywords": null, "confidence": 0.93}`
-— the verb "make" does not co-occur with any programming or system noun, so Stage A routes
-it here rather than to `CODE_SIMPLE`/`CODE_COMPLEX`.
+**Anchor:** "How many r's in strawberry?" → `{"route": "REASONING", "keywords": "", "confidence": 0.95}`
+**Anchor (disambiguation case):** "How do I make a pizza?" → `{"route": "REASONING", "keywords": "", "confidence": 0.93}`
+— the verb "make" does not co-occur with any digital-artifact noun, so this routes here rather
+than to `CODE_SIMPLE`/`CODE_COMPLEX`.
 **Scope of the above anchor (read carefully — this is the single most common misroute):** the
 "make a pizza" example has ZERO digital-artifact noun in it — no "website," "app," "page," or
 "site." It does NOT generalize to "make/build/create a website for a pizza restaurant," "design
@@ -122,7 +136,7 @@ of closing it.
 **Intent:** Casual chat, creative writing, storytelling, poetry, roleplay, identity questions.
 **Triggers:** "tell me a story", "hello", "good morning", "who are you", "who made you".
 **NEGATIVE CONSTRAINT:** DO NOT route queries starting with "what is", "who is" (except for identity questions like "who is Iris"), or "where is" to GENERAL. Those MUST go to `SEARCH`.
-**Anchor:** "Write a poem about the ocean." → `{"route": "GENERAL", "keywords": null, "confidence": 0.98}`
+**Anchor:** "Write a poem about the ocean." → `{"route": "GENERAL", "keywords": "", "confidence": 0.98}`
 **Greeting handling:** Simple greetings ("hi", "hello") still receive a full route classification
 to `GENERAL` — the harness layer, not the router, decides whether to short-circuit with a
 canned reply. Keeping that decision out of the classification contract removes a second
@@ -134,16 +148,16 @@ physics calculations, geometry, combinatorics, math word problems.
 **Triggers:** "calculate", "solve", "derivative", "integral", "prove that", bare arithmetic
 expressions, "differential equation", "algebra", "calculus", "math", geometry terms ("circle", "triangle"), formulas (e.g. `$n$`).
 **OVERRIDE RULE:** ANY QUERY ASKING HOW TO SOLVE A MATH PROBLEM, ASKING FOR AN EXPLANATION OF A MATH CONCEPT (e.g. differential equations, linear algebra, calculus), OR INVOLVING MATH WORD PROBLEMS (e.g. geometry, combinatorics) MUST ALWAYS BE ROUTED TO `MATH`, NOT `REASONING` OR `GENERAL`.
-**Anchor:** "Prove that there are infinitely many primes." → `{"route": "MATH", "keywords": null, "confidence": 0.96}`
-**Anchor (Math Word Problem):** "You are given a positive integer $n$. There are $n$ points placed distinctively on the circumference of a circle. Into how many distinct regions is the interior divided?" → `{"route": "MATH", "keywords": null, "confidence": 0.98}`
-**Anchor (Math Explanation):** "How do I find the general solution to a second-order linear homogeneous differential equation with constant coefficients?" → `{"route": "MATH", "keywords": null, "confidence": 0.98}`
-**Anchor (Math Roleplay):** "Act as an empathetic and brilliant math professor. I want to learn how to solve differential equations." → `{"route": "MATH", "keywords": null, "confidence": 0.99}`
+**Anchor:** "Prove that there are infinitely many primes." → `{"route": "MATH", "keywords": "", "confidence": 0.96}`
+**Anchor (Math Word Problem):** "You are given a positive integer $n$. There are $n$ points placed distinctively on the circumference of a circle. Into how many distinct regions is the interior divided?" → `{"route": "MATH", "keywords": "", "confidence": 0.98}`
+**Anchor (Math Explanation):** "How do I find the general solution to a second-order linear homogeneous differential equation with constant coefficients?" → `{"route": "MATH", "keywords": "", "confidence": 0.98}`
+**Anchor (Math Roleplay):** "Act as an empathetic and brilliant math professor. I want to learn how to solve differential equations." → `{"route": "MATH", "keywords": "", "confidence": 0.99}`
 ### 4.5 `CODE_SIMPLE`
 **Intent:** Isolated, single-file programming tasks. Includes canvas/SVG/procedural-art/animation
 requests per the paper's explicit override.
 **Triggers:** "write a python function", "fix this regex", "create an HTML button", "bash
 script to move files", "canvas animation".
-**Anchor:** "Make a canvas animation of a bouncing ball." → `{"route": "CODE_SIMPLE", "keywords": null, "confidence": 0.95}`
+**Anchor:** "Make a canvas animation of a bouncing ball." → `{"route": "CODE_SIMPLE", "keywords": "", "confidence": 0.95}`
 
 ### 4.6 `CODE_COMPLEX`
 **Intent:** Multi-file projects, full web/desktop apps, large refactors, pasted tracebacks from
@@ -161,7 +175,7 @@ a pizza?"), which contains no digital-artifact noun at all — it's a request fo
 not a coding request. The test: does the query name a digital artifact (website, app, page, site,
 program, script, tool)? If yes, that noun determines the route regardless of topic/domain. If no
 such noun is present, fall through to the normal `REASONING`/`GENERAL` logic.
-**Anchor:** "Build a complete full-stack app with React and Node." → `{"route": "CODE_COMPLEX", "keywords": null, "confidence": 0.97}`
+**Anchor:** "Build a complete full-stack app with React and Node." → `{"route": "CODE_COMPLEX", "keywords": "", "confidence": 0.97}`
 **Disambiguation rule:** "write a script to delete files" → `CODE_COMPLEX`/`CODE_SIMPLE`
 (they're asking for code). "Delete the files in my downloads folder" → `CONTROL` (they're
 asking the system to *act*). The distinguishing test is asked-for-code vs. asked-for-action,
@@ -171,7 +185,7 @@ not the presence of the word "delete."
 **Intent:** Direct manipulation of the host OS, hardware, or local apps.
 **Triggers:** "open Spotify", "set brightness", "check battery", "send a WhatsApp message",
 "empty trash", "restart".
-**Anchor:** "Open my system settings and toggle Wi-Fi off." → `{"route": "CONTROL", "keywords": null, "confidence": 0.96}`
+**Anchor:** "Open my system settings and toggle Wi-Fi off." → `{"route": "CONTROL", "keywords": "", "confidence": 0.96}`
 **Important — this is a power-granting route, not just a content category.** Per Section 3 of
 the paper, `CONTROL` queries still pass through `iris_002`'s own sandbox validation and
 error-ceiling checks (Section 8.1) before any host-level execution happens. The triage router
@@ -184,7 +198,12 @@ this spec.
 **Intent:** Any query referencing an attached/uploaded image, requiring visual question
 answering.
 **Triggers:** presence of an image attachment + a question about its contents.
-**Anchor:** [image attached] "What's in this picture?" → `{"route": "VISION", "keywords": null, "confidence": 0.98}`
+**Anchor:** [image attached] "What's in this picture?" → routed to `iris_007` directly.
+**Note — not part of `iris_001`'s own output enum:** image-attached queries are detected and
+diverted to the vision pipeline by the harness *before* the query ever reaches the triage
+router (see Section 1's enum, which is the seven text-classification routes only). `iris_001`
+never needs to, and cannot, emit `VISION` itself; it's listed here purely so this document
+stays a complete reference for the full `iris_00X` role space described in Section 2.
 
 ---
 
@@ -194,19 +213,20 @@ The goal stated for this spec was a router that's "100% stable" and doesn't hall
 Two honest caveats worth stating plainly:
 
 1. **No classifier is literally 100% stable.** What actually moves the needle is (a) a small,
-   fixed enum the model is constrained to (via grammar-constrained decoding, not just
-   instructions), (b) a deterministic pre-filter that resolves the easy majority of cases
-   before the neural pass ever runs, and (c) a safe default (`REASONING`) for the residual
-   ambiguous cases — rather than guessing at a high-stakes route like `CONTROL` or
-   `CODE_COMPLEX`. That combination is what the paper's Section 3 actually describes, and
-   it's what this spec implements.
+   fixed enum the model is constrained to via grammar-constrained decoding, not just
+   instructions, and (b) a safe default (`REASONING`) whenever the model's own reported
+   confidence drops below the floor in Section 1 — rather than guessing at a high-stakes route
+   like `CONTROL` or `CODE_COMPLEX`. There is deliberately no separate deterministic
+   keyword/regex pre-filter stage: a rule broad enough to "catch everything" in one category
+   reliably mis-catches another (see Section 3), so the grammar constraint plus the confidence
+   floor carry the whole anti-hallucination burden instead.
 2. **Instructing a model to "never refuse" does not improve routing accuracy** — it just
    removes a safety check the downstream specialist role would otherwise apply. That
    instruction has been deliberately left out of this spec. If you want the router itself to
    be robust against adversarial inputs (e.g., a document or webpage containing embedded
    instructions trying to manipulate the route or impersonate a system message), the
    strongest mitigation is the constrained-decoding enum in Section 1 — an attacker can say
-   anything they want, but the output token space literally only contains eight valid routes.
+   anything they want, but the output token space literally only contains seven valid routes.
 
 ---
 

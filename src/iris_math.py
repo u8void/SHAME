@@ -2,6 +2,7 @@ import re
 from typing import Generator, Dict, Any
 from src.iris_engine import ModelRole, load_model, unload_model, _keep_loaded, _stream_tokens, load_generation_config
 from src.iris_engine import detect_user_language, _language_directive
+from src.iris_engine import _quality_guard, translate_text
 
 
 def get_math_prompt(identity: str) -> str:
@@ -12,6 +13,16 @@ def get_math_prompt(identity: str) -> str:
         "RESPONSE FORMAT:\n"
         "- Put ALL your step-by-step reasoning, work, and derivations inside <think>...</think> tags.\n"
         "- After </think>, output ONLY the clean final solution and answer (or your concise identity answer). Everything outside </think> is shown directly to the user.\n"
+        "SOLUTION DISCIPLINE (MANDATORY — violation produces wrong answers):\n"
+        "1. PLAN BEFORE COMPUTING: Inside <think>, start by listing every case or sub-problem you need to handle. "
+        "Only after the full plan is written should you begin computing each case in turn.\n"
+        "2. NO BACKTRACKING: Work carefully the first time. NEVER use 'Wait', 'Hold on', 'Let me reconsider', "
+        "'Actually', or any mid-answer self-correction. If you feel the urge to correct yourself, it means "
+        "you did not plan carefully enough. Start the <think> block over rather than patching in corrections.\n"
+        "3. VERIFY EVERY SOLUTION: After solving for each answer, substitute it back into the original equation "
+        "and confirm it satisfies it before moving on. State the verification explicitly (e.g. 'Check: $7^2 - 5^2 = 49 - 25 = 24$ ✓').\n"
+        "4. COMPLETE ALL CASES: If a problem has multiple cases (factor pairs, sign combinations, etc.), "
+        "work through every case to completion before writing your final answer list.\n"
         "LATEX FORMATTING RULES:\n"
         "1. You MUST use FULL, flawless LaTeX for all mathematics.\n"
         "2. For inline math, ALWAYS use $...$ (never \\( ... \\)). Do NOT put spaces inside the delimiters (e.g., $x$ not $ x $).\n"
@@ -90,12 +101,14 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     general_query = (
         f"The math core model (003) solved the following mathematical problem:\n"
         f"User Query: {user_query}\n\n"
-        f"Here are the calculations and reasoning step-by-step from 003:\n"
+        f"Here are the verified calculations and reasoning from 003:\n"
         f"--- START CALCULATIONS ---\n"
         f"{math_solution}\n"
         f"--- END CALCULATIONS ---\n\n"
-        f"Now, explain this solution step-by-step clearly and give the final answer with explanation. "
-        f"Use flawless LaTeX for mathematical expressions."
+        f"Your job is to present and explain this solution clearly to the user. "
+        f"CRITICAL: Do NOT re-derive the problem yourself. Do NOT second-guess or redo the math model's calculations. "
+        f"Trust the work above as correct and focus entirely on explaining it in a clear, structured, and elegant way. "
+        f"Use flawless LaTeX for all mathematical expressions."
     )
 
     general_messages = []
@@ -136,11 +149,9 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     # Strip any remaining HTML tags
     visible_answer = re.sub(r'<[^>]+>', '', visible_answer).strip()
 
-    from src.iris_engine import _quality_guard
     cleaned = _quality_guard(visible_answer) if visible_answer else ""
 
     if user_lang != "English" and cleaned:
-        from src.iris_engine import translate_text
         yield {"type": "status", "content": f"Translating to {user_lang}..."}
         cleaned = translate_text(cleaned, user_lang)
 
