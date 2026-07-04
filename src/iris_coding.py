@@ -1,6 +1,5 @@
 import re
 import os
-import random
 import logging
 from typing import Dict, List, Any, Generator, Optional
 
@@ -529,8 +528,7 @@ def _run_complex_coding(
         {"role": "user", "content": code_content}
     ]
     full_code = ""
-    _complex_code_temp = 0.7 if (isinstance(settings, dict) and settings.get('_web_design_mode')) else 0.4
-    for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=_complex_code_temp, think_mode="show", settings=settings):
+    for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=0.4, think_mode="show", settings=settings):
         if user_lang == "English" or ev["type"] != "token":
             yield ev
         if ev["type"] == "token":
@@ -735,11 +733,9 @@ def generate_internal_code(
 
 def _run_simple_coding(user_query: str, history: list, optimized: list, settings: dict) -> Generator[Dict[str, str], None, None]:
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
-    # Use higher temperature for web design to produce varied creative outputs
-    _code_temp = 0.6 if settings.get('_web_design_mode') else 0.2
     yield {"type": "status", "content": "Writing code..."}
     full = ""
-    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=_code_temp, think_mode="show", settings=settings):
+    for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings):
         if user_lang == "English" or ev["type"] != "token":
             yield ev
         if ev["type"] == "token":
@@ -877,162 +873,6 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
     yield {"type": "raw_response", "content": full}
 
 
-# ─── Design Variety System ───────────────────────────────────────────────
-# Each web design request gets a randomly selected theme to prevent
-# the model from always defaulting to the same zinc/indigo palette.
-
-_WEB_DESIGN_RE = re.compile(
-    r'(?i)\b(website|web\s*site|web\s*page|webpage|landing\s*page|html|'
-    r'web\s*app|portfolio|homepage|web\s*design|web\s*interface)\b'
-)
-
-_DESIGN_THEMES = [
-    {
-        "name": "Midnight Emerald",
-        "primary": "emerald", "secondary": "teal",
-        "bg": "slate-950", "card_bg": "slate-900",
-        "font_heading": "'Plus Jakarta Sans'", "font_body": "'Inter'",
-        "glow_color": "emerald-500/15",
-    },
-    {
-        "name": "Sunset Rose",
-        "primary": "rose", "secondary": "orange",
-        "bg": "stone-950", "card_bg": "stone-900",
-        "font_heading": "'Outfit'", "font_body": "'DM Sans'",
-        "glow_color": "rose-500/15",
-    },
-    {
-        "name": "Arctic Cyan",
-        "primary": "cyan", "secondary": "blue",
-        "bg": "gray-950", "card_bg": "gray-900",
-        "font_heading": "'Space Grotesk'", "font_body": "'Inter'",
-        "glow_color": "cyan-500/15",
-    },
-    {
-        "name": "Royal Violet",
-        "primary": "violet", "secondary": "fuchsia",
-        "bg": "zinc-950", "card_bg": "zinc-900",
-        "font_heading": "'Sora'", "font_body": "'Inter'",
-        "glow_color": "violet-500/15",
-    },
-    {
-        "name": "Amber Luxe",
-        "primary": "amber", "secondary": "yellow",
-        "bg": "neutral-950", "card_bg": "neutral-900",
-        "font_heading": "'Playfair Display'", "font_body": "'Lato'",
-        "glow_color": "amber-500/15",
-    },
-    {
-        "name": "Ocean Blue",
-        "primary": "blue", "secondary": "sky",
-        "bg": "slate-950", "card_bg": "slate-900",
-        "font_heading": "'Montserrat'", "font_body": "'Source Sans 3'",
-        "glow_color": "blue-500/15",
-    },
-    {
-        "name": "Coral Flame",
-        "primary": "red", "secondary": "orange",
-        "bg": "zinc-950", "card_bg": "zinc-900",
-        "font_heading": "'Poppins'", "font_body": "'Nunito'",
-        "glow_color": "red-500/15",
-    },
-    {
-        "name": "Forest Pine",
-        "primary": "green", "secondary": "lime",
-        "bg": "stone-950", "card_bg": "stone-900",
-        "font_heading": "'Raleway'", "font_body": "'Open Sans'",
-        "glow_color": "green-500/15",
-    },
-    {
-        "name": "Neon Pink",
-        "primary": "pink", "secondary": "purple",
-        "bg": "gray-950", "card_bg": "gray-900",
-        "font_heading": "'Urbanist'", "font_body": "'Work Sans'",
-        "glow_color": "pink-500/15",
-    },
-    {
-        "name": "Golden Dusk",
-        "primary": "yellow", "secondary": "amber",
-        "bg": "neutral-950", "card_bg": "neutral-900",
-        "font_heading": "'Cinzel'", "font_body": "'Cormorant Garamond'",
-        "glow_color": "yellow-500/15",
-    },
-    {
-        "name": "Steel Indigo",
-        "primary": "indigo", "secondary": "violet",
-        "bg": "slate-950", "card_bg": "slate-900",
-        "font_heading": "'Manrope'", "font_body": "'Inter'",
-        "glow_color": "indigo-500/15",
-    },
-    {
-        "name": "Tropical Teal",
-        "primary": "teal", "secondary": "emerald",
-        "bg": "zinc-950", "card_bg": "zinc-900",
-        "font_heading": "'Lexend'", "font_body": "'Rubik'",
-        "glow_color": "teal-500/15",
-    },
-]
-
-_LAYOUT_STYLES = [
-    "Use asymmetric hero layout with text on the left and a decorative gradient shape on the right.",
-    "Use a centered hero with a large bold headline stacked above dual CTA buttons and floating glassmorphic cards.",
-    "Use a split-screen hero with a gradient mesh background on one side and content on the other.",
-    "Use a full-width hero with an animated gradient background and text overlay.",
-    "Use a minimal hero with oversized typography and ample whitespace.",
-    "Use a hero with a subtle diagonal divider separating the dark top from a slightly lighter bottom section.",
-    "Use a hero with floating badge elements and staggered text reveal animations.",
-    "Use a hero with a dot-grid or subtle pattern overlay for texture.",
-]
-
-_NAV_STYLES = [
-    "Use a transparent floating nav bar with rounded corners and a subtle border, centered on the page with max-w-5xl.",
-    "Use a full-width sticky nav bar with a solid dark background and a glowing accent underline on the active link.",
-    "Use a minimal nav bar with the logo left-aligned and a single prominent CTA button on the right.",
-    "Use a nav bar with pill-shaped nav links that highlight on hover.",
-]
-
-
-def _is_web_design_request(query: str) -> bool:
-    """Check if the user query is asking for a website or web design."""
-    return bool(_WEB_DESIGN_RE.search(query))
-
-
-def _has_explicit_design_choices(query: str) -> bool:
-    """Detect if the user query has explicit color, font, or theme instructions."""
-    design_preference_pattern = re.compile(
-        r'(?i)\b(color|colour|colors|colours|theme|themes|font|fonts|palette|palettes|style|styling|css|custom|hex|rgb|hsl|bg-|text-|border-|'
-        r'red|blue|green|yellow|orange|purple|indigo|teal|cyan|pink|rose|emerald|amber|fuchsia|sky|lime|violet|gray|grey|slate|zinc|black|white|gold|cream|beige|silver)\b'
-    )
-    return bool(design_preference_pattern.search(query))
-
-
-def _generate_design_directive() -> str:
-    """Generate a random design directive to inject variety into web design outputs."""
-    theme = random.choice(_DESIGN_THEMES)
-    layout = random.choice(_LAYOUT_STYLES)
-    nav = random.choice(_NAV_STYLES)
-
-    directive = (
-        f"\n\n[DESIGN DIRECTIVE — MANDATORY FOR THIS REQUEST]\n"
-        f"You MUST use the following design theme for this website. Do NOT deviate from it:\n"
-        f"- Theme Name: {theme['name']}\n"
-        f"- Primary Color: {theme['primary']} (use {theme['primary']}-400 through {theme['primary']}-600 for accents, gradients, and highlights)\n"
-        f"- Secondary Color: {theme['secondary']} (use {theme['secondary']}-400 through {theme['secondary']}-600 for gradient endpoints and hover states)\n"
-        f"- Background: bg-{theme['bg']} for the page body\n"
-        f"- Card Background: bg-{theme['card_bg']} for cards and sections\n"
-        f"- Glow Orbs: Use bg-{theme['glow_color']} for ambient glow effects\n"
-        f"- Heading Font: {theme['font_heading']} (import from Google Fonts)\n"
-        f"- Body Font: {theme['font_body']} (import from Google Fonts)\n"
-        f"- Hero Gradient: bg-gradient-to-r from-{theme['primary']}-400 to-{theme['secondary']}-400 for highlighted text\n"
-        f"- Button Gradient: bg-gradient-to-r from-{theme['primary']}-500 to-{theme['secondary']}-600\n"
-        f"- Button Shadow: shadow-lg shadow-{theme['primary']}-500/20\n"
-        f"- Layout: {layout}\n"
-        f"- Navigation: {nav}\n"
-        f"DO NOT use indigo/purple as the default. The theme above is your ONLY palette.\n"
-    )
-    logger.info(f"[Design Variety] Selected theme: {theme['name']} ({theme['primary']}/{theme['secondary']})")
-    return directive
-
 
 def run_stream(user_query: str, history: list, retriever: Any, settings: dict, is_complex: bool = False) -> Generator[Dict[str, str], None, None]:
     if settings is None:
@@ -1040,11 +880,6 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
     else:
         # Create a copy of the settings dictionary to avoid side effects
         settings = dict(settings)
-
-    # Detect if this is a web design request for higher creativity
-    is_web_design = _is_web_design_request(user_query)
-    if is_web_design:
-        settings['_web_design_mode'] = True
         
     # 1. RAG
     context = ""
@@ -1063,10 +898,6 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
                 context = context[:12000] + "\n\n...[TRUNCATED FOR PERFORMANCE]..."
             
     final_query = user_query
-
-    # Inject randomized design directive for web design requests if user didn't specify custom design choices
-    if is_web_design and not _has_explicit_design_choices(user_query):
-        final_query += _generate_design_directive()
 
     if context:
         final_query = (
