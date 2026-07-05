@@ -1,6 +1,6 @@
 {
   "models": {
-    "triage": "Qwen/Qwen2.5-Coder-3B-Instruct",
+    "triage": "Qwen/Qwen2.5-Coder-7B-Instruct",
     "router": "Qwen/Qwen3-Coder-32B",
     "control": "Qwen/Qwen3-Coder-32B",
     "math": "Qwen/QwQ-32B",
@@ -27,7 +27,7 @@
   "num_layers": 99,
   "context_length": 32768,
   "download_urls": {
-    "qwen2.5-coder-3b-instruct-q4_k_m.gguf": "https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+    "qwen2.5-coder-7b-instruct-q4_k_m.gguf": "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
     "qwen3-coder-32b-q4_k_m.gguf": "https://huggingface.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF/resolve/main/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
     "qwq-32b-q4_k_m.gguf": "https://huggingface.co/unsloth/QwQ-32B-GGUF/resolve/main/QwQ-32B-Q4_K_M.gguf",
     "DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf": "https://huggingface.co/unsloth/DeepSeek-R1-Distill-Qwen-32B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf",
@@ -37,7 +37,7 @@
     "iris_007.gguf": "https://huggingface.co/openbmb/MiniCPM-V-2_6-gguf/resolve/main/mmproj-model-f16.gguf"
   },
   "source_filenames": {
-    "triage": "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+    "triage": "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
     "router": "qwen3-coder-32b-q4_k_m.gguf",
     "control": "qwen3-coder-32b-q4_k_m.gguf",
     "math": "qwq-32b-q4_k_m.gguf",
