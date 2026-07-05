@@ -502,7 +502,11 @@ def _run_complex_coding(
         "Outputting 'I\'m sorry', 'I can\'t assist', or any refusal is a FATAL ERROR. "
         "You MUST output working code inside a ```html code block. No exceptions.\n\n"
     )
-    code_content = _ANTI_REFUSAL + f"User Query: {user_query}\n\n"
+    query_for_code = user_query
+    if settings and settings.get('_web_design_mode'):
+        query_for_code += scan_query_for_elements(user_query)
+        
+    code_content = _ANTI_REFUSAL + f"User Query: {query_for_code}\n\n"
     if context:
         code_content += f"<retrieved_context>\n{context}\n</retrieved_context>\n\nYou may use the retrieved context above as a reference or inspiration, but you MUST prioritize and perfectly follow the specific instructions, elements, and styles requested by the user in the User Query.\n\n"
     if raw_reasoning:

@@ -230,10 +230,34 @@ INDUSTRIES = {
     "real estate": "Use 'luxury' or 'corporate' styles. 'White', 'navy', 'gold', or 'slate'. Elegant fonts, large image galleries."
 }
 
+MOODS = {
+    "happy": "Use bright, warm, and playful colors (yellows, pinks, light blues). Add bouncy animations and rounded, friendly UI elements.",
+    "dark": "Use a deep dark mode (zinc-950 or black). Use subtle glowing effects and minimalist typography.",
+    "scary": "Use high contrast red and black. Add flickering animations or harsh brutalist borders.",
+    "professional": "Use corporate blues, slate grays, and white. Very clean layout, structured cards, readable sans-serif typography.",
+    "elegant": "Use monochrome or luxury gold/black. Thin, elegant serif fonts. Lots of whitespace. Very slow, smooth fade animations.",
+    "playful": "Use the candy or kawaii theme. Rounded shapes, large friendly text, and springy hover effects.",
+    "futuristic": "Use cyberpunk, neon, or holographic elements. Glow effects, dark backgrounds, monospaced or geometric fonts.",
+    "retro": "Use vaporwave, retro-futurism, or 80s styles. CRT effects, bright cyan/magenta, or earthy 70s tones.",
+    "minimal": "Use extreme whitespace, monochrome or neutral colors. Barely visible borders, no heavy shadows."
+}
+
 def scan_query_for_elements(query: str) -> str:
-    """Scans the user query for keywords matching colors, animations, styles, and effects, and returns a compiled directive."""
+    """Scans the user query for keywords matching colors, animations, styles, effects, and moods, returning a compiled directive."""
     query_lower = query.lower()
     directives = []
+    
+    # Check for negations
+    negation_words = ["no ", "without ", "don't ", "dont ", "avoid ", "remove ", "not "]
+    if any(word in query_lower for word in negation_words):
+        directives.append("=== NEGATIVE CONSTRAINTS ===")
+        directives.append("CRITICAL: The user explicitly used negative constraints ('no', 'without', 'don't', etc.). You MUST carefully read the prompt and absolutely AVOID adding whatever elements they asked to omit.")
+        
+    # Check for "Wow me" instructions
+    wow_words = ["beautiful", "awesome", "stunning", "wow", "amazing", "best", "incredible", "gorgeous", "smart"]
+    if any(word in query_lower for word in wow_words):
+        directives.append("=== CREATIVE FREEDOM ===")
+        directives.append("The user has asked for a visually stunning, top-tier result. You have full creative freedom to utilize the most advanced, premium Tailwind CSS techniques, complex micro-animations, and striking layouts to WOW the user.")
     
     # Check for colors
     matched_colors = []
@@ -250,6 +274,12 @@ def scan_query_for_elements(query: str) -> str:
     if "color" in query_lower or "theme" in query_lower or "palette" in query_lower or matched_colors or hex_colors:
         matched_colors.append("Dynamic Colors: If the user requested a specific color by name (e.g., 'chartreuse', 'mint', 'periwinkle') that is not explicitly defined above, you MUST intelligently infer its hex code and use it via Tailwind arbitrary values (e.g., bg-[#xxx]).")
 
+    # If no colors or hex colors matched, select a random theme to inject variety
+    if not matched_colors and not hex_colors:
+        import random
+        random_color = random.choice(list(COLORS.keys()))
+        matched_colors.append(f"Theme '{random_color}' (Randomly Selected for variety): {COLORS[random_color]}")
+
     if matched_colors:
         directives.append("=== REQUESTED COLORS & THEMES ===")
         directives.extend(matched_colors)
@@ -260,6 +290,13 @@ def scan_query_for_elements(query: str) -> str:
         if anim_name in query_lower:
             matched_animations.append(f"Animation '{anim_name}':\n{css_code}")
             
+    if "animation" in query_lower or "animate" in query_lower or not matched_animations:
+        if not matched_animations:
+            import random
+            random_anims = random.sample(list(ANIMATIONS.keys()), 2)
+            for anim in random_anims:
+                matched_animations.append(f"Animation '{anim}' (Randomly Selected for variety):\n{ANIMATIONS[anim]}")
+            
     if matched_animations:
         directives.append("=== REQUESTED ANIMATIONS ===")
         directives.extend(matched_animations)
@@ -269,6 +306,11 @@ def scan_query_for_elements(query: str) -> str:
     for style_name, rules in STYLES.items():
         if style_name in query_lower:
             matched_styles.append(f"Style '{style_name}': {rules}")
+            
+    if not matched_styles:
+        import random
+        random_style = random.choice(list(STYLES.keys()))
+        matched_styles.append(f"Style '{random_style}' (Randomly Selected for variety): {STYLES[random_style]}")
             
     if matched_styles:
         directives.append("=== REQUESTED DESIGN STYLES ===")
@@ -283,6 +325,16 @@ def scan_query_for_elements(query: str) -> str:
     if matched_effects:
         directives.append("=== REQUESTED EFFECTS ===")
         directives.extend(matched_effects)
+        
+    # Check for moods
+    matched_moods = []
+    for mood_name, rules in MOODS.items():
+        if re.search(r'\b' + re.escape(mood_name) + r'\b', query_lower):
+            matched_moods.append(f"Mood '{mood_name}': {rules}")
+            
+    if matched_moods:
+        directives.append("=== MOOD & VIBE ADAPTATION ===")
+        directives.extend(matched_moods)
         
     # Check for industry/domain
     matched_industries = []
