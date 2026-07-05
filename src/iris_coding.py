@@ -9,6 +9,7 @@ from src.iris_engine import ModelRole, TaskType, load_model, unload_model, _keep
 from src.iris_engine import _detect_language, translate_text, _language_directive, ROLE_CTX, DEFAULT_CTX
 from src.harness import apply_smart_harness_code, apply_code_specific as _apply_harness, HermesAgentLoop, build_hermes_text_prompt, HERMES_AGENT_SYSTEM_PROMPT, parse_hermes_tool_call, HermesToolRegistry, HermesResultAnalyzer
 from src.syntax_checker import check_syntax
+from src.elements_db import scan_query_for_elements
 
 SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills", "coding")
 
@@ -503,7 +504,7 @@ def _run_complex_coding(
     )
     code_content = _ANTI_REFUSAL + f"User Query: {user_query}\n\n"
     if context:
-        code_content += f"<retrieved_context>\n{context}\n</retrieved_context>\n\nMake sure your implementation heavily utilizes the instructions, themes, and patterns in the retrieved context above.\n\n"
+        code_content += f"<retrieved_context>\n{context}\n</retrieved_context>\n\nYou may use the retrieved context above as a reference or inspiration, but you MUST prioritize and perfectly follow the specific instructions, elements, and styles requested by the user in the User Query.\n\n"
     if raw_reasoning:
         code_content += (
             f"Structured Architecture Blueprint:\n{raw_reasoning}\n\n"
@@ -879,143 +880,9 @@ _WEB_DESIGN_RE = re.compile(
     r'web\s*app|portfolio|homepage|web\s*design|web\s*interface)\b'
 )
 
-_DESIGN_THEMES = [
-    {
-        "name": "Midnight Emerald",
-        "primary": "emerald", "secondary": "teal",
-        "bg": "slate-950", "card_bg": "slate-900",
-        "font_heading": "'Plus Jakarta Sans'", "font_body": "'Inter'",
-        "glow_color": "emerald-500/15",
-    },
-    {
-        "name": "Sunset Rose",
-        "primary": "rose", "secondary": "orange",
-        "bg": "stone-950", "card_bg": "stone-900",
-        "font_heading": "'Outfit'", "font_body": "'DM Sans'",
-        "glow_color": "rose-500/15",
-    },
-    {
-        "name": "Arctic Cyan",
-        "primary": "cyan", "secondary": "blue",
-        "bg": "gray-950", "card_bg": "gray-900",
-        "font_heading": "'Space Grotesk'", "font_body": "'Inter'",
-        "glow_color": "cyan-500/15",
-    },
-    {
-        "name": "Royal Violet",
-        "primary": "violet", "secondary": "fuchsia",
-        "bg": "zinc-950", "card_bg": "zinc-900",
-        "font_heading": "'Sora'", "font_body": "'Inter'",
-        "glow_color": "violet-500/15",
-    },
-    {
-        "name": "Amber Luxe",
-        "primary": "amber", "secondary": "yellow",
-        "bg": "neutral-950", "card_bg": "neutral-900",
-        "font_heading": "'Playfair Display'", "font_body": "'Lato'",
-        "glow_color": "amber-500/15",
-    },
-    {
-        "name": "Ocean Blue",
-        "primary": "blue", "secondary": "sky",
-        "bg": "slate-950", "card_bg": "slate-900",
-        "font_heading": "'Montserrat'", "font_body": "'Source Sans 3'",
-        "glow_color": "blue-500/15",
-    },
-    {
-        "name": "Coral Flame",
-        "primary": "red", "secondary": "orange",
-        "bg": "zinc-950", "card_bg": "zinc-900",
-        "font_heading": "'Poppins'", "font_body": "'Nunito'",
-        "glow_color": "red-500/15",
-    },
-    {
-        "name": "Forest Pine",
-        "primary": "green", "secondary": "lime",
-        "bg": "stone-950", "card_bg": "stone-900",
-        "font_heading": "'Raleway'", "font_body": "'Open Sans'",
-        "glow_color": "green-500/15",
-    },
-    {
-        "name": "Neon Pink",
-        "primary": "pink", "secondary": "purple",
-        "bg": "gray-950", "card_bg": "gray-900",
-        "font_heading": "'Urbanist'", "font_body": "'Work Sans'",
-        "glow_color": "pink-500/15",
-    },
-    {
-        "name": "Golden Dusk",
-        "primary": "yellow", "secondary": "amber",
-        "bg": "neutral-950", "card_bg": "neutral-900",
-        "font_heading": "'Cinzel'", "font_body": "'Cormorant Garamond'",
-        "glow_color": "yellow-500/15",
-    },
-    {
-        "name": "Steel Indigo",
-        "primary": "indigo", "secondary": "violet",
-        "bg": "slate-950", "card_bg": "slate-900",
-        "font_heading": "'Manrope'", "font_body": "'Inter'",
-        "glow_color": "indigo-500/15",
-    },
-    {
-        "name": "Tropical Teal",
-        "primary": "teal", "secondary": "emerald",
-        "bg": "zinc-950", "card_bg": "zinc-900",
-        "font_heading": "'Lexend'", "font_body": "'Rubik'",
-        "glow_color": "teal-500/15",
-    },
-]
-
-_LAYOUT_STYLES = [
-    "Use asymmetric hero layout with text on the left and a decorative gradient shape on the right.",
-    "Use a centered hero with a large bold headline stacked above dual CTA buttons and floating glassmorphic cards.",
-    "Use a split-screen hero with a gradient mesh background on one side and content on the other.",
-    "Use a full-width hero with an animated gradient background and text overlay.",
-    "Use a minimal hero with oversized typography and ample whitespace.",
-    "Use a hero with a subtle diagonal divider separating the dark top from a slightly lighter bottom section.",
-    "Use a hero with floating badge elements and staggered text reveal animations.",
-    "Use a hero with a dot-grid or subtle pattern overlay for texture.",
-]
-
-_NAV_STYLES = [
-    "Use a transparent floating nav bar with rounded corners and a subtle border, centered on the page with max-w-5xl.",
-    "Use a full-width sticky nav bar with a solid dark background and a glowing accent underline on the active link.",
-    "Use a minimal nav bar with the logo left-aligned and a single prominent CTA button on the right.",
-    "Use a nav bar with pill-shaped nav links that highlight on hover.",
-]
-
-
 def _is_web_design_request(query: str) -> bool:
     """Check if the user query is asking for a website or web design."""
     return bool(_WEB_DESIGN_RE.search(query))
-
-
-def _generate_design_directive() -> str:
-    """Generate a random design directive to inject variety into web design outputs."""
-    theme = random.choice(_DESIGN_THEMES)
-    layout = random.choice(_LAYOUT_STYLES)
-    nav = random.choice(_NAV_STYLES)
-
-    directive = (
-        f"\n\n[DESIGN DIRECTIVE — MANDATORY FOR THIS REQUEST]\n"
-        f"You MUST use the following design theme for this website. Do NOT deviate from it:\n"
-        f"- Theme Name: {theme['name']}\n"
-        f"- Primary Color: {theme['primary']} (use {theme['primary']}-400 through {theme['primary']}-600 for accents, gradients, and highlights)\n"
-        f"- Secondary Color: {theme['secondary']} (use {theme['secondary']}-400 through {theme['secondary']}-600 for gradient endpoints and hover states)\n"
-        f"- Background: bg-{theme['bg']} for the page body\n"
-        f"- Card Background: bg-{theme['card_bg']} for cards and sections\n"
-        f"- Glow Orbs: Use bg-{theme['glow_color']} for ambient glow effects\n"
-        f"- Heading Font: {theme['font_heading']} (import from Google Fonts)\n"
-        f"- Body Font: {theme['font_body']} (import from Google Fonts)\n"
-        f"- Hero Gradient: bg-gradient-to-r from-{theme['primary']}-400 to-{theme['secondary']}-400 for highlighted text\n"
-        f"- Button Gradient: bg-gradient-to-r from-{theme['primary']}-500 to-{theme['secondary']}-600\n"
-        f"- Button Shadow: shadow-lg shadow-{theme['primary']}-500/20\n"
-        f"- Layout: {layout}\n"
-        f"- Navigation: {nav}\n"
-        f"DO NOT use indigo/purple as the default. The theme above is your ONLY palette.\n"
-    )
-    logger.info(f"[Design Variety] Selected theme: {theme['name']} ({theme['primary']}/{theme['secondary']})")
-    return directive
 
 
 def run_stream(user_query: str, history: list, retriever: Any, settings: dict, is_complex: bool = False) -> Generator[Dict[str, str], None, None]:
@@ -1050,12 +917,12 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
 
     # Inject randomized design directive for web design requests
     if is_web_design:
-        final_query += _generate_design_directive()
+        final_query += scan_query_for_elements(user_query)
 
     if context:
         final_query = (
             f"<retrieved_context>\n{context}\n</retrieved_context>\n\n"
-            f"You MUST use the reference architectures, layout patterns, and gorgeous single-file website templates provided in the retrieved context above to implement the gorgeous design, animations, typography, and styling for the website.\n\n"
+            f"You may use the reference architectures and templates provided in the retrieved context above as a guide, but you MUST prioritize and perfectly fulfill the exact requirements, design, animations, and styling requested by the user in their query.\n\n"
             f"{final_query}"
         )
         
