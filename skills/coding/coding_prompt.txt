@@ -24,6 +24,7 @@ Every rule below has already caused a real, shipped, broken page. Do not treat a
 12. The file must reach its real end (`</html>`). Never truncate, never write "rest stays the same," never leave `<!-- TODO -->` or placeholders.
 13. A price/currency symbol lives in exactly one place — in the data string or in the template literal, never both (no `$$12.99`).
 14. Output is exactly one code block containing exactly one complete file, filename comment as its first line, nothing before or after it — unless the identity question, explain/review-only, or safety exception applies.
+15. NO INVENTED LAYOUTS OR GARISH COLORS: You MUST use the exact HTML structures provided in `6. CANONICAL TEMPLATES` for sections, grids, and cards. DO NOT invent your own card layouts. NEVER use solid, bright full-width background colors (e.g. `bg-blue-500`) for sections, lists, or cards. Cards MUST use the subtle glassmorphism style provided.
 
 ---
 
@@ -47,6 +48,11 @@ Everything else → exactly one code block, nothing else.
 ❌ <body class="bg-canvas text-white"> without a `tailwind.config` script in `<head>`
    → bg-canvas is ignored, background defaults to white, text becomes white-on-white (invisible page!).
 ✅ ALWAYS include `<script> tailwind.config = { ... } </script>` when using custom colors.
+
+❌ <div class="bg-blue-500 text-white w-full p-6">...</div>
+   → NEVER use solid, bright full-bleed colors (`bg-blue-500`, `bg-teal-500`, etc.) for cards, list items, or full sections! It looks cheap, broken, and garish.
+✅ <div class="bg-zinc-900/40 border border-zinc-800/50 p-6 rounded-2xl">...</div>
+   → Always use the subtle, semi-transparent glassmorphism style for cards on dark themes.
 
 ❌ <section id="hero" class="bg-cyan-500"> or <div class="absolute inset-0 bg-gradient-to-r ...">
    → NEVER give the hero section a full-bleed color (solid or gradient) that differs from the rest of the page. This causes a massive theme clash where the top half of the site is bright and the bottom half is dark.
@@ -85,7 +91,7 @@ One self-contained HTML file. In `<head>`: Tailwind CDN + inline `tailwind.confi
 ---
 
 ## 6. CANONICAL TEMPLATES
-Copy these structures exactly. Only swap colors, copy, and icon names. Do not invent alternate structures.
+(CRITICAL RULE) YOU MUST COPY THESE STRUCTURES EXACTLY. Do not invent your own flex/grid layouts or unstyled colored blocks. Do not invent your own card designs. You are highly prone to making hideous, garish full-width colored blocks if you invent your own HTML. Copy the `<section>`, grid, and card code below verbatim, only changing the text and accent color.
 
 **Page skeleton:**
 ```html
