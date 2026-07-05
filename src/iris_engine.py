@@ -850,7 +850,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> "Llama"
         # Determine n_gpu_layers with fallback to size config limits (prevents VRAM OOM on larger models)
         n_gpu_layers = cfg.get("n_gpu_layers", -1)
         if (
-            n_gpu_layers == -1 or str(n_gpu_layers).lower() == "auto"
+            str(n_gpu_layers).lower() == "auto"
         ) and "num_layers" in size_cfg:
             n_gpu_layers = size_cfg["num_layers"]
         if n_gpu_layers == -1:
