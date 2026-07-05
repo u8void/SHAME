@@ -257,7 +257,16 @@ def chat():
         role = "assistant" if msg.get("role") == "bot" else "user"
         agent_history.append({"role": role, "content": msg.get("content", "")})
 
-
+    # Inject context-loss reminder for small models on follow-up edits
+    has_assistant_code = any(m["role"] == "assistant" and "```" in m["content"] for m in agent_history)
+    if has_assistant_code:
+        reminder = (
+            "\n\n[CRITICAL SYSTEM REMINDER: You are modifying an existing file. "
+            "DO NOT rewrite the entire file or output <!DOCTYPE html>. "
+            "You MUST output exactly one SEARCH/REPLACE block (<<<< ==== >>>>) containing ONLY the lines that change. "
+            "The SEARCH block must exactly match the existing code.]"
+        )
+        user_message += reminder
 
     from src import controller
     controller.IS_INTERACTIVE = False

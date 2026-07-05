@@ -195,6 +195,17 @@ def chat_completions():
                     "content": extract_text(m.get("content", ""))
                 })
                 
+        # Inject context-loss reminder for small models on follow-up edits
+        has_assistant_code = any(m["role"] == "assistant" and "```" in m["content"] for m in valid_msgs)
+        if has_assistant_code and valid_msgs and valid_msgs[-1]["role"] == "user":
+            reminder = (
+                "\n\n[CRITICAL SYSTEM REMINDER: You are modifying an existing file. "
+                "DO NOT rewrite the entire file or output <!DOCTYPE html>. "
+                "You MUST output exactly one SEARCH/REPLACE block (<<<< ==== >>>>) containing ONLY the lines that change. "
+                "The SEARCH block must exactly match the existing code.]"
+            )
+            valid_msgs[-1]["content"] += reminder
+                
         import threading
         if not hasattr(llm, "inference_lock"):
             llm.inference_lock = threading.Lock()

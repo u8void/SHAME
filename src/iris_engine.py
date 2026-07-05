@@ -859,6 +859,8 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> "Llama"
         n_threads = cfg.get("n_threads", hw.n_threads)
         if str(n_threads).lower() == "auto":
             n_threads = hw.n_threads
+        else:
+            n_threads = int(n_threads)
 
         _ca_cfg = cfg.get("compressed_attention", {})
         _kv_pref = _ca_cfg.get("kv_quant", "auto")
@@ -976,10 +978,14 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> "Llama"
         _n_threads_batch = cfg.get("n_threads_batch", hw.n_threads_batch)
         if str(_n_threads_batch).lower() == "auto":
             _n_threads_batch = hw.n_threads_batch
+        else:
+            _n_threads_batch = int(_n_threads_batch)
 
         _n_batch = cfg.get("n_batch", hw.n_batch)
         if str(_n_batch).lower() == "auto":
             _n_batch = hw.n_batch
+        else:
+            _n_batch = int(_n_batch)
 
         _n_ubatch = cfg.get("n_ubatch", hw.n_ubatch)
         if str(_n_ubatch).lower() == "auto":
@@ -1007,7 +1013,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> "Llama"
                 n_threads_batch=_n_threads_batch,
                 use_mmap=hw.use_mmap,
                 use_mlock=hw.use_mlock,
-                flash_attn=_flash_attn,
+                flash_attn=True,
                 type_k=_selected_kv_type,
                 type_v=_selected_kv_type,
                 n_batch=_n_batch,
@@ -1016,6 +1022,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> "Llama"
                 logits_all=(draft_model is not None),
                 main_gpu=_main_gpu,
                 tensor_split=_tensor_split,
+                chat_format="chatml",
             )
         except Exception as e:
             logger.error(
@@ -1636,6 +1643,16 @@ def _stream_tokens(
             else _reserved_tokens,
         )
 
+        from .patcher import apply_patch
+        base_code = ""
+        base_lang = "python"
+        for msg in reversed(full_messages):
+            if msg.get("role") == "assistant":
+                blocks = extract_code_blocks(msg.get("content", ""))
+                if blocks:
+                    base_lang, base_code = blocks[-1]
+                    break
+
         logger.debug(f"[Model Start] Role: {role.value.upper()} | Model: {model_name}")
         stop_list = [
             "</s>",
@@ -1675,6 +1692,8 @@ def _stream_tokens(
             else True
         )
         continuation_buffer = ""
+        in_patch = False
+        patch_buffer = ""
 
         for chunk in stream:
             choices = chunk.get("choices", [])
@@ -1827,6 +1846,44 @@ def _stream_tokens(
 
             buffer += token
 
+            if not in_patch and "<<<" in buffer and base_code:
+                idx = buffer.index("<<<")
+                if idx > 0:
+                    yield {"type": "token", "content": buffer[:idx]}
+                    loop_content += buffer[:idx]
+                in_patch = True
+                patch_buffer = buffer[idx:]
+                buffer = ""
+                continue
+                
+            if in_patch:
+                patch_buffer += token
+                buffer = ""
+                if ">>>" in patch_buffer:
+                    # Find the last >>> so we capture all of them if they wrote >>>>>
+                    idx = patch_buffer.rindex(">>>") + 3
+                    
+                    # Also consume any trailing > that might exist immediately after
+                    while idx < len(patch_buffer) and patch_buffer[idx] == '>':
+                        idx += 1
+                        
+                    final_patch = patch_buffer[:idx]
+                    patch_buffer = patch_buffer[idx:]
+                    new_code = apply_patch(base_code, final_patch)
+                    patched_output = f"\n```{base_lang}\n{new_code}\n```\n"
+                    
+                    # Yield in chunks to prevent frontend markdown parser from glitching
+                    chunk_size = 50
+                    for i in range(0, len(patched_output), chunk_size):
+                        yield {"type": "token", "content": patched_output[i:i+chunk_size]}
+                        
+                    loop_content += patched_output
+                    in_patch = False
+                    
+                    # Immediately halt the LLM stream to prevent it from rewriting the file
+                    finish_reason = "stop"
+                    break
+                continue
             if think_mode == "hide":
                 while True:
                     if not in_thinking:
@@ -2041,6 +2098,14 @@ def _stream_tokens(
             stripped_leading_fence = True
             continuation_buffer = ""
 
+        if in_patch:
+            new_code = apply_patch(base_code, patch_buffer)
+            patched_output = f"\n```{base_lang}\n{new_code}\n```\n"
+            yield {"type": "token", "content": patched_output}
+            loop_content += patched_output
+            in_patch = False
+            buffer = ""
+            
         if buffer:
             if think_mode == "hide" and in_thinking:
                 pass
