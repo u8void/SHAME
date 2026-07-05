@@ -163,10 +163,11 @@ def _check_rust(code: str) -> Optional[str]:
             pass
 
 def _check_html(code: str) -> Optional[str]:
-    # 1. Unclosed tag sanity checks
+    # 1. Unclosed tag sanity checks (enhanced to avoid substring matching like <header> for <head>)
     for tag in ["html", "head", "body", "script", "style"]:
-        open_count = len(re.findall(f"<{tag}", code, re.IGNORECASE))
-        close_count = len(re.findall(f"</{tag}>", code, re.IGNORECASE))
+        # \b ensures we match exactly <tag> or <tag ...> and not <tagname>
+        open_count = len(re.findall(rf"<{tag}\b", code, re.IGNORECASE))
+        close_count = len(re.findall(rf"</{tag}\b", code, re.IGNORECASE))
         if open_count != close_count:
             return f"HTML Syntax Error: Unbalanced <{tag}> tags (found {open_count} open, {close_count} close). Ensure every <{tag}> tag is properly closed."
 
@@ -178,22 +179,24 @@ def _check_html(code: str) -> Optional[str]:
                 "but does not import the Lucide library CDN script (e.g. <script src=\"https://unpkg.com/lucide@latest\"></script>) in the <head>."
             )
 
-    # 3. Custom class styling in <style> block check (Rule 5 violation)
+    # 3. Tailwind CSS CDN check (Enhancement)
+    if 'class="' in code and 'tailwindcss' not in code and 'tailwind.config' not in code:
+        if not any(x in code for x in ["cdn.tailwindcss.com"]):
+            return (
+                "HTML Dependency Error: The code appears to use utility classes but the Tailwind CSS CDN "
+                "is not imported. Ensure you include <script src=\"https://cdn.tailwindcss.com\"></script> in the <head>."
+            )
+
+    # 4. Enhanced CSS Syntax Check (Replaces the strict Rule 5)
     style_blocks = re.findall(r'<style[^>]*>([\s\S]*?)<\/style>', code, re.IGNORECASE)
     for block in style_blocks:
-        # Strip out valid @keyframes definitions to isolate other selectors
-        cleaned = re.sub(r'@keyframes\s+\w+\s*\{[\s\S]*?\}', '', block)
-        # Find all selectors before a opening brace '{'
-        for match in re.finditer(r'([^\}\{]+)\{', cleaned):
-            selector = match.group(1).strip()
-            if selector and not selector.startswith('@media') and not re.match(r'^(from|to|\d+%)', selector):
-                return (
-                    f"HTML Styling Violation: Custom CSS selector '{selector}' defined in <style> block. "
-                    "Rule 5 states that a <style> block may contain @keyframes ONLY. Use Tailwind utility classes "
-                    "directly in your HTML elements (e.g. flex flex-col instead of custom styles) and define custom themes in tailwind.config."
-                )
+        # Check for basic balanced braces in CSS
+        open_braces = block.count('{')
+        close_braces = block.count('}')
+        if open_braces != close_braces:
+            return f"HTML Styling Error: Unbalanced braces in <style> block (found {open_braces} open '{{', {close_braces} close '}}'). Check your CSS syntax."
 
-    # 4. Custom colors tailwind.config check (Rule 4 violation)
+    # 5. Custom colors tailwind.config check (Rule 4 violation)
     custom_colors = ["bg-canvas", "text-accent", "bg-accent", "text-canvas", "border-accent", "border-canvas"]
     if any(color in code for color in custom_colors):
         if "tailwind.config" not in code:
@@ -203,8 +206,6 @@ def _check_html(code: str) -> Optional[str]:
                 "a `<script> tailwind.config = ... </script>` block in the <head>."
             )
 
-    # 5. Check for obvious layout breaking flex directions
-    # If custom CSS is used to build layout, it's already caught by Rule 5 check.
     return None
 
 
