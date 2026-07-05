@@ -163,9 +163,50 @@ def _check_rust(code: str) -> Optional[str]:
             pass
 
 def _check_html(code: str) -> Optional[str]:
-    # LLMs frequently use template variables or pseudo-code in HTML scripts.
-    # Strict JS checking causes false-positive auto-correction loops.
+    # 1. Unclosed tag sanity checks
+    for tag in ["html", "head", "body", "script", "style"]:
+        open_count = len(re.findall(f"<{tag}", code, re.IGNORECASE))
+        close_count = len(re.findall(f"</{tag}>", code, re.IGNORECASE))
+        if open_count != close_count:
+            return f"HTML Syntax Error: Unbalanced <{tag}> tags (found {open_count} open, {close_count} close). Ensure every <{tag}> tag is properly closed."
+
+    # 2. Lucide Icons CDN check
+    if "lucide" in code.lower() or "data-lucide" in code:
+        if not any(x in code for x in ["lucide.min.js", "lucide@latest", "unpkg.com/lucide", "jsdelivr.net/npm/lucide"]):
+            return (
+                "HTML Dependency Error: The code uses Lucide icons or calls lucide.createIcons() "
+                "but does not import the Lucide library CDN script (e.g. <script src=\"https://unpkg.com/lucide@latest\"></script>) in the <head>."
+            )
+
+    # 3. Custom class styling in <style> block check (Rule 5 violation)
+    style_blocks = re.findall(r'<style[^>]*>([\s\S]*?)<\/style>', code, re.IGNORECASE)
+    for block in style_blocks:
+        # Strip out valid @keyframes definitions to isolate other selectors
+        cleaned = re.sub(r'@keyframes\s+\w+\s*\{[\s\S]*?\}', '', block)
+        # Find all selectors before a opening brace '{'
+        for match in re.finditer(r'([^\}\{]+)\{', cleaned):
+            selector = match.group(1).strip()
+            if selector and not selector.startswith('@media') and not re.match(r'^(from|to|\d+%)', selector):
+                return (
+                    f"HTML Styling Violation: Custom CSS selector '{selector}' defined in <style> block. "
+                    "Rule 5 states that a <style> block may contain @keyframes ONLY. Use Tailwind utility classes "
+                    "directly in your HTML elements (e.g. flex flex-col instead of custom styles) and define custom themes in tailwind.config."
+                )
+
+    # 4. Custom colors tailwind.config check (Rule 4 violation)
+    custom_colors = ["bg-canvas", "text-accent", "bg-accent", "text-canvas", "border-accent", "border-canvas"]
+    if any(color in code for color in custom_colors):
+        if "tailwind.config" not in code:
+            return (
+                "HTML Tailwind Error: Custom color classes (e.g., bg-canvas, text-accent) are used, "
+                "but tailwind.config is not defined. You must declare custom theme colors inside "
+                "a `<script> tailwind.config = ... </script>` block in the <head>."
+            )
+
+    # 5. Check for obvious layout breaking flex directions
+    # If custom CSS is used to build layout, it's already caught by Rule 5 check.
     return None
+
 
 CHECKERS = {
     "python":     _check_python,
