@@ -254,7 +254,7 @@ def scan_query_for_elements(query: str) -> str:
         directives.append("CRITICAL: The user explicitly used negative constraints ('no', 'without', 'don't', etc.). You MUST carefully read the prompt and absolutely AVOID adding whatever elements they asked to omit.")
         
     # Check for "Wow me" instructions
-    wow_words = ["beautiful", "awesome", "stunning", "wow", "amazing", "best", "incredible", "gorgeous", "smart"]
+    wow_words = ["beautiful", "awesome", "stunning", "wow", "amazing", "best", "incredible", "gorgeous", "smart", "attractive", "modern", "premium"]
     if any(word in query_lower for word in wow_words):
         directives.append("=== CREATIVE FREEDOM ===")
         directives.append("The user has asked for a visually stunning, top-tier result. You have full creative freedom to utilize the most advanced, premium Tailwind CSS techniques, complex micro-animations, and striking layouts to WOW the user.")
