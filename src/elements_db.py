@@ -223,11 +223,15 @@ INDUSTRIES = {
     "web3": "Use 'dark mode', 'cyber', or 'neon' styles. Colors like 'purple', 'magenta', 'cyan', or 'obsidian'. Use 'glow' effects.",
     "medical": "Use 'flat' or 'corporate' styles. 'White', 'blue', 'teal', or 'cyan' colors. Extremely clean, lots of whitespace, trustworthy.",
     "health": "Use 'flat' or 'corporate' styles. 'White', 'blue', 'teal', or 'cyan' colors. Extremely clean, lots of whitespace, trustworthy.",
+    "hospital": "Use 'flat' or 'corporate' styles. 'White', 'blue', 'teal', or 'cyan' colors. Extremely clean, lots of whitespace, trustworthy.",
+    "clinic": "Use 'flat' or 'corporate' styles. 'White', 'blue', 'teal', or 'cyan' colors. Extremely clean, lots of whitespace, trustworthy.",
     "fitness": "Use 'brutalism' or high-contrast 'dark mode'. 'Black', 'red', 'neon yellow'. Aggressive, energetic fonts and angles.",
     "gym": "Use 'brutalism' or high-contrast 'dark mode'. 'Black', 'red', 'neon yellow'. Aggressive, energetic fonts and angles.",
     "education": "Use 'flat', 'material', or 'friendly' styles. 'Blue', 'green', 'yellow'. Legible sans-serif fonts, structured card layouts.",
     "school": "Use 'flat', 'material', or 'friendly' styles. 'Blue', 'green', 'yellow'. Legible sans-serif fonts, structured card layouts.",
-    "real estate": "Use 'luxury' or 'corporate' styles. 'White', 'navy', 'gold', or 'slate'. Elegant fonts, large image galleries."
+    "real estate": "Use 'luxury' or 'corporate' styles. 'White', 'navy', 'gold', or 'slate'. Elegant fonts, large image galleries.",
+    "gaming": "Use 'dark mode', 'cyberpunk', or 'brutalism' styles. Intense neon or fiery contrasting colors (like electric blue, crimson red, dark obsidian). Glows, hover card scales, dynamic action fonts.",
+    "game": "Use 'dark mode', 'cyberpunk', or 'brutalism' styles. Intense neon or fiery contrasting colors (like electric blue, crimson red, dark obsidian). Glows, hover card scales, dynamic action fonts."
 }
 
 MOODS = {
@@ -242,10 +246,56 @@ MOODS = {
     "minimal": "Use extreme whitespace, monochrome or neutral colors. Barely visible borders, no heavy shadows."
 }
 
+LAYOUTS = {
+    "split-screen": "Use a split-screen layout for the hero section: text and primary call-to-actions on one side (left or right), and a prominent visual card, product showcase, mockup, or interactive grid on the other side.",
+    "centered-hero": "Use a centered stacked hero layout: a massive, bold main headline in the center of the viewport, with subheadings, stacked CTA buttons, and a grid of floating card items directly below it.",
+    "asymmetric-mesh": "Use an asymmetric, modern design: text shifted off-center with staggered cards, overlapping borders, and abstract gradient circles floating behind sections to create a layer of depth.",
+    "dashboard-grid": "Use a dashboard or card-centric layout: structure the entire page around a clean, multi-column grid system with visible borders, unified cards, and separate metric blocks rather than standard text sections.",
+    "minimal-whitespace": "Use a minimal design layout: maximize whitespace, utilize oversized headlines with high letter-spacing, and place clean simple two-column descriptions with absolute minimal graphical noise.",
+    "diagonal-split": "Use a diagonal split screen: use CSS clip-path or angled borders to create diagonal section dividers that break the page visually between the header and the body sections."
+}
+
+NAV_STYLES = {
+    "floating-pill": "Use a transparent floating navigation bar: centered on the page with rounded-full corners, backdrop-blur effect, and a thin border to make it hover over the content.",
+    "sticky-full": "Use a classic sticky full-width navigation bar: solid background color matching the page's theme, and a thin glowing border at the bottom that remains fixed at the top of the screen.",
+    "sidebar-dock": "Use a vertical dock navigation layout: place a sleek, narrow navbar fixed on the left side of the viewport, with round icon buttons that slide open on hover.",
+    "minimal-logo": "Use a clean header navigation: logo aligned to the left, central menu links hidden on mobile but showing as standard pill buttons on desktop, and a single prominent call-to-action button on the far right."
+}
+
 def scan_query_for_elements(query: str) -> str:
     """Scans the user query for keywords matching colors, animations, styles, effects, and moods, returning a compiled directive."""
     query_lower = query.lower()
     directives = []
+    
+    # Check for layouts
+    matched_layouts = []
+    for layout_name, description in LAYOUTS.items():
+        if layout_name in query_lower:
+            matched_layouts.append(f"Layout '{layout_name}': {description}")
+            
+    if not matched_layouts:
+        import random
+        random_layout = random.choice(list(LAYOUTS.keys()))
+        matched_layouts.append(f"Layout '{random_layout}' (Randomly Selected for variety): {LAYOUTS[random_layout]}")
+        
+    if matched_layouts:
+        directives.append("=== DESIGN LAYOUT & WIREFRAME ===")
+        directives.extend(matched_layouts)
+
+    # Check for nav styles
+    matched_navs = []
+    for nav_name, description in NAV_STYLES.items():
+        if nav_name in query_lower:
+            matched_navs.append(f"Navigation '{nav_name}': {description}")
+            
+    if not matched_navs:
+        import random
+        random_nav = random.choice(list(NAV_STYLES.keys()))
+        matched_navs.append(f"Navigation '{random_nav}' (Randomly Selected for variety): {NAV_STYLES[random_nav]}")
+        
+    if matched_navs:
+        directives.append("=== NAVIGATION STYLE ===")
+        directives.extend(matched_navs)
     
     # Check for negations
     negation_words = ["no ", "without ", "don't ", "dont ", "avoid ", "remove ", "not "]
