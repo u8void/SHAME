@@ -361,21 +361,6 @@ ANIMATIONS = {
     "blur in": """Add this to CSS:
 @keyframes blurIn { from { filter: blur(10px); opacity: 0; } to { filter: blur(0); opacity: 1; } }
 .animate-blur-in { animation: blurIn 0.8s ease-out forwards; }""",
-    "blur out": """Add this to CSS:
-@keyframes blurOut { from { filter: blur(0); opacity: 1; } to { filter: blur(10px); opacity: 0; } }
-.animate-blur-out { animation: blurOut 0.8s ease-in forwards; }""",
-    "slide out up": """Add this to CSS:
-@keyframes slideOutUp { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-30px); } }
-.animate-slide-out-up { animation: slideOutUp 0.8s ease-in forwards; }""",
-    "slide out down": """Add this to CSS:
-@keyframes slideOutDown { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(30px); } }
-.animate-slide-out-down { animation: slideOutDown 0.8s ease-in forwards; }""",
-    "slide out left": """Add this to CSS:
-@keyframes slideOutLeft { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(-30px); } }
-.animate-slide-out-left { animation: slideOutLeft 0.8s ease-in forwards; }""",
-    "slide out right": """Add this to CSS:
-@keyframes slideOutRight { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(30px); } }
-.animate-slide-out-right { animation: slideOutRight 0.8s ease-in forwards; }""",
     "rotate in down left": """Add this to CSS:
 @keyframes rotateInDownLeft { from { transform-origin: left bottom; transform: rotate3d(0, 0, 1, -45deg); opacity: 0; } to { transform-origin: left bottom; transform: translate3d(0, 0, 0); opacity: 1; } }
 .animate-rotate-in-down-left { animation: rotateInDownLeft 1s; }""",
@@ -385,9 +370,6 @@ ANIMATIONS = {
     "bounce in": """Add this to CSS:
 @keyframes bounceIn { from, 20%, 40%, 60%, 80%, to { animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1); } 0% { opacity: 0; transform: scale3d(0.3, 0.3, 0.3); } 20% { transform: scale3d(1.1, 1.1, 1.1); } 40% { transform: scale3d(0.9, 0.9, 0.9); } 60% { opacity: 1; transform: scale3d(1.03, 1.03, 1.03); } 80% { transform: scale3d(0.97, 0.97, 0.97); } to { opacity: 1; transform: scale3d(1, 1, 1); } }
 .animate-bounce-in { animation: bounceIn 0.8s; }""",
-    "bounce out": """Add this to CSS:
-@keyframes bounceOut { 20% { transform: scale3d(0.9, 0.9, 0.9); } 50%, 55% { opacity: 1; transform: scale3d(1.1, 1.1, 1.1); } to { opacity: 0; transform: scale3d(0.3, 0.3, 0.3); } }
-.animate-bounce-out { animation: bounceOut 0.8s; }""",
 
     "slide-up-fast-v2": """Add this to CSS:\n@keyframes slide-up-fast { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-up-fast { animation: slide-up-fast 1s ease-in-out forwards; }""",
     "slide-up-slow-v2": """Add this to CSS:\n@keyframes slide-up-slow { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-up-slow { animation: slide-up-slow 1s ease-in-out forwards; }""",
@@ -1353,6 +1335,29 @@ NAV_STYLES = {
 "nav-transparent-blur": "Transparent Blur Nav: `fixed top-0 w-full bg-white/5 backdrop-blur-lg border-b border-white/10 z-50 px-8 py-4 flex items-center justify-between`.",
 }
 
+
+INDUSTRY_ALIASES = {
+    "gaming": ["gaming", "game", "gamer", "playstation", "xbox", "nintendo", "steam", "rpg", "arcade", "esports", "combat", "fight", "battle", "multiplayer", "coop", "console", "pc game", "interactive", "character", "boss", "versus", "action"],
+    "technology": ["technology", "tech", "software", "app", "application", "quantum", "cyber", "ai", "hardware", "cpu", "gpu", "data", "cloud", "api", "developer", "coding"],
+    "sales": ["sales", "selling", "marketing", "promotion", "agency", "advertise", "ads"],
+    "ecommerce": ["ecommerce", "shop", "store", "buy", "cart", "product", "checkout", "retail", "deals"],
+    "restaurant": ["restaurant", "cafe", "food", "menu", "bakery", "bar", "dining", "chef", "cook", "coffee", "baking"],
+    "portfolio": ["portfolio", "resume", "showcase", "cv", "about me", "my work", "projects", "designer", "developer portfolio"],
+    "finance": ["finance", "financial", "bank", "banking", "money", "loan", "investment", "wealth"],
+    "crypto": ["crypto", "cryptocurrency", "bitcoin", "ethereum", "blockchain", "web3", "nft", "token"],
+    "medical": ["medical", "health", "doctor", "hospital", "clinic", "dental", "dentist", "patient", "nurse", "medicine"],
+    "fitness": ["fitness", "gym", "workout", "exercise", "training", "coach", "athlete", "run", "sport"],
+    "real estate": ["real estate", "property", "house", "home", "apartment", "condo", "rent", "buy home"],
+    "fashion": ["fashion", "clothing", "wear", "style", "dress", "outfit", "boutique", "apparel", "model"],
+    "law": ["law", "lawyer", "attorney", "legal", "court", "justice", "firm", "advocate"],
+    "music": ["music", "song", "band", "artist", "album", "singer", "concert", "dj", "sound", "audio", "track"],
+    "beauty": ["beauty", "makeup", "cosmetics", "salon", "spa", "skin", "hair", "styling"],
+    "sports": ["sports", "football", "basketball", "soccer", "tennis", "game", "match", "tournament"],
+    "automotive": ["automotive", "car", "vehicle", "auto", "engine", "drive", "racing"],
+    "blog": ["blog", "article", "post", "news", "magazine", "reading", "writeup"],
+    "wedding": ["wedding", "marriage", "bride", "groom", "rsvp", "anniversary"]
+}
+
 def scan_query_for_elements(query: str) -> str:
     """Scans the user query for keywords. If no explicit keywords match a category, it dynamically injects a random high-end element from that category to guarantee maximum variety and dynamic output."""
     import random
@@ -1411,10 +1416,12 @@ def scan_query_for_elements(query: str) -> str:
         directives.append("=== CREATIVE FREEDOM ===")
         directives.append("The user has asked for a visually stunning, top-tier result. You have full creative freedom to utilize the most advanced, premium Tailwind CSS techniques, complex micro-animations, and striking layouts to WOW the user.")
 
-    # Check for industry/domain
+    # Check for industry/domain using semantic aliases
     matched_industries = []
     for industry_name, rules in INDUSTRIES.items():
-        if re.search(r'\b' + re.escape(industry_name) + r'\b', query_lower):
+        aliases = INDUSTRY_ALIASES.get(industry_name, [industry_name])
+        # If any alias is in the query, apply the industry rules
+        if any(re.search(r'\b' + re.escape(alias) + r'\b', query_lower) for alias in aliases) or industry_name in query_lower:
             matched_industries.append(f"Industry '{industry_name}': {rules}")
             
     if matched_industries:
