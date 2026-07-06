@@ -141,191 +141,197 @@ def home():
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    if request.is_json:
-        data = request.json
-        image_files = []
-        doc_files = []
-    else:
-        data = request.form
-        image_files = request.files.getlist("image")
-        doc_files = request.files.getlist("document")
-
-    chat_id      = data.get("chat_id", "unknown_chat")
-    user_message = data.get("message", "").strip()
-    history      = data.get("history", "")
-    
-    settings_raw = data.get("settings", {})
-    if isinstance(settings_raw, str):
-        try:
-            settings = json.loads(settings_raw)
-        except (json.JSONDecodeError, TypeError) as e:
-            logger.warning(f"Settings JSON parse failed: {e}")
-            return jsonify({"error": f"Invalid settings JSON: {e}"}), 400
-    else:
-        settings = settings_raw
-
-    for image_file in image_files:
-        if image_file and _allowed_file(image_file.filename):
-            filename = f"{uuid.uuid4().hex}_{secure_filename(image_file.filename)}"
-            save_path = os.path.join(UPLOAD_DIR, filename)
-            image_file.save(save_path)
-            user_message = f"[IMAGE_UPLOADED: {save_path}]\n{user_message}"
-
-    actual_prompt = user_message if user_message else "Please provide a detailed, comprehensive summary and explanation of the attached documents."
-    doc_sections = []
-
-    
-    parsed_docs = []
-    for doc_file in doc_files:
-        if doc_file:
-            filename = f"{uuid.uuid4().hex}_{secure_filename(doc_file.filename)}"
-            save_path = os.path.join(UPLOAD_DIR, filename)
-            doc_file.save(save_path)
-            try:
-                from markitdown import MarkItDown
-                md = MarkItDown()
-                result = md.convert(save_path)
-                parsed_docs.append((filename, result.text_content))
-            except Exception as e:
-                import logging
-                logging.getLogger('iris').warning(f"Failed to parse document {filename} with MarkItDown: {e}")
-                try:
-                    with open(save_path, "r", encoding="utf-8") as f:
-                        fallback_text = f.read()
-                    parsed_docs.append((filename, fallback_text))
-                except Exception:
-                    parsed_docs.append((filename, f"[Failed to parse `{filename}`]"))
-
-    if parsed_docs:
-        if PRO_MODE:
-            for filename, text in parsed_docs:
-                doc_sections.append(f"Document `{filename}`:\n<document>\n{text}\n</document>")
+    try:
+        if request.is_json:
+            data = request.json
+            image_files = []
+            doc_files = []
         else:
-            
-            budget = 12000
-            per_doc_budget = budget // max(1, len(parsed_docs))
-            
-            
-            final_texts = {}
-            remaining_docs = []
-            for filename, text in parsed_docs:
-                if len(text) <= per_doc_budget:
-                    final_texts[filename] = text
-                    budget -= len(text)
-                else:
-                    remaining_docs.append((filename, text))
-            
-            
-            if remaining_docs:
-                per_doc_budget = budget // len(remaining_docs)
-                for filename, text in remaining_docs:
-                    truncated = text[:per_doc_budget] + f"\n\n[DOCUMENT TRUNCATED DUE TO MAX {per_doc_budget} CHARS]"
-                    final_texts[filename] = truncated
+            data = request.form
+            image_files = request.files.getlist("image")
+            doc_files = request.files.getlist("document")
 
-            
-            for filename, _ in parsed_docs:
-                doc_sections.append(f"Document `{filename}`:\n<document>\n{final_texts[filename]}\n</document>")
+        chat_id      = data.get("chat_id", "unknown_chat")
+        user_message = data.get("message", "")
+        if user_message is None:
+            user_message = ""
+        user_message = str(user_message).strip()
+        history      = data.get("history", "")
+        
+        settings_raw = data.get("settings", {})
+        if isinstance(settings_raw, str):
+            try:
+                settings = json.loads(settings_raw)
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Settings JSON parse failed: {e}")
+                return jsonify({"error": f"Invalid settings JSON: {e}"}), 400
+        else:
+            settings = settings_raw
 
-    if doc_sections:
-        all_docs_text = "\n\n".join(doc_sections)
-        user_message = f"[SYSTEM DIRECTIVE: The user has attached {len(doc_files)} document(s). You MUST analyze the content of these documents to answer their request.]\n\n{all_docs_text}\n\nUser's Request:\n{actual_prompt}"
+        for image_file in image_files:
+            if image_file and _allowed_file(image_file.filename):
+                filename = f"{uuid.uuid4().hex}_{secure_filename(image_file.filename)}"
+                save_path = os.path.join(UPLOAD_DIR, filename)
+                image_file.save(save_path)
+                user_message = f"[IMAGE_UPLOADED: {save_path}]\n{user_message}"
 
-    if not user_message and not image_files and not doc_files:
-        return jsonify({"reply": "Please send a valid message."}), 400
+        actual_prompt = user_message if user_message else "Please provide a detailed, comprehensive summary and explanation of the attached documents."
+        doc_sections = []
 
+        
+        parsed_docs = []
+        for doc_file in doc_files:
+            if doc_file:
+                filename = f"{uuid.uuid4().hex}_{secure_filename(doc_file.filename)}"
+                save_path = os.path.join(UPLOAD_DIR, filename)
+                doc_file.save(save_path)
+                try:
+                    from markitdown import MarkItDown
+                    md = MarkItDown()
+                    result = md.convert(save_path)
+                    parsed_docs.append((filename, result.text_content))
+                except Exception as e:
+                    import logging
+                    logging.getLogger('iris').warning(f"Failed to parse document {filename} with MarkItDown: {e}")
+                    try:
+                        with open(save_path, "r", encoding="utf-8") as f:
+                            fallback_text = f.read()
+                        parsed_docs.append((filename, fallback_text))
+                    except Exception:
+                        parsed_docs.append((filename, f"[Failed to parse `{filename}`]"))
 
-    if PREVIEW_MODE:
-        def preview_generate():
-            mock_event = {"type": "action_result", "content": "[Preview Mode] Mock response."}
-            yield f"data: {json.dumps(mock_event)}\n\n"
-        resp = Response(preview_generate(), mimetype='text/event-stream')
+        if parsed_docs:
+            if PRO_MODE:
+                for filename, text in parsed_docs:
+                    doc_sections.append(f"Document `{filename}`:\n<document>\n{text}\n</document>")
+            else:
+                budget = 12000
+                per_doc_budget = budget // max(1, len(parsed_docs))
+                final_texts = {}
+                remaining_docs = []
+                for filename, text in parsed_docs:
+                    if len(text) <= per_doc_budget:
+                        final_texts[filename] = text
+                        budget -= len(text)
+                    else:
+                        remaining_docs.append((filename, text))
+                if remaining_docs:
+                    per_doc_budget = budget // len(remaining_docs)
+                    for filename, text in remaining_docs:
+                        truncated = text[:per_doc_budget] + f"\n\n[DOCUMENT TRUNCATED DUE TO MAX {per_doc_budget} CHARS]"
+                        final_texts[filename] = truncated
+                for filename, _ in parsed_docs:
+                    doc_sections.append(f"Document `{filename}`:\n<document>\n{final_texts[filename]}\n</document>")
+
+        if doc_sections:
+            all_docs_text = "\n\n".join(doc_sections)
+            user_message = f"[SYSTEM DIRECTIVE: The user has attached {len(doc_files)} document(s). You MUST analyze the content of these documents to answer their request.]\n\n{all_docs_text}\n\nUser's Request:\n{actual_prompt}"
+
+        if not user_message and not image_files and not doc_files:
+            return jsonify({"reply": "Please send a valid message."}), 400
+
+        if PREVIEW_MODE:
+            def preview_generate():
+                mock_event = {"type": "action_result", "content": "[Preview Mode] Mock response."}
+                yield f"data: {json.dumps(mock_event)}\n\n"
+            resp = Response(preview_generate(), mimetype='text/event-stream')
+            resp.headers['X-Accel-Buffering'] = 'no'
+            resp.headers['Cache-Control']     = 'no-cache'
+            resp.headers['Connection']        = 'keep-alive'
+            return resp
+
+        frontend_messages = []
+        if "messages" in data:
+            try:
+                frontend_messages = json.loads(data["messages"]) if isinstance(data["messages"], str) else data["messages"]
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Failed to parse message history: {e}")
+
+        if not isinstance(frontend_messages, list):
+            frontend_messages = []
+
+        agent_history = []
+        for msg in frontend_messages[:-1]:
+            if not isinstance(msg, dict):
+                continue
+            role = "assistant" if msg.get("role") == "bot" else "user"
+            agent_history.append({"role": role, "content": msg.get("content", "")})
+
+        from src import controller
+        controller.IS_INTERACTIVE = False
+        from src.controller import ai_agent_handle
+
+        def generate():
+            with global_generation_lock:
+                try:
+                    yield f"data: {json.dumps({'type': 'status', 'content': 'Initializing...'})}\n\n"
+                    retriever_instance = get_retriever()
+                    
+                    final_response = ""
+                    assigned_role = None
+
+                    for event in ai_agent_handle(
+                        user_message,
+                        retriever_instance,
+                        agent_history,
+                        settings=settings,
+                        keep_loaded=False
+                    ):
+                        if event.get("type") == "raw_response":
+                            final_response = event.get("content", "")
+                        elif event.get("type") == "status":
+                            status_text = event.get("content", "")
+                            if status_text.startswith("Task: "):
+                                assigned_role = status_text.split("Task: ")[1].strip().lower()
+                        yield f"data: {json.dumps(event)}\n\n"
+                        
+                    from src.iris_engine import ModelRole
+                    from src.context_compactor import auto_compact_for_role
+                    
+                    target_role = ModelRole.GENERAL
+                    if assigned_role:
+                        for r in ModelRole:
+                            if r.value.lower() == assigned_role:
+                                target_role = r
+                                break
+                                
+                    full_history = list(agent_history)
+                    full_history.append({"role": "user", "content": user_message})
+                    if final_response:
+                        full_history.append({"role": "assistant", "content": final_response})
+                        
+                    yield f"data: {json.dumps({'type': 'status', 'content': 'Compacting Context (HCA)...'})}\n\n"
+                    compacted, info = auto_compact_for_role(full_history, role=target_role, max_output_tokens=4096)
+                    logger.info(f"[HCA Post-Pipeline] {info}")
+                    
+                    if "compacted=" in info:
+                        frontend_compacted = []
+                        for m in compacted:
+                            role = "bot" if m["role"] == "assistant" else m["role"]
+                            frontend_compacted.append({"role": role, "content": m["content"]})
+                        yield f"data: {json.dumps({'type': 'compact_history', 'messages': frontend_compacted})}\n\n"
+                        
+                except Exception as e:
+                    err_msg = str(e)
+                    error_content = "\n\n> [ERROR] **Iris Error:** " + err_msg
+                    yield f"data: {json.dumps({'type': 'token', 'content': error_content})}\n\n"
+
+        resp = Response(generate(), mimetype='text/event-stream')
         resp.headers['X-Accel-Buffering'] = 'no'
         resp.headers['Cache-Control']     = 'no-cache'
         resp.headers['Connection']        = 'keep-alive'
         return resp
-
-    frontend_messages = []
-    if "messages" in data:
+    except Exception as _e:
+        import traceback
+        import os
+        tb = traceback.format_exc()
+        crash_log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "flask_crash.txt")
         try:
-            frontend_messages = json.loads(data["messages"]) if isinstance(data["messages"], str) else data["messages"]
-        except (json.JSONDecodeError, TypeError) as e:
-            logger.warning(f"Failed to parse message history: {e}")
-            agent_history = []  
-
-    agent_history = []
-    for msg in frontend_messages[:-1]:
-        role = "assistant" if msg.get("role") == "bot" else "user"
-        agent_history.append({"role": role, "content": msg.get("content", "")})
-
-
-
-    from src import controller
-    controller.IS_INTERACTIVE = False
-    from src.controller import ai_agent_handle
-
-    def generate():
-        with global_generation_lock:
-            try:
-                yield f"data: {json.dumps({'type': 'status', 'content': 'Initializing...'})}\n\n"
-                retriever_instance = get_retriever()
-                
-                final_response = ""
-                assigned_role = None
-
-                for event in ai_agent_handle(
-                    user_message,
-                    retriever_instance,
-                    agent_history,
-                    settings=settings,
-                    keep_loaded=False
-                ):
-                    if event.get("type") == "raw_response":
-                        final_response = event.get("content", "")
-                    elif event.get("type") == "status":
-                        status_text = event.get("content", "")
-                        if status_text.startswith("Task: "):
-                            assigned_role = status_text.split("Task: ")[1].strip().lower()
-                    yield f"data: {json.dumps(event)}\n\n"
-                    
-                # Post-pipeline HCA compaction
-                from src.iris_engine import ModelRole
-                from src.context_compactor import auto_compact_for_role
-                
-                # Determine role enum
-                target_role = ModelRole.GENERAL
-                if assigned_role:
-                    for r in ModelRole:
-                        if r.value.lower() == assigned_role:
-                            target_role = r
-                            break
-                            
-                full_history = list(agent_history)
-                full_history.append({"role": "user", "content": user_message})
-                if final_response:
-                    full_history.append({"role": "assistant", "content": final_response})
-                    
-                yield f"data: {json.dumps({'type': 'status', 'content': 'Compacting Context (HCA)...'})}\n\n"
-                compacted, info = auto_compact_for_role(full_history, role=target_role, max_output_tokens=4096)
-                logger.info(f"[HCA Post-Pipeline] {info}")
-                
-                if "compacted=" in info:
-                    # Convert to frontend format (bot instead of assistant)
-                    frontend_compacted = []
-                    for m in compacted:
-                        role = "bot" if m["role"] == "assistant" else m["role"]
-                        frontend_compacted.append({"role": role, "content": m["content"]})
-                    yield f"data: {json.dumps({'type': 'compact_history', 'messages': frontend_compacted})}\n\n"
-                    
-            except Exception as e:
-                err_msg = str(e)
-                error_content = "\n\n> [ERROR] **Iris Error:** " + err_msg
-                yield f"data: {json.dumps({'type': 'token', 'content': error_content})}\n\n"
-
-    resp = Response(generate(), mimetype='text/event-stream')
-    resp.headers['X-Accel-Buffering'] = 'no'
-    resp.headers['Cache-Control']     = 'no-cache'
-    resp.headers['Connection']        = 'keep-alive'
-    return resp
+            with open(crash_log_path, "w") as f:
+                f.write(tb)
+        except:
+            pass
+        return jsonify({"error": tb}), 500
 
 @app.route("/analyze_image", methods=["POST"])
 def analyze_image_route():

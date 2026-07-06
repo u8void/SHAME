@@ -1353,7 +1353,15 @@ document.addEventListener("DOMContentLoaded", () => {
             });
 
             if (!response.ok) {
-                const errText = await response.text().catch(() => response.status);
+                let errText = await response.text().catch(() => response.status);
+                try {
+                    const errJson = JSON.parse(errText);
+                    errText = errJson.error || errJson.message || errText;
+                } catch (e) {
+                    if (typeof errText === 'string' && (errText.trim().toLowerCase().startsWith('<!doctype html') || errText.trim().toLowerCase().startsWith('<html'))) {
+                        errText = "Internal Server Error. Please check the backend logs.";
+                    }
+                }
                 throw new Error(`Server error ${response.status}: ${errText}`);
             }
 
