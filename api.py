@@ -134,9 +134,9 @@ def chat_completions():
         from llama_cpp import Llama
         import gc
 
-        # We must load a model with a manageable context size (16384) 
+        # We must load a model with a manageable context size (32768) 
         # to prevent llama_decode returned -1. 32768 causes memory 
-        # allocation failures on Mac, and 8192 is too small for 
+        # allocation failures on Mac, but 16384 is too small for 
         # OpenCode's massive 7.6k token prompt + generation length.
         if "opencode" not in _model_pool:
             import logging
@@ -157,7 +157,7 @@ def chat_completions():
                 path = _model_paths.get(ModelRole.CODE)
                 if not path:
                     # Fallback to loading via iris_engine if _model_paths isn't fully populated
-                    load_model(ModelRole.CODE, override_n_ctx=16384)
+                    load_model(ModelRole.CODE, override_n_ctx=32768)
                     if ModelRole.CODE.value in _model_pool:
                         _model_pool["opencode"] = _model_pool[ModelRole.CODE.value]
                     else:
@@ -165,7 +165,7 @@ def chat_completions():
                         _model_pool["opencode"] = Llama(
                             model_path=path,
                             n_gpu_layers=-1,
-                            n_ctx=16384,
+                            n_ctx=32768,
                             n_batch=1024,
                             verbose=False
                         )
@@ -173,7 +173,7 @@ def chat_completions():
                     _model_pool["opencode"] = Llama(
                         model_path=path,
                         n_gpu_layers=-1,
-                        n_ctx=16384,
+                        n_ctx=32768,
                         n_batch=1024,
                         verbose=False
                     )
