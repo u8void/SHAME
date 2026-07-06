@@ -2,8 +2,8 @@ import re
 from typing import Dict, List, Optional
 
 COLORS = {
-    "neon": "Primary: cyan-400, Secondary: fuchsia-500, Background: zinc-950, Text: white. Use bright glowing text with drop-shadow-[0_0_15px_rgba(34,211,238,0.5)].",
     "pastel": "Primary: rose-300, Secondary: sky-300, Background: slate-50, Text: slate-800. Soft, gentle aesthetic.",
+    "neon": "Primary: cyan-400, Secondary: fuchsia-500, Background: zinc-950, Text: white. Use bright glowing text with drop-shadow-[0_0_15px_rgba(34,211,238,0.5)].",
     "cyberpunk": "Primary: yellow-400, Secondary: cyan-400, Background: black, Text: zinc-100. High contrast, aggressive neon aesthetics.",
     "monochrome": "Primary: zinc-900, Secondary: zinc-500, Background: white, Text: black. Minimalist, high contrast grayscale.",
     "earth": "Primary: emerald-600, Secondary: amber-600, Background: stone-100, Text: stone-900. Natural, warm colors.",
@@ -95,15 +95,260 @@ COLORS = {
     "winter": "Primary: blue-300, Secondary: slate-300, Background: slate-100, Text: slate-900. Cold, snowy, crisp winter whites.",
     "neon-pink": "Primary: pink-500, Secondary: fuchsia-400, Background: black, Text: pink-300. Hot neon pink on pure black.",
     "neon-green": "Primary: lime-400, Secondary: green-400, Background: black, Text: lime-300. Radioactive neon green on pure black.",
-    "neon-blue": "Primary: blue-400, Secondary: cyan-400, Background: black, Text: blue-300. Electric neon blue on pure black.",
-    "champagne": "Primary: amber-200, Secondary: yellow-100, Background: amber-50, Text: stone-800. Soft, bubbly champagne gold.",
-    "titanium": "Primary: zinc-400, Secondary: slate-300, Background: zinc-900, Text: zinc-100. Brushed titanium metallic look.",
-    "graphite": "Primary: neutral-600, Secondary: stone-500, Background: neutral-900, Text: neutral-200. Matte graphite pencil dark theme.",
-    "mahogany": "Primary: red-900, Secondary: amber-800, Background: stone-950, Text: stone-200. Rich, dark wood grain tones.",
-    "tiffany": "Primary: cyan-400, Secondary: teal-300, Background: white, Text: slate-900. Iconic Tiffany blue luxury.",
-    "slate-blue": "Primary: slate-500, Secondary: blue-400, Background: slate-100, Text: slate-900. Muted, professional blue-gray.",
-    "warm-gray": "Primary: stone-400, Secondary: stone-300, Background: stone-100, Text: stone-800. Cozy warm neutral grays.",
-    "ice-blue": "Primary: sky-200, Secondary: blue-200, Background: white, Text: slate-800. Ultra-light frozen ice aesthetic."
+    "neon-blue": "Primary: blue-500, Secondary: cyan-400, Background: black, Text: blue-200. Vibrant neon blue on dark background.",
+    "neon-purple": "Primary: purple-500, Secondary: violet-400, Background: black, Text: purple-300. Electric neon purple glow effect.",
+    "neon-yellow": "Primary: yellow-400, Secondary: amber-300, Background: black, Text: yellow-200. Bright neon yellow with glowing outline.",
+    "neon-orange": "Primary: orange-500, Secondary: red-400, Background: black, Text: orange-200. Intense neon orange with glow effect.",
+    "neon-cyan": "Primary: cyan-400, Secondary: sky-300, Background: black, Text: cyan-200. Bright cyan with glowing edges.",
+    "neon-teal": "Primary: teal-500, Secondary: emerald-400, Background: black, Text: teal-200. Vibrant teal with neon glow effect.",
+    "neon-lime": "Primary: lime-500, Secondary: green-400, Background: black, Text: lime-200. Bright lime with glowing outline.",
+    "neon-indigo": "Primary: indigo-500, Secondary: violet-400, Background: black, Text: indigo-200. Deep neon indigo glow effect.",
+    "neon-violet": "Primary: violet-500, Secondary: purple-400, Background: black, Text: violet-200. Electric violet with glowing edges.",
+    "neon-fuchsia": "Primary: fuchsia-500, Secondary: pink-400, Background: black, Text: fuchsia-200. Bright neon fuchsia glow effect.",
+    "neon-pink-dark": "Primary: pink-600, Secondary: rose-500, Background: slate-950, Text: pink-100. Deep neon pink on dark background.",
+    "neon-green-dark": "Primary: green-600, Secondary: emerald-500, Background: slate-950, Text: green-100. Rich neon green with glow effect.",
+    "neon-blue-dark": "Primary: blue-600, Secondary: cyan-500, Background: slate-950, Text: blue-100. Deep neon blue on dark backdrop.",
+    "neon-purple-dark": "Primary: purple-600, Secondary: violet-500, Background: slate-950, Text: purple-100. Intense neon purple glow effect.",
+    "neon-yellow-dark": "Primary: yellow-600, Secondary: amber-500, Background: slate-950, Text: yellow-100. Bright neon yellow on dark background.",
+    "neon-orange-dark": "Primary: orange-600, Secondary: red-500, Background: slate-950, Text: orange-100. Intense neon orange glow effect.",
+    "neon-cyan-dark": "Primary: cyan-600, Secondary: sky-500, Background: slate-950, Text: cyan-100. Bright cyan with glowing edges on dark background.",
+    "neon-teal-dark": "Primary: teal-600, Secondary: emerald-500, Background: slate-950, Text: teal-100. Vibrant neon teal glow effect.",
+    "neon-lime-dark": "Primary: lime-600, Secondary: green-500, Background: slate-950, Text: lime-100. Bright neon lime with glowing outline on dark background.",
+    "neon-indigo-dark": "Primary: indigo-600, Secondary: violet-500, Background: slate-950, Text: indigo-100. Deep neon indigo glow effect.",
+    "neon-violet-dark": "Primary: violet-600, Secondary: purple-500, Background: slate-950, Text: violet-100. Electric neon violet with glowing edges on dark background.",
+    "neon-fuchsia-dark": "Primary: fuchsia-600, Secondary: pink-500, Background: slate-950, Text: fuchsia-100. Bright neon fuchsia glow effect on dark backdrop.",
+    "gradient-neon-pink": "Primary: linear-gradient(45deg,#f72585,#b5179e), Secondary: #ff6b6b, Background: black, Text: white. Gradient neon pink with glowing effects.",
+    "gradient-neon-green": "Primary: linear-gradient(45deg,#00c3ff,#ffff1c), Secondary: #2ecc71, Background: black, Text: white. Bright gradient neon green glow effect.",
+    "gradient-neon-blue": "Primary: linear-gradient(45deg,#6a11cb,#2575fc), Secondary: #00d2d3, Background: black, Text: white. Vibrant blue-to-cyan gradient with glowing edges.",
+    "gradient-neon-purple": "Primary: linear-gradient(45deg,#834d9b,#d04ed6), Secondary: #ff7eb3, Background: black, Text: white. Deep purple-to-pink gradient neon effect.",
+    "gradient-neon-yellow": "Primary: linear-gradient(45deg,#ffd200,#f7974a), Secondary: #ffc107, Background: black, Text: white. Bright yellow-orange gradient with glowing outline.",
+    "gradient-neon-orange": "Primary: linear-gradient(45deg,#ff8c00,#ff6b35), Secondary: #ffa502, Background: black, Text: white. Intense orange-to-red gradient neon glow effect.",
+    "gradient-neon-cyan": "Primary: linear-gradient(45deg,#00d2d3,#00a8cc), Secondary: #1abc9c, Background: black, Text: white. Bright cyan-blue gradient with glowing edges.",
+    "gradient-neon-teal": "Primary: linear-gradient(45deg,#00b7c6,#00cdac), Secondary: #32d7a8, Background: black, Text: white. Vibrant teal-to-green gradient neon glow effect.",
+    "gradient-neon-lime": "Primary: linear-gradient(45deg,#91e08f,#76b852), Secondary: #cdeb8b, Background: black, Text: white. Bright lime-green gradient with glowing outline on dark background.",
+    "gradient-neon-indigo": "Primary: linear-gradient(45deg,#3a1c71,#d769ad), Secondary: #0f2027, Background: black, Text: white. Deep indigo-to-purple gradient neon effect.",
+    "gradient-neon-violet": "Primary: linear-gradient(45deg,#8e2de2,#4a00e0), Secondary: #6c5ce7, Background: black, Text: white. Electric violet-to-blue gradient with glowing edges on dark background.",
+    "gradient-neon-fuchsia": "Primary: linear-gradient(45deg,#ff00cc,#333399), Secondary: #f812b8, Background: black, Text: white. Bright fuchsia-purple gradient neon glow effect.",
+    "gradient-lavender": "Primary: linear-gradient(45deg,#e6d7fa,#cbbaf5), Secondary: #a08ae3, Background: slate-900, Text: slate-100. Soft lavender-to-violet gradient with subtle glow.",
+    "gradient-sunset": "Primary: linear-gradient(45deg,#ff7eb3,#f7974a), Secondary: #ffd200, Background: stone-950, Text: stone-50. Warm sunset gradient with glowing edges.",
+    "gradient-ocean": "Primary: linear-gradient(45deg,#1e3c72,#2a5298), Secondary: #6d9bcf, Background: slate-900, Text: slate-50. Deep ocean blue-to-cyan gradient with subtle glow.",
+    "gradient-mint": "Primary: linear-gradient(45deg,#1e5799,#207cca), Secondary: #8ed3d6, Background: stone-50, Text: stone-800. Cool mint-green to blue gradient effect.",
+    "gradient-sakura": "Primary: linear-gradient(45deg,#fbd2c1,#e7b9ce), Secondary: #ff9aa2, Background: pink-50, Text: slate-800. Soft cherry blossom gradient with gentle glow.",
+    "gradient-lavender-dark": "Primary: linear-gradient(45deg,#6a3d8f,#c17ebe), Secondary: #b39cd0, Background: indigo-950, Text: indigo-100. Deep purple-to-pink gradient with subtle glow.",
+    "gradient-sunset-dark": "Primary: linear-gradient(45deg,#ff6a8d,#f7c27e), Secondary: #ffd3b6, Background: stone-950, Text: stone-50. Warm sunset gradient on dark background with glowing edges.",
+    "gradient-ocean-dark": "Primary: linear-gradient(45deg,#1e3c72,#2a5298), Secondary: #6d9bcf, Background: slate-900, Text: slate-50. Deep ocean gradient on dark background with subtle glow.",
+    "gradient-mint-dark": "Primary: linear-gradient(45deg,#1e3c72,#2a5298), Secondary: #6d9bcf, Background: emerald-950, Text: emerald-100. Cool mint-green to blue gradient effect on dark backdrop.",
+    "gradient-sakura-dark": "Primary: linear-gradient(45deg,#e7b9ce,#ff9aa2), Secondary: #ffd3b6, Background: pink-50, Text: slate-800. Soft cherry blossom gradient with gentle glow on light background.",
+    "gradient-coral": "Primary: linear-gradient(45deg,#f1a7a7,#e38d9c), Secondary: #ff9aa2, Background: orange-50, Text: stone-900. Bright coral-to-pink gradient with glowing edges.",
+    "gradient-turquoise": "Primary: linear-gradient(45deg,#6bffb8,#1fbbcd), Secondary: #a3e7d4, Background: slate-900, Text: slate-100. Vibrant turquoise-to-teal gradient with subtle glow effect.",
+    "gradient-maroon": "Primary: linear-gradient(45deg,#c21638,#b71f3c), Secondary: #e9a3aa, Background: stone-950, Text: stone-300. Deep maroon-to-pink gradient with rich glow effect.",
+    "gradient-navy": "Primary: linear-gradient(45deg,#2d3436,#17202a), Secondary: #8c9ea8, Background: slate-950, Text: slate-300. Deep navy-to-gray gradient with subtle glow effect.",
+    "gradient-olive": "Primary: linear-gradient(45deg,#bfc9bb,#d6e7cd), Secondary: #a1c2af, Background: stone-900, Text: stone-300. Muted olive-green-to-light-gray gradient with soft glow.",
+    "gradient-peach": "Primary: linear-gradient(45deg,#ffd8b1,#ffad60), Secondary: #ffb7a0, Background: orange-50, Text: stone-800. Soft peach-to-orange gradient with gentle glow effect.",
+    "gradient-plum": "Primary: linear-gradient(45deg,#9c27b0,#e91e63), Secondary: #f48fb1, Background: slate-950, Text: slate-300. Deep plum-to-pink gradient with rich glow effect.",
+    "gradient-red": "Primary: linear-gradient(45deg,#ff416c,#ff4b2b), Secondary: #e74c3c, Background: white, Text: neutral-900. Classic red gradient with vibrant glowing edges.",
+    "gradient-blue": "Primary: linear-gradient(45deg,#2193b0,#6dd5ed), Secondary: #3498db, Background: white, Text: neutral-900. Vibrant blue-to-cyan gradient with subtle glow effect.",
+    "gradient-green": "Primary: linear-gradient(45deg,#76ff03,#1de9b6), Secondary: #2ecc71, Background: white, Text: neutral-900. Bright green-to-teal gradient with glowing edges.",
+    "gradient-yellow": "Primary: linear-gradient(45deg,#ffd800,#ffb800), Secondary: #f39c12, Background: neutral-900, Text: white. Vibrant yellow gradient with intense glow effect.",
+    "gradient-orange": "Primary: linear-gradient(45deg,#ff7e5f,#feb47b), Secondary: #ffa726, Background: white, Text: neutral-900. Warm orange-to-pink gradient with glowing edges.",
+    "gradient-purple": "Primary: linear-gradient(45deg,#834d9b,#d04ed6), Secondary: #a1c4fd, Background: white, Text: neutral-900. Deep purple-to-blue gradient with rich glow effect.",
+    "gradient-pink": "Primary: linear-gradient(45deg,#f72585,#e364ff), Secondary: #d83b7a, Background: white, Text: neutral-900. Bright pink-to-purple gradient with glowing edges.",
+    "gradient-black": "Primary: linear-gradient(45deg,#1c1c1c,#323232), Secondary: #6e6e6e, Background: white, Text: black. Classic dark gray gradient with subtle glow effect.",
+    "gradient-white": "Primary: linear-gradient(45deg,#f0f0f0,#ffffff), Secondary: #d1d1d1, Background: black, Text: white. Clean light-gray-to-white gradient with glowing edges.",
+    "gradient-gray": "Primary: linear-gradient(45deg,#8e9eab,#eef2f3), Secondary: #a7b0c6, Background: white, Text: neutral-900. Soft gray gradient with subtle glow effect.",
+    "gradient-brown": "Primary: linear-gradient(45deg,#d1913c,#ffd89b), Secondary: #e2af5f, Background: amber-50, Text: amber-950. Warm brown-to-golden gradient with gentle glow.",
+    "gradient-mint-light": "Primary: linear-gradient(45deg,#a7d6cd,#c1f3ec), Secondary: #8ed3d6, Background: stone-50, Text: stone-800. Cool mint-green to light-blue gradient effect with soft glow.",
+    "gradient-coffee-light": "Primary: linear-gradient(45deg,#a7927b,#c1af9e), Secondary: #d3c6b4, Background: stone-100, Text: stone-900. Warm coffee-toned gradient with subtle glow.",
+    "gradient-matcha-light": "Primary: linear-gradient(45deg,#8cbf26,#72aa37), Secondary: #a1d87c, Background: stone-50, Text: stone-800. Gentle green tea gradient with soft glowing edges.",
+    "gradient-bubblegum-light": "Primary: linear-gradient(45deg,#ff9ec0,#f6b2e3), Secondary: #ffd1d8, Background: pink-50, Text: pink-950. Sweet bubblegum-to-pink gradient with playful glow.",
+    "gradient-lilac-light": "Primary: linear-gradient(45deg,#c7a8ff,#d6bdf2), Secondary: #e3cbf1, Background: slate-50, Text: slate-800. Soft lavender to purple gradient with gentle glow effect.",
+    "gradient-charcoal-light": "Primary: linear-gradient(45deg,#9ca8b7,#c5d6eb), Secondary: #a2b3cd, Background: zinc-900, Text: zinc-100. Modern dark gray gradient on light backdrop with subtle glow.",
+    "gradient-cream-light": "Primary: linear-gradient(45deg,#f3e8cc,#f7f1d6), Secondary: #f2eac3, Background: stone-50, Text: stone-900. Warm cream-to-beige gradient with soft glowing edges.",
+    "gradient-sand-light": "Primary: linear-gradient(45deg,#cdaa8b,#e7ccaa), Secondary: #d6bb9f, Background: stone-100, Text: stone-900. Desert-inspired sand-to-beige gradient with subtle glow effect.",
+    "gradient-terracotta-light": "Primary: linear-gradient(45deg,#c38a7e,#dfb2ab), Secondary: #d6afac, Background: stone-50, Text: stone-900. Earthen clay-to-pink gradient with gentle glow effect.",
+    "gradient-nord-light": "Primary: linear-gradient(45deg,#81c3dd,#a7e3f2), Secondary: #b6dce9, Background: slate-900, Text: slate-100. Clean arctic-blue-to-cyan gradient with subtle glow.",
+    "gradient-gruvbox-light": "Primary: linear-gradient(45deg,#b8bb26,#d79921), Secondary: #fabd2f, Background: stone-900, Text: stone-200. Retro-technical warm dark gradient with glowing edges.",
+    "gradient-solarized-dark-light": "Primary: linear-gradient(45deg,#83a598,#6c71c4), Secondary: #2aa198, Background: slate-950, Text: slate-300. Classic low-contrast solarized dark gradient with subtle glow.",
+    "gradient-solarized-light-light": "Primary: linear-gradient(45deg,#2a6d7e,#b5cde2), Secondary: #189cb0, Background: stone-100, Text: stone-800. Classic low-contrast solarized light gradient with gentle glow.",
+    "gradient-monokai-light": "Primary: linear-gradient(45deg,#f92672,#fd971f), Secondary: #a6e22d, Background: neutral-900, Text: white. Vibrant developer-editor inspired dark gradient with glowing edges.",
+    "gradient-one-dark-light": "Primary: linear-gradient(45deg,#3b82f6,#ec4899), Secondary: #10b981, Background: slate-900, Text: slate-200. Clean professional editor dark gradient with subtle glow.",
+    "gradient-royal-light": "Primary: linear-gradient(45deg,#3c7ae6,#fbbd0e), Secondary: #ffcc00, Background: slate-950, Text: slate-100. Majestic dark blue-to-golden gradient with glowing edges.",
+    "gradient-burgundy-light": "Primary: linear-gradient(45deg,#8b2637,#c03a5e), Secondary: #d84f79, Background: stone-950, Text: stone-200. Rich wine-red gradient with subtle glow effect.",
+    "gradient-rust-light": "Primary: linear-gradient(45deg,#b16e37,#c8a17d), Secondary: #e0ac69, Background: stone-950, Text: stone-200. Oxidized iron gradient with rich glowing edges.",
+    "gradient-mustard-light": "Primary: linear-gradient(45deg,#fbbf24,#ff9800), Secondary: #ffd700, Background: stone-900, Text: stone-100. Warm mustard-yellow gradient with intense glow effect.",
+    "gradient-sage-light": "Primary: linear-gradient(45deg,#6d9c8a,#83b2a3), Secondary: #a9c7bb, Background: stone-100, Text: stone-900. Muted herbal green gradient with soft glow effect.",
+    "gradient-steel-light": "Primary: linear-gradient(45deg,#6d9bcf,#8e9fb2), Secondary: #b3cde7, Background: slate-950, Text: slate-100. Industrial metallic blue-gray gradient with subtle glow.",
+    "gradient-tropical-light": "Primary: linear-gradient(45deg,#1a6d6d,#2bb8aa), Secondary: #4dbf9e, Background: teal-950, Text: white. Lush tropical paradise gradient with vibrant glowing edges.",
+    "gradient-wine-light": "Primary: linear-gradient(45deg,#7c3b51,#a06d7d), Secondary: #b88293, Background: stone-950, Text: stone-200. Rich aged wine gradient with glowing edges.",
+    "gradient-galaxy-light": "Primary: linear-gradient(45deg,#5e68c1,#a07ce5), Secondary: #d5baf0, Background: slate-950, Text: slate-100. Deep space nebula gradient with star-like accents.",
+    "gradient-aqua-light": "Primary: linear-gradient(45deg,#32e8c6,#1a7be0), Secondary: #6cd1f0, Background: slate-50, Text: slate-900. Fresh water-inspired light theme gradient with subtle glow effect.",
+    "gradient-concrete-light": "Primary: linear-gradient(45deg,#b3b8ba,#d2cfcf), Secondary: #e6e7ea, Background: stone-200, Text: stone-900. Raw urban concrete aesthetic gradient with soft glowing edges.",
+    "gradient-carbon-light": "Primary: linear-gradient(45deg,#a1a3aa,#b8bbbe), Secondary: #d1d6db, Background: neutral-950, Text: neutral-200. Carbon fiber dark tech look gradient with subtle glow effect.",
+    "gradient-cherry-light": "Primary: linear-gradient(45deg,#e75a8c,#ff3b6f), Secondary: #ff9aa2, Background: red-50, Text: red-950. Sweet cherry blossom red-pink gradient with gentle glow effect.",
+    "gradient-denim-light": "Primary: linear-gradient(45deg,#1e7ec8,#3a9cdd), Secondary: #6dabf2, Background: blue-50, Text: blue-950. Casual denim-inspired blue tones gradient with subtle glow.",
+    "gradient-honey-light": "Primary: linear-gradient(45deg,#ffcc00,#ffd700), Secondary: #ffb83a, Background: amber-50, Text: amber-950. Warm golden honey sweetness gradient with glowing edges.",
+    "gradient-lavender-dark-light": "Primary: linear-gradient(45deg,#c1b2e6,#dcd0f7), Secondary: #eae0ff, Background: indigo-950, Text: indigo-100. Soft lavender on deep dark backdrop gradient with gentle glow.",
+    "gradient-mint-dark-light": "Primary: linear-gradient(45deg,#8ed3d6,#a2f7f1), Secondary: #cdeff9, Background: emerald-950, Text: emerald-100. Cool mint on dark forest green gradient with subtle glow.",
+    "gradient-autumn-light": "Primary: linear-gradient(45deg,#e86d3a,#f7b27a), Secondary: #ffaa6c, Background: stone-100, Text: stone-900. Warm falling leaves and harvest tones gradient with glowing edges.",
+    "gradient-spring-light": "Primary: linear-gradient(45deg,#8ed3d6,#a3e7d4), Secondary: #b2f0db, Background: green-50, Text: green-950. Fresh blossoms and new growth gradient with gentle glow effect.",
+    "gradient-winter-light": "Primary: linear-gradient(45deg,#c1d8ed,#d6eaf7), Secondary: #e2f3ff, Background: slate-100, Text: slate-900. Cold snowy crisp winter whites gradient with subtle glow effect.",
+    "gradient-neon-pink-light": "Primary: linear-gradient(45deg,#f8a5c2,#f76baf), Secondary: #ff6b9d, Background: black, Text: pink-300. Hot neon pink on pure black gradient with glowing edges.",
+    "gradient-neon-green-light": "Primary: linear-gradient(45deg,#1de9b6,#8ed3d6), Secondary: #2ecc71, Background: black, Text: lime-300. Radioactive neon green on pure black gradient with glowing effect.",
+    "gradient-neon-blue-light": "Primary: linear-gradient(45deg,#00a8ff,#00d2d3), Secondary: #6c9cd7, Background: black, Text: blue-200. Vibrant neon blue on dark background gradient with glowing edges.",
+    "gradient-neon-purple-light": "Primary: linear-gradient(45deg,#b19cd9,#a87fd3), Secondary: #d8b6f2, Background: black, Text: purple-300. Electric neon purple glow effect on dark backdrop gradient with glowing edges.",
+    "gradient-neon-yellow-light": "Primary: linear-gradient(45deg,#ffd166,#ff9e7a), Secondary: #ffb78c, Background: black, Text: yellow-200. Bright neon yellow with glowing outline gradient with intense glow effect.",
+    "gradient-neon-orange-light": "Primary: linear-gradient(45deg,#ff9f3d,#ff6b35), Secondary: #ffa15a, Background: black, Text: orange-200. Intense neon orange with glow effect on dark background gradient with glowing edges.",
+    "gradient-neon-cyan-light": "Primary: linear-gradient(45deg,#00d2d3,#6c9cd7), Secondary: #1abc9c, Background: black, Text: cyan-200. Bright cyan with glowing edges on dark background gradient with subtle glow.",
+    "gradient-neon-teal-light": "Primary: linear-gradient(45deg,#00b8a3,#6d9bcf), Secondary: #76b852, Background: black, Text: teal-200. Vibrant neon teal glow effect on dark backdrop gradient with glowing edges.",
+    "gradient-neon-lime-light": "Primary: linear-gradient(45deg,#cdeb8b,#a1d87c), Secondary: #91e08f, Background: black, Text: lime-200. Bright neon lime with glowing outline on dark background gradient with intense glow effect.",
+    "gradient-neon-indigo-light": "Primary: linear-gradient(45deg,#6a3d8f,#c17ebe), Secondary: #b39cd0, Background: black, Text: indigo-200. Deep neon indigo glow effect on dark backdrop gradient with glowing edges.",
+    "gradient-neon-violet-light": "Primary: linear-gradient(45deg,#6a3d8f,#c17ebe), Secondary: #b39cd0, Background: black, Text: violet-200. Electric neon violet with glowing edges on dark background gradient with subtle glow.",
+    "gradient-neon-fuchsia-light": "Primary: linear-gradient(45deg,#ff6b9d,#f76baf), Secondary: #e81c8a, Background: black, Text: fuchsia-200. Bright neon fuchsia glow effect on dark backdrop gradient with glowing edges.",
+    "gradient-neon-pink-dark-light": "Primary: linear-gradient(45deg,#d9378f,#b5179e), Secondary: #ff6b9d, Background: slate-950, Text: pink-100. Deep neon pink on dark background gradient with glowing edges.",
+    "gradient-neon-green-dark-light": "Primary: linear-gradient(45deg,#2ecc71,#8ed3d6), Secondary: #a1c2af, Background: slate-950, Text: green-100. Rich neon green glow effect on dark backdrop gradient with glowing edges.",
+    "gradient-neon-blue-dark-light": "Primary: linear-gradient(45deg,#2e8bfc,#6d9bcf), Secondary: #a3e7d4, Background: slate-950, Text: blue-100. Deep neon blue on dark background gradient with glowing edges.",
+    "gradient-neon-purple-dark-light": "Primary: linear-gradient(45deg,#834d9b,#cbbaf5), Secondary: #e6d7fa, Background: slate-950, Text: purple-100. Intense neon purple glow effect on dark backdrop gradient with glowing edges.",
+    "gradient-neon-yellow-dark-light": "Primary: linear-gradient(45deg,#ffd800,#f39c12), Secondary: #ffb78c, Background: slate-950, Text: yellow-100. Bright neon yellow on dark background gradient with glowing edges.",
+    "gradient-neon-orange-dark-light": "Primary: linear-gradient(45deg,#ff6b35,#f7974a), Secondary: #ffa15a, Background: slate-950, Text: orange-100. Intense neon orange glow effect on dark backdrop gradient with glowing edges.",
+    "gradient-neon-cyan-dark-light": "Primary: linear-gradient(45deg,#00d2d3,#6c9cd7), Secondary: #8ed3d6, Background: slate-950, Text: cyan-100. Bright neon cyan with glowing edges on dark background gradient with subtle glow.",
+    "gradient-neon-teal-dark-light": "Primary: linear-gradient(45deg,#2bb8aa,#a3e7d4), Secondary: #cdeff9, Background: slate-950, Text: teal-100. Vibrant neon teal glow effect on dark backdrop gradient with glowing edges.",
+    "gradient-neon-lime-dark-light": "Primary: linear-gradient(45deg,#a1d87c,#8ed3d6), Secondary: #b2f0db, Background: slate-950, Text: lime-100. Bright neon lime with glowing outline on dark background gradient with intense glow effect.",
+    "gradient-neon-indigo-dark-light": "Primary: linear-gradient(45deg,#8e2de2,#6a3d8f), Secondary: #b39cd0, Background: slate-950, Text: indigo-100. Deep neon indigo glow effect on dark backdrop gradient with glowing edges.",
+    "gradient-neon-violet-dark-light": "Primary: linear-gradient(45deg,#6a3d8f,#c17ebe), Secondary: #b39cd0, Background: slate-950, Text: violet-100. Electric neon violet with glowing edges on dark background gradient with subtle glow.",
+    "gradient-neon-fuchsia-dark-light": "Primary: linear-gradient(45deg,#ff6b9d,#f76baf), Secondary: #e81c8a, Background: slate-950, Text: fuchsia-100. Bright neon fuchsia glow effect on dark backdrop gradient with glowing edges.",
+    "gradient-sakura-dark-light": "Primary: linear-gradient(45deg,#fbd2c1,#ff9aa2), Secondary: #ffd3b6, Background: pink-50, Text: slate-800. Soft cherry blossom gradient on light background with gentle glow effect.",
+    "gradient-lavender-dark-light": "Primary: linear-gradient(45deg,#e6d7fa,#cbbaf5), Secondary: #a08ae3, Background: indigo-950, Text: indigo-100. Soft lavender-to-purple gradient with subtle glow on dark backdrop.",
+    "gradient-sunset-dark-light": "Primary: linear-gradient(45deg,#ff7eb3,#f7c27e), Secondary: #ffd3b6, Background: stone-950, Text: stone-50. Warm sunset gradient on dark background with glowing edges effect.",
+    "gradient-ocean-dark-light": "Primary: linear-gradient(45deg,#1e3c72,#2a5298), Secondary: #6d9bcf, Background: slate-900, Text: slate-50. Deep ocean blue-to-cyan gradient with subtle glow on dark backdrop.",
+    "gradient-mint-dark-light": "Primary: linear-gradient(45deg,#1e3c72,#2a5298), Secondary: #6d9bcf, Background: emerald-950, Text: emerald-100. Cool mint-green to blue gradient on dark background with subtle glow effect.",
+    "gradient-sakura-dark-light": "Primary: linear-gradient(45deg,#e7b9ce,#ff9aa2), Secondary: #ffd3b6, Background: pink-50, Text: slate-800. Soft cherry blossom gradient on light background with gentle glow effect.",
+    "gradient-coral-dark-light": "Primary: linear-gradient(45deg,#f1a7a7,#e38d9c), Secondary: #ff9aa2, Background: orange-50, Text: stone-900. Bright coral-to-pink gradient with glowing edges on light background.",
+    "gradient-turquoise-dark-light": "Primary: linear-gradient(45deg,#6bffb8,#1fbbcd), Secondary: #a3e7d4, Background: slate-900, Text: slate-100. Vibrant turquoise-to-teal gradient with subtle glow effect on dark backdrop.",
+    "gradient-maroon-dark-light": "Primary: linear-gradient(45deg,#c21638,#b71f3c), Secondary: #e9a3aa, Background: stone-950, Text: stone-300. Deep maroon-to-pink gradient with rich glow effect on dark background.",
+    "gradient-navy-dark-light": "Primary: linear-gradient(45deg,#2d3436,#17202a), Secondary: #8c9ea8, Background: slate-950, Text: slate-300. Deep navy-to-gray gradient with subtle glow effect on dark backdrop.",
+    "gradient-olive-dark-light": "Primary: linear-gradient(45deg,#bfc9bb,#d6e7cd), Secondary: #a1c2af, Background: stone-900, Text: stone-300. Muted olive-green-to-light-gray gradient with soft glow on dark background.",
+    "gradient-peach-dark-light": "Primary: linear-gradient(45deg,#ffd8b1,#ffad60), Secondary: #ffb7a0, Background: orange-50, Text: stone-800. Soft peach-to-orange gradient with gentle glow effect on light backdrop.",
+    "gradient-plum-dark-light": "Primary: linear-gradient(45deg,#9c27b0,#e91e63), Secondary: #f48fb1, Background: slate-950, Text: slate-300. Deep plum-to-pink gradient with rich glow effect on dark background.",
+    "gradient-red-dark-light": "Primary: linear-gradient(45deg,#ff416c,#ff4b2b), Secondary: #e74c3c, Background: white, Text: neutral-900. Classic red gradient with vibrant glowing edges on light backdrop.",
+    "gradient-blue-dark-light": "Primary: linear-gradient(45deg,#2193b0,#6dd5ed), Secondary: #3498db, Background: white, Text: neutral-900. Vibrant blue-to-cyan gradient with subtle glow effect on light background.",
+    "gradient-green-dark-light": "Primary: linear-gradient(45deg,#76ff03,#1de9b6), Secondary: #2ecc71, Background: white, Text: neutral-900. Bright green-to-teal gradient with glowing edges on light backdrop.",
+    "gradient-yellow-dark-light": "Primary: linear-gradient(45deg,#ffd800,#ffb800), Secondary: #f39c12, Background: neutral-900, Text: white. Vibrant yellow gradient with intense glow effect on dark background.",
+    "gradient-orange-dark-light": "Primary: linear-gradient(45deg,#ff7e5f,#feb47b), Secondary: #ffa726, Background: white, Text: neutral-900. Warm orange-to-pink gradient with glowing edges on light backdrop.",
+    "gradient-purple-dark-light": "Primary: linear-gradient(45deg,#834d9b,#d04ed6), Secondary: #a1c4fd, Background: white, Text: neutral-900. Deep purple-to-blue gradient with rich glow effect on light background.",
+    "gradient-pink-dark-light": "Primary: linear-gradient(45deg,#f72585,#e364ff), Secondary: #d83b7a, Background: white, Text: neutral-900. Bright pink-to-purple gradient with glowing edges on light backdrop.",
+    "gradient-black-dark-light": "Primary: linear-gradient(45deg,#1c1c1c,#323232), Secondary: #6e6e6e, Background: white, Text: black. Classic dark gray gradient with subtle glow effect on light background.",
+    "gradient-white-dark-light": "Primary: linear-gradient(45deg,#f0f0f0,#ffffff), Secondary: #d1d1d1, Background: black, Text: white. Clean light-gray-to-white gradient with glowing edges on dark backdrop.",
+    "gradient-gray-dark-light": "Primary: linear-gradient(45deg,#8e9eab,#eef2f3), Secondary: #a7b0c6, Background: white, Text: neutral-900. Soft gray gradient with subtle glow effect on light background.",
+    "gradient-brown-dark-light": "Primary: linear-gradient(45deg,#d1913c,#ffd89b), Secondary: #e2af5f, Background: amber-50, Text: amber-950. Warm brown-to-golden gradient with gentle glow on light backdrop.",
+    "gradient-mint-light-dark": "Primary: linear-gradient(45deg,#a7d6cd,#c1f3ec), Secondary: #8ed3d6, Background: stone-50, Text: stone-800. Cool mint-green to light-blue gradient effect with soft glow on light backdrop.",
+    "gradient-coffee-light-dark": "Primary: linear-gradient(45deg,#a7927b,#c1af9e), Secondary: #d3c6b4, Background: stone-100, Text: stone-900. Warm coffee-toned gradient with subtle glow on light background.",
+    "gradient-matcha-light-dark": "Primary: linear-gradient(45deg,#8cbf26,#72aa37), Secondary: #a1d87c, Background: stone-50, Text: stone-800. Gentle green tea gradient with soft glowing edges on light backdrop.",
+    "gradient-bubblegum-light-dark": "Primary: linear-gradient(45deg,#ff9ec0,#f6b2e3), Secondary: #ffd1d8, Background: pink-50, Text: pink-950. Sweet bubblegum-to-pink gradient with playful glow on light background.",
+    "gradient-lilac-light-dark": "Primary: linear-gradient(45deg,#c7a8ff,#d6bdf2), Secondary: #e3cbf1, Background: slate-50, Text: slate-800. Soft lavender to purple gradient with gentle glow effect on light backdrop.",
+    "gradient-charcoal-light-dark": "Primary: linear-gradient(45deg,#9ca8b7,#c5d6eb), Secondary: #a2b3cd, Background: zinc-900, Text: zinc-100. Modern dark gray gradient on light backdrop with subtle glow.",
+    "gradient-cream-light-dark": "Primary: linear-gradient(45deg,#f3e8cc,#f7f1d6), Secondary: #f2eac3, Background: stone-50, Text: stone-900. Warm cream-to-beige gradient with soft glowing edges on light background.",
+    "gradient-sand-light-dark": "Primary: linear-gradient(45deg,#cdaa8b,#e7ccaa), Secondary: #d6bb9f, Background: stone-100, Text: stone-900. Desert-inspired sand-to-beige gradient with subtle glow effect on light backdrop.",
+    "gradient-terracotta-light-dark": "Primary: linear-gradient(45deg,#c38a7e,#dfb2ab), Secondary: #d6afac, Background: stone-50, Text: stone-900. Earthen clay-to-pink gradient with gentle glow effect on light background.",
+    "gradient-nord-light-dark": "Primary: linear-gradient(45deg,#81c3dd,#a7e3f2), Secondary: #b6dce9, Background: slate-900, Text: slate-100. Clean arctic-blue-to-cyan gradient with subtle glow on dark backdrop.",
+    "gradient-gruvbox-light-dark": "Primary: linear-gradient(45deg,#b8bb26,#d79921), Secondary: #fabd2f, Background: stone-900, Text: stone-200. Retro-technical warm dark gradient with glowing edges on dark backdrop.",
+    "gradient-solarized-dark-light-dark": "Primary: linear-gradient(45deg,#83a598,#6c71c4), Secondary: #2aa198, Background: slate-950, Text: slate-300. Classic low-contrast solarized dark gradient with subtle glow on dark backdrop.",
+    "gradient-solarized-light-light-dark": "Primary: linear-gradient(45deg,#2a6d7e,#b5cde2), Secondary: #189cb0, Background: stone-100, Text: stone-800. Classic low-contrast solarized light gradient with gentle glow on light backdrop.",
+    "gradient-monokai-light-dark": "Primary: linear-gradient(45deg,#f92672,#fd971f), Secondary: #a6e22d, Background: neutral-900, Text: white. Vibrant developer-editor inspired dark gradient with glowing edges on dark backdrop.",
+    "gradient-one-dark-light-dark": "Primary: linear-gradient(45deg,#3b82f6,#ec4899), Secondary: #10b981, Background: slate-900, Text: slate-200. Clean professional editor dark gradient with subtle glow on dark backdrop.",
+    "gradient-royal-light-dark": "Primary: linear-gradient(45deg,#3c7ae6,#fbbd0e), Secondary: #ffcc00, Background: slate-950, Text: slate-100. Majestic dark blue-to-golden gradient with glowing edges on dark backdrop.",
+    "gradient-burgundy-light-dark": "Primary: linear-gradient(45deg,#8b2637,#c03a5e), Secondary: #d84f79, Background: stone-950, Text: stone-200. Rich wine-red gradient with subtle glow effect on dark backdrop.",
+    "gradient-rust-light-dark": "Primary: linear-gradient(45deg,#b16e37,#c8a17d), Secondary: #e0ac69, Background: stone-950, Text: stone-200. Oxidized iron gradient with rich glowing edges on dark backdrop.",
+    "gradient-mustard-light-dark": "Primary: linear-gradient(45deg,#fbbf24,#ff9800), Secondary: #ffd700, Background: stone-900, Text: stone-100. Warm mustard-yellow gradient with intense glow effect on dark backdrop.",
+    "gradient-sage-light-dark": "Primary: linear-gradient(45deg,#6d9c8a,#83b2a3), Secondary: #a9c7bb, Background: stone-100, Text: stone-900. Muted herbal green gradient with soft glow effect on light backdrop.",
+    "gradient-steel-light-dark": "Primary: linear-gradient(45deg,#6d9bcf,#8e9fb2), Secondary: #b3cde7, Background: slate-950, Text: slate-100. Industrial metallic blue-gray gradient with subtle glow on dark backdrop.",
+    "gradient-tropical-light-dark": "Primary: linear-gradient(45deg,#1a6d6d,#2bb8aa), Secondary: #4dbf9e, Background: teal-950, Text: white. Lush tropical paradise gradient with vibrant glowing edges on dark backdrop.",
+    "gradient-wine-light-dark": "Primary: linear-gradient(45deg,#7c3b51,#a06d7d), Secondary: #b88293, Background: stone-950, Text: stone-200. Rich aged wine gradient with glowing edges on dark backdrop.",
+    "gradient-galaxy-light-dark": "Primary: linear-gradient(45deg,#5e68c1,#a07ce5), Secondary: #d5baf0, Background: slate-950, Text: slate-100. Deep space nebula gradient with star-like accents on dark backdrop.",
+    "gradient-aqua-light-dark": "Primary: linear-gradient(45deg,#32e8c6,#1a7be0), Secondary: #6cd1f0, Background: slate-50, Text: slate-900. Fresh water-inspired light theme gradient with subtle glow effect on light backdrop.",
+    "gradient-concrete-light-dark": "Primary: linear-gradient(45deg,#b3b8ba,#d2cfcf), Secondary: #e6e7ea, Background: stone-200, Text: stone-900. Raw urban concrete aesthetic gradient with soft glowing edges on light backdrop.",
+    "gradient-carbon-light-dark": "Primary: linear-gradient(45deg,#a1a3aa,#b8bbbe), Secondary: #d1d6db, Background: neutral-950, Text: neutral-200. Carbon fiber dark tech look gradient with subtle glow on dark backdrop.",
+    "gradient-cherry-light-dark": "Primary: linear-gradient(45deg,#e75a8c,#ff3b6f), Secondary: #ff9aa2, Background: red-50, Text: red-950. Sweet cherry blossom red-pink gradient with gentle glow effect on light backdrop.",
+    "gradient-denim-light-dark": "Primary: linear-gradient(45deg,#1e7ec8,#3a9cdd), Secondary: #6dabf2, Background: blue-50, Text: blue-950. Casual denim-inspired blue tones gradient with subtle glow on light backdrop.",
+    "gradient-honey-light-dark": "Primary: linear-gradient(45deg,#ffcc00,#ffd700), Secondary: #ffb83a, Background: amber-50, Text: amber-950. Warm golden honey sweetness gradient with glowing edges on light backdrop.",
+    "gradient-lavender-dark-light-dark": "Primary: linear-gradient(45deg,#c1b2e6,#dcd0f7), Secondary: #eae0ff, Background: indigo-950, Text: indigo-100. Soft lavender on deep dark backdrop gradient with gentle glow effect.",
+    "gradient-mint-dark-light-dark": "Primary: linear-gradient(45deg,#8ed3d6,#a2f7f1), Secondary: #cdeff9, Background: emerald-950, Text: emerald-100. Cool mint on dark forest green gradient with subtle glow effect.",
+    "gradient-autumn-light-dark": "Primary: linear-gradient(45deg,#e86d3a,#f7b27a), Secondary: #ffaa6c, Background: stone-100, Text: stone-900. Warm falling leaves and harvest tones gradient with glowing edges on light backdrop.",
+    "gradient-spring-light-dark": "Primary: linear-gradient(45deg,#8ed3d6,#a3e7d4), Secondary: #b2f0db, Background: green-50, Text: green-950. Fresh blossoms and new growth gradient with gentle glow effect on light backdrop.",
+    "gradient-winter-light-dark": "Primary: linear-gradient(45deg,#c1d8ed,#d6eaf7), Secondary: #e2f3ff, Background: slate-100, Text: slate-900. Cold snowy crisp winter whites gradient with subtle glow effect on light backdrop.",
+    "gradient-neon-pink-light-dark": "Primary: linear-gradient(45deg,#f8a5c2,#f76baf), Secondary: #ff6b9d, Background: black, Text: pink-300. Hot neon pink on pure black gradient with glowing edges effect.",
+    "gradient-neon-green-light-dark": "Primary: linear-gradient(45deg,#1de9b6,#8ed3d6), Secondary: #2ecc71, Background: black, Text: lime-300. Radioactive neon green on pure black gradient with glowing effect on dark backdrop.",
+    "gradient-neon-blue-light-dark": "Primary: linear-gradient(45deg,#00a8ff,#00d2d3), Secondary: #6c9cd7, Background: black, Text: blue-200. Vibrant neon blue on dark background gradient with glowing edges effect.",
+    "gradient-neon-purple-light-dark": "Primary: linear-gradient(45deg,#b19cd9,#a87fd3), Secondary: #d8b6f2, Background: black, Text: purple-300. Electric neon purple glow effect on dark backdrop gradient with glowing edges.",
+    "gradient-neon-yellow-light-dark": "Primary: linear-gradient(45deg,#ffd166,#ff9e7a), Secondary: #ffb78c, Background: black, Text: yellow-200. Bright neon yellow with glowing outline gradient with intense glow effect on dark backdrop.",
+    "gradient-neon-orange-light-dark": "Primary: linear-gradient(45deg,#ff9f3d,#ff6b35), Secondary: #ffa15a, Background: black, Text: orange-200. Intense neon orange with glow effect on dark background gradient with glowing edges.",
+    "gradient-neon-cyan-light-dark": "Primary: linear-gradient(45deg,#00d2d3,#6c9cd7), Secondary: #1abc9c, Background: black, Text: cyan-200. Bright neon cyan with glowing edges on dark background gradient with subtle glow.",
+    "gradient-neon-teal-light-dark": "Primary: linear-gradient(45deg,#00b8a3,#6d9bcf), Secondary: #76b852, Background: black, Text: teal-200. Vibrant neon teal glow effect on dark backdrop gradient with glowing edges.",
+    "gradient-neon-lime-light-dark": "Primary: linear-gradient(45deg,#cdeb8b,#a1d87c), Secondary: #91e08f, Background: black, Text: lime-200. Bright neon lime with glowing outline on dark background gradient with intense glow effect.",
+    "gradient-neon-indigo-light-dark": "Primary: linear-gradient(45deg,#6a3d8f,#c17ebe), Secondary: #b39cd0, Background: black, Text: indigo-200. Deep neon indigo glow effect on dark backdrop gradient with glowing edges.",
+
+    "emerald-dark-v2": "Primary: emerald-500, Secondary: emerald-400, Background: zinc-900, Text: emerald-100. A beautiful dark variation of emerald.",
+    "emerald-light-v2": "Primary: emerald-500, Secondary: emerald-400, Background: zinc-900, Text: emerald-100. A beautiful light variation of emerald.",
+    "emerald-neon-v2": "Primary: emerald-500, Secondary: emerald-400, Background: zinc-900, Text: emerald-100. A beautiful neon variation of emerald.",
+    "emerald-pastel-v2": "Primary: emerald-500, Secondary: emerald-400, Background: zinc-900, Text: emerald-100. A beautiful pastel variation of emerald.",
+    "emerald-muted-v2": "Primary: emerald-500, Secondary: emerald-400, Background: zinc-900, Text: emerald-100. A beautiful muted variation of emerald.",
+    "emerald-vivid-v2": "Primary: emerald-500, Secondary: emerald-400, Background: zinc-900, Text: emerald-100. A beautiful vivid variation of emerald.",
+    "emerald-pale-v2": "Primary: emerald-500, Secondary: emerald-400, Background: zinc-900, Text: emerald-100. A beautiful pale variation of emerald.",
+    "emerald-deep-v2": "Primary: emerald-500, Secondary: emerald-400, Background: zinc-900, Text: emerald-100. A beautiful deep variation of emerald.",
+    "indigo-dark-v2": "Primary: indigo-500, Secondary: indigo-400, Background: zinc-900, Text: indigo-100. A beautiful dark variation of indigo.",
+    "indigo-light-v2": "Primary: indigo-500, Secondary: indigo-400, Background: zinc-900, Text: indigo-100. A beautiful light variation of indigo.",
+    "indigo-neon-v2": "Primary: indigo-500, Secondary: indigo-400, Background: zinc-900, Text: indigo-100. A beautiful neon variation of indigo.",
+    "indigo-pastel-v2": "Primary: indigo-500, Secondary: indigo-400, Background: zinc-900, Text: indigo-100. A beautiful pastel variation of indigo.",
+    "indigo-muted-v2": "Primary: indigo-500, Secondary: indigo-400, Background: zinc-900, Text: indigo-100. A beautiful muted variation of indigo.",
+    "indigo-vivid-v2": "Primary: indigo-500, Secondary: indigo-400, Background: zinc-900, Text: indigo-100. A beautiful vivid variation of indigo.",
+    "indigo-pale-v2": "Primary: indigo-500, Secondary: indigo-400, Background: zinc-900, Text: indigo-100. A beautiful pale variation of indigo.",
+    "indigo-deep-v2": "Primary: indigo-500, Secondary: indigo-400, Background: zinc-900, Text: indigo-100. A beautiful deep variation of indigo.",
+    "rose-dark-v2": "Primary: rose-500, Secondary: rose-400, Background: zinc-900, Text: rose-100. A beautiful dark variation of rose.",
+    "rose-light-v2": "Primary: rose-500, Secondary: rose-400, Background: zinc-900, Text: rose-100. A beautiful light variation of rose.",
+    "rose-neon-v2": "Primary: rose-500, Secondary: rose-400, Background: zinc-900, Text: rose-100. A beautiful neon variation of rose.",
+    "rose-pastel-v2": "Primary: rose-500, Secondary: rose-400, Background: zinc-900, Text: rose-100. A beautiful pastel variation of rose.",
+    "rose-muted-v2": "Primary: rose-500, Secondary: rose-400, Background: zinc-900, Text: rose-100. A beautiful muted variation of rose.",
+    "rose-vivid-v2": "Primary: rose-500, Secondary: rose-400, Background: zinc-900, Text: rose-100. A beautiful vivid variation of rose.",
+    "rose-pale-v2": "Primary: rose-500, Secondary: rose-400, Background: zinc-900, Text: rose-100. A beautiful pale variation of rose.",
+    "rose-deep-v2": "Primary: rose-500, Secondary: rose-400, Background: zinc-900, Text: rose-100. A beautiful deep variation of rose.",
+    "amber-dark-v2": "Primary: amber-500, Secondary: amber-400, Background: zinc-900, Text: amber-100. A beautiful dark variation of amber.",
+    "amber-light-v2": "Primary: amber-500, Secondary: amber-400, Background: zinc-900, Text: amber-100. A beautiful light variation of amber.",
+    "amber-neon-v2": "Primary: amber-500, Secondary: amber-400, Background: zinc-900, Text: amber-100. A beautiful neon variation of amber.",
+    "amber-pastel-v2": "Primary: amber-500, Secondary: amber-400, Background: zinc-900, Text: amber-100. A beautiful pastel variation of amber.",
+    "amber-muted-v2": "Primary: amber-500, Secondary: amber-400, Background: zinc-900, Text: amber-100. A beautiful muted variation of amber.",
+    "amber-vivid-v2": "Primary: amber-500, Secondary: amber-400, Background: zinc-900, Text: amber-100. A beautiful vivid variation of amber.",
+    "amber-pale-v2": "Primary: amber-500, Secondary: amber-400, Background: zinc-900, Text: amber-100. A beautiful pale variation of amber.",
+    "amber-deep-v2": "Primary: amber-500, Secondary: amber-400, Background: zinc-900, Text: amber-100. A beautiful deep variation of amber.",
+    "fuchsia-dark-v2": "Primary: fuchsia-500, Secondary: fuchsia-400, Background: zinc-900, Text: fuchsia-100. A beautiful dark variation of fuchsia.",
+    "fuchsia-light-v2": "Primary: fuchsia-500, Secondary: fuchsia-400, Background: zinc-900, Text: fuchsia-100. A beautiful light variation of fuchsia.",
+    "fuchsia-neon-v2": "Primary: fuchsia-500, Secondary: fuchsia-400, Background: zinc-900, Text: fuchsia-100. A beautiful neon variation of fuchsia.",
+    "fuchsia-pastel-v2": "Primary: fuchsia-500, Secondary: fuchsia-400, Background: zinc-900, Text: fuchsia-100. A beautiful pastel variation of fuchsia.",
+    "fuchsia-muted-v2": "Primary: fuchsia-500, Secondary: fuchsia-400, Background: zinc-900, Text: fuchsia-100. A beautiful muted variation of fuchsia.",
+    "fuchsia-vivid-v2": "Primary: fuchsia-500, Secondary: fuchsia-400, Background: zinc-900, Text: fuchsia-100. A beautiful vivid variation of fuchsia.",
+    "fuchsia-pale-v2": "Primary: fuchsia-500, Secondary: fuchsia-400, Background: zinc-900, Text: fuchsia-100. A beautiful pale variation of fuchsia.",
+    "fuchsia-deep-v2": "Primary: fuchsia-500, Secondary: fuchsia-400, Background: zinc-900, Text: fuchsia-100. A beautiful deep variation of fuchsia.",
+    "cyan-dark-v2": "Primary: cyan-500, Secondary: cyan-400, Background: zinc-900, Text: cyan-100. A beautiful dark variation of cyan.",
+    "cyan-light-v2": "Primary: cyan-500, Secondary: cyan-400, Background: zinc-900, Text: cyan-100. A beautiful light variation of cyan.",
+    "cyan-neon-v2": "Primary: cyan-500, Secondary: cyan-400, Background: zinc-900, Text: cyan-100. A beautiful neon variation of cyan.",
+    "cyan-pastel-v2": "Primary: cyan-500, Secondary: cyan-400, Background: zinc-900, Text: cyan-100. A beautiful pastel variation of cyan.",
+    "cyan-muted-v2": "Primary: cyan-500, Secondary: cyan-400, Background: zinc-900, Text: cyan-100. A beautiful muted variation of cyan.",
+    "cyan-vivid-v2": "Primary: cyan-500, Secondary: cyan-400, Background: zinc-900, Text: cyan-100. A beautiful vivid variation of cyan.",
+    "cyan-pale-v2": "Primary: cyan-500, Secondary: cyan-400, Background: zinc-900, Text: cyan-100. A beautiful pale variation of cyan.",
+    "cyan-deep-v2": "Primary: cyan-500, Secondary: cyan-400, Background: zinc-900, Text: cyan-100. A beautiful deep variation of cyan.",
+    "teal-dark-v2": "Primary: teal-500, Secondary: teal-400, Background: zinc-900, Text: teal-100. A beautiful dark variation of teal.",
+    "teal-light-v2": "Primary: teal-500, Secondary: teal-400, Background: zinc-900, Text: teal-100. A beautiful light variation of teal.",
+    "teal-neon-v2": "Primary: teal-500, Secondary: teal-400, Background: zinc-900, Text: teal-100. A beautiful neon variation of teal.",
+    "teal-pastel-v2": "Primary: teal-500, Secondary: teal-400, Background: zinc-900, Text: teal-100. A beautiful pastel variation of teal.",
+    "teal-muted-v2": "Primary: teal-500, Secondary: teal-400, Background: zinc-900, Text: teal-100. A beautiful muted variation of teal.",
+    "teal-vivid-v2": "Primary: teal-500, Secondary: teal-400, Background: zinc-900, Text: teal-100. A beautiful vivid variation of teal.",
+    "teal-pale-v2": "Primary: teal-500, Secondary: teal-400, Background: zinc-900, Text: teal-100. A beautiful pale variation of teal.",
+    "teal-deep-v2": "Primary: teal-500, Secondary: teal-400, Background: zinc-900, Text: teal-100. A beautiful deep variation of teal.",
+
+
+"premium-executive-blue": "Primary: slate-800, Secondary: blue-900, Background: slate-50, Text: slate-900. Highly professional, trustworthy, corporate feel.",
+"premium-luxury-gold": "Primary: amber-500, Secondary: yellow-600, Background: zinc-950, Text: zinc-50. Elegant, exclusive, dark luxury aesthetic.",
+"comfort-soft-linen": "Primary: stone-400, Secondary: orange-200, Background: stone-50, Text: stone-800. Easy on the eyes, comfortable, warm, and inviting.",
+"professional-monochrome": "Primary: zinc-800, Secondary: zinc-500, Background: white, Text: zinc-950. Crisp, ultra-clean, minimalist business style.",
+"premium-silk-dark": "Primary: violet-900, Secondary: slate-800, Background: black, Text: slate-200. Deep, rich, smooth luxury dark mode.",
 }
 
 ANIMATIONS = {
@@ -256,7 +501,35 @@ ANIMATIONS = {
 .animate-bounce-in { animation: bounceIn 0.8s; }""",
     "bounce out": """Add this to CSS:
 @keyframes bounceOut { 20% { transform: scale3d(0.9, 0.9, 0.9); } 50%, 55% { opacity: 1; transform: scale3d(1.1, 1.1, 1.1); } to { opacity: 0; transform: scale3d(0.3, 0.3, 0.3); } }
-.animate-bounce-out { animation: bounceOut 0.8s; }"""
+.animate-bounce-out { animation: bounceOut 0.8s; }""",
+
+    "slide-up-fast-v2": """Add this to CSS:\n@keyframes slide-up-fast { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-up-fast { animation: slide-up-fast 1s ease-in-out forwards; }""",
+    "slide-up-slow-v2": """Add this to CSS:\n@keyframes slide-up-slow { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-up-slow { animation: slide-up-slow 1s ease-in-out forwards; }""",
+    "slide-up-medium-v2": """Add this to CSS:\n@keyframes slide-up-medium { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-up-medium { animation: slide-up-medium 1s ease-in-out forwards; }""",
+    "slide-down-fast-v2": """Add this to CSS:\n@keyframes slide-down-fast { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-down-fast { animation: slide-down-fast 1s ease-in-out forwards; }""",
+    "slide-down-slow-v2": """Add this to CSS:\n@keyframes slide-down-slow { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-down-slow { animation: slide-down-slow 1s ease-in-out forwards; }""",
+    "slide-down-medium-v2": """Add this to CSS:\n@keyframes slide-down-medium { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-down-medium { animation: slide-down-medium 1s ease-in-out forwards; }""",
+    "slide-left-fast-v2": """Add this to CSS:\n@keyframes slide-left-fast { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-left-fast { animation: slide-left-fast 1s ease-in-out forwards; }""",
+    "slide-left-slow-v2": """Add this to CSS:\n@keyframes slide-left-slow { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-left-slow { animation: slide-left-slow 1s ease-in-out forwards; }""",
+    "slide-left-medium-v2": """Add this to CSS:\n@keyframes slide-left-medium { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-left-medium { animation: slide-left-medium 1s ease-in-out forwards; }""",
+    "slide-right-fast-v2": """Add this to CSS:\n@keyframes slide-right-fast { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-right-fast { animation: slide-right-fast 1s ease-in-out forwards; }""",
+    "slide-right-slow-v2": """Add this to CSS:\n@keyframes slide-right-slow { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-right-slow { animation: slide-right-slow 1s ease-in-out forwards; }""",
+    "slide-right-medium-v2": """Add this to CSS:\n@keyframes slide-right-medium { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-right-medium { animation: slide-right-medium 1s ease-in-out forwards; }""",
+    "slide-top-left-fast-v2": """Add this to CSS:\n@keyframes slide-top-left-fast { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-top-left-fast { animation: slide-top-left-fast 1s ease-in-out forwards; }""",
+    "slide-top-left-slow-v2": """Add this to CSS:\n@keyframes slide-top-left-slow { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-top-left-slow { animation: slide-top-left-slow 1s ease-in-out forwards; }""",
+    "slide-top-left-medium-v2": """Add this to CSS:\n@keyframes slide-top-left-medium { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-top-left-medium { animation: slide-top-left-medium 1s ease-in-out forwards; }""",
+    "slide-top-right-fast-v2": """Add this to CSS:\n@keyframes slide-top-right-fast { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-top-right-fast { animation: slide-top-right-fast 1s ease-in-out forwards; }""",
+    "slide-top-right-slow-v2": """Add this to CSS:\n@keyframes slide-top-right-slow { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-top-right-slow { animation: slide-top-right-slow 1s ease-in-out forwards; }""",
+    "slide-top-right-medium-v2": """Add this to CSS:\n@keyframes slide-top-right-medium { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-top-right-medium { animation: slide-top-right-medium 1s ease-in-out forwards; }""",
+    "slide-bottom-left-fast-v2": """Add this to CSS:\n@keyframes slide-bottom-left-fast { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-bottom-left-fast { animation: slide-bottom-left-fast 1s ease-in-out forwards; }""",
+    "slide-bottom-left-slow-v2": """Add this to CSS:\n@keyframes slide-bottom-left-slow { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-bottom-left-slow { animation: slide-bottom-left-slow 1s ease-in-out forwards; }""",
+    "slide-bottom-left-medium-v2": """Add this to CSS:\n@keyframes slide-bottom-left-medium { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-bottom-left-medium { animation: slide-bottom-left-medium 1s ease-in-out forwards; }""",
+    "slide-bottom-right-fast-v2": """Add this to CSS:\n@keyframes slide-bottom-right-fast { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-bottom-right-fast { animation: slide-bottom-right-fast 1s ease-in-out forwards; }""",
+    "slide-bottom-right-slow-v2": """Add this to CSS:\n@keyframes slide-bottom-right-slow { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-bottom-right-slow { animation: slide-bottom-right-slow 1s ease-in-out forwards; }""",
+    "slide-bottom-right-medium-v2": """Add this to CSS:\n@keyframes slide-bottom-right-medium { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-bottom-right-medium { animation: slide-bottom-right-medium 1s ease-in-out forwards; }""",
+
+"float-gentle": "Add this to CSS: `@keyframes floatGentle { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }`. Class: `.animate-float-gentle { animation: floatGentle 4s ease-in-out infinite; }`.",
+"pulse-glow": "Add this to CSS: `@keyframes pulseGlow { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.8; transform: scale(1.05); } }`. Class: `.animate-pulse-glow { animation: pulseGlow 3s ease-in-out infinite; }`.",
 }
 
 STYLES = {
@@ -319,7 +592,19 @@ STYLES = {
     "blueprint": "Technical blueprint style. Deep blue background, white/cyan thin lines, monospace font, and grid overlay: `bg-blue-900 text-cyan-100 font-mono border border-cyan-400/30`.",
     "comic-book": "Bold comic panel style. Thick black outlines, halftone dots, speech bubbles, POW/ZAP action text, and primary colors: `border-4 border-black bg-yellow-300 font-black uppercase`.",
     "sci-fi-hud": "Heads-up display interface. Transparent panels, scanning lines, circular UI elements, and cyan/amber data readouts: `bg-black/80 border border-cyan-500/40 text-cyan-400 font-mono text-sm`.",
-    "crypto-web3": "Blockchain/Web3 aesthetic. Dark purple-black backgrounds, neon gradient accents, hexagonal shapes, and futuristic sans-serif fonts: `bg-slate-950 text-purple-300 border border-purple-500/20`."
+    "crypto-web3": "Blockchain/Web3 aesthetic. Dark purple-black backgrounds, neon gradient accents, hexagonal shapes, and futuristic sans-serif fonts: `bg-slate-950 text-purple-300 border border-purple-500/20`.",
+
+
+
+"premium-glass": "Use `bg-white/5 backdrop-blur-2xl border border-white/10 shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] rounded-3xl` for high-end frosted glass.",
+"professional-card": "Use `bg-white border border-gray-200 shadow-sm rounded-xl hover:shadow-md transition-shadow` for clean SaaS/Dashboard interfaces.",
+"comfort-soft": "Use `bg-stone-50 border border-stone-200 shadow-inner rounded-3xl p-8` for a soft, pillowy, ergonomic container.",
+"luxury-matte": "Use `bg-zinc-900 border border-zinc-800 rounded-none shadow-[20px_20px_60px_#000000,-20px_-20px_60px_#1a1a1a]` for heavy, expensive feel.",
+
+"card-glass-premium": "Premium glass card: `bg-zinc-900/40 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-6 shadow-2xl shadow-black/50`.",
+"card-neumorphic-light": "Neumorphic light card: `bg-zinc-100 rounded-3xl shadow-[20px_20px_60px_#d4d4d8,-20px_-20px_60px_#ffffff] p-8 text-zinc-800`.",
+"card-neumorphic-dark": "Neumorphic dark card: `bg-zinc-900 rounded-3xl shadow-[10px_10px_30px_#0a0a0b,-10px_-10px_30px_#26262b] p-8 text-zinc-100`.",
+"badge-glowing": "Glowing badge: `inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.2)]`.",
 }
 
 EFFECTS = {
@@ -356,7 +641,13 @@ EFFECTS = {
     "striped bg": "Use `bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(0,0,0,0.05)_10px,rgba(0,0,0,0.05)_20px)]` for diagonal stripes.",
     "border glow": "Use `border border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.4),inset_0_0_15px_rgba(6,182,212,0.1)]` for glowing borders.",
     "clip path": "Use `clip-path: polygon(...)` for custom non-rectangular shapes like triangles, hexagons, or diagonal cuts.",
-    "sticky element": "Use `sticky top-0 z-50` to make an element stick to the top of the viewport on scroll."
+    "sticky element": "Use `sticky top-0 z-50` to make an element stick to the top of the viewport on scroll.",
+
+
+
+"premium-glow": "Use `shadow-[0_0_40px_-10px_rgba(139,92,246,0.3)]` for a very subtle, expensive-looking ambient glow.",
+"professional-focus": "Use `focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all` for accessible, crisp form interactions.",
+"comfort-fade": "Use `opacity-90 hover:opacity-100 transition-opacity duration-500` for a gentle, non-jarring hover response.",
 }
 
 TYPOGRAPHY = {
@@ -388,7 +679,38 @@ TYPOGRAPHY = {
     "grotesk": "Use `font-family: 'Darker Grotesque', sans-serif`. Edgy modern grotesk for creative sites. Add `<link href='https://fonts.googleapis.com/css2?family=Darker+Grotesque:wght@300;400;500;600;700;800;900&display=swap' rel='stylesheet'>`.",
     "code": "Use `font-family: 'Fira Code', monospace`. Monospace with ligatures for code. Add `<link href='https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&display=swap' rel='stylesheet'>`.",
     "impact": "Use `font-family: 'Bebas Neue', sans-serif`. Ultra-condensed impact headline font. Add `<link href='https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap' rel='stylesheet'>`.",
-    "japanese": "Use `font-family: 'Noto Sans JP', sans-serif`. Clean Japanese-supporting font. Add `<link href='https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700;800;900&display=swap' rel='stylesheet'>`."
+    "japanese": "Use `font-family: 'Noto Sans JP', sans-serif`. Clean Japanese-supporting font. Add `<link href='https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700;800;900&display=swap' rel='stylesheet'>`.",
+
+    "typo-sans-tight-v2": "Use `font-sans tracking-tight leading-relaxed` for elegant readability.",
+    "typo-sans-loose-v2": "Use `font-sans tracking-loose leading-relaxed` for elegant readability.",
+    "typo-sans-massive-v2": "Use `font-sans tracking-massive leading-relaxed` for elegant readability.",
+    "typo-sans-tiny-v2": "Use `font-sans tracking-tiny leading-relaxed` for elegant readability.",
+    "typo-sans-standard-v2": "Use `font-sans tracking-standard leading-relaxed` for elegant readability.",
+    "typo-serif-tight-v2": "Use `font-serif tracking-tight leading-relaxed` for elegant readability.",
+    "typo-serif-loose-v2": "Use `font-serif tracking-loose leading-relaxed` for elegant readability.",
+    "typo-serif-massive-v2": "Use `font-serif tracking-massive leading-relaxed` for elegant readability.",
+    "typo-serif-tiny-v2": "Use `font-serif tracking-tiny leading-relaxed` for elegant readability.",
+    "typo-serif-standard-v2": "Use `font-serif tracking-standard leading-relaxed` for elegant readability.",
+    "typo-mono-tight-v2": "Use `font-mono tracking-tight leading-relaxed` for elegant readability.",
+    "typo-mono-loose-v2": "Use `font-mono tracking-loose leading-relaxed` for elegant readability.",
+    "typo-mono-massive-v2": "Use `font-mono tracking-massive leading-relaxed` for elegant readability.",
+    "typo-mono-tiny-v2": "Use `font-mono tracking-tiny leading-relaxed` for elegant readability.",
+    "typo-mono-standard-v2": "Use `font-mono tracking-standard leading-relaxed` for elegant readability.",
+    "typo-display-tight-v2": "Use `font-display tracking-tight leading-relaxed` for elegant readability.",
+    "typo-display-loose-v2": "Use `font-display tracking-loose leading-relaxed` for elegant readability.",
+    "typo-display-massive-v2": "Use `font-display tracking-massive leading-relaxed` for elegant readability.",
+    "typo-display-tiny-v2": "Use `font-display tracking-tiny leading-relaxed` for elegant readability.",
+    "typo-display-standard-v2": "Use `font-display tracking-standard leading-relaxed` for elegant readability.",
+    "typo-handwriting-tight-v2": "Use `font-handwriting tracking-tight leading-relaxed` for elegant readability.",
+    "typo-handwriting-loose-v2": "Use `font-handwriting tracking-loose leading-relaxed` for elegant readability.",
+    "typo-handwriting-massive-v2": "Use `font-handwriting tracking-massive leading-relaxed` for elegant readability.",
+    "typo-handwriting-tiny-v2": "Use `font-handwriting tracking-tiny leading-relaxed` for elegant readability.",
+    "typo-handwriting-standard-v2": "Use `font-handwriting tracking-standard leading-relaxed` for elegant readability.",
+
+"premium-editorial": "Use `font-serif tracking-tight leading-relaxed text-zinc-900` for a high-end magazine/editorial look.",
+"professional-corporate": "Use `font-sans tracking-normal leading-snug text-slate-800` for crisp, trustworthy business readability.",
+"comfort-reading": "Use `font-sans tracking-wide leading-loose text-stone-700` to minimize eye strain and maximize reading comfort.",
+"luxury-display": "Use `font-serif tracking-widest uppercase font-light text-amber-500` for ultra-premium headings.",
 }
 
 BUTTONS = {
@@ -413,7 +735,13 @@ BUTTONS = {
     "danger": "Danger/destructive button: `px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 shadow-lg shadow-red-500/25 transition-all duration-300`.",
     "success": "Success/confirm button: `px-6 py-3 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 shadow-lg shadow-emerald-500/25 transition-all duration-300`.",
     "animated-border": "Animated border button: `px-8 py-3 bg-transparent text-white rounded-lg font-semibold relative` with a rotating conic-gradient border animation using pseudo-elements.",
-    "text-only": "Text-only minimal button: `px-4 py-2 bg-transparent text-current font-medium hover:opacity-70 transition-opacity` with no border or background."
+    "text-only": "Text-only minimal button: `px-4 py-2 bg-transparent text-current font-medium hover:opacity-70 transition-opacity` with no border or background.",
+
+
+"premium-cta": "Premium button: `px-10 py-4 bg-zinc-950 text-white rounded-full font-medium tracking-wide hover:bg-zinc-800 hover:scale-105 transition-all shadow-xl`.",
+"professional-submit": "Professional button: `px-6 py-2.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 shadow-sm transition-colors`.",
+"comfort-pill": "Comfortable button: `px-8 py-3 bg-stone-200 text-stone-800 rounded-full font-medium hover:bg-stone-300 transition-colors focus:ring-4 focus:ring-stone-100`.",
+"luxury-gold-outline": "Luxury button: `px-8 py-3 bg-transparent border-2 border-amber-500 text-amber-500 rounded-sm font-light uppercase tracking-widest hover:bg-amber-500 hover:text-black transition-all duration-500`.",
 }
 
 HEROES = {
@@ -436,7 +764,11 @@ HEROES = {
     "typed-hero": "Typed text hero: Headline with typewriter animation effect, cycling through different words/phrases with a blinking cursor.",
     "wave-hero": "Wave divider hero: Hero section with an SVG wave shape at the bottom edge creating a smooth curved transition to the next section.",
     "diagonal-hero": "Diagonal hero: Content divided diagonally using clip-path, with image on one side and text on the other at an angle.",
-    "aurora-hero": "Aurora hero: Dark background with animated aurora borealis-style gradient waves flowing behind centered text content."
+    "aurora-hero": "Aurora hero: Dark background with animated aurora borealis-style gradient waves flowing behind centered text content.",
+
+
+"hero-saas-modern": "Modern SaaS Hero: `text-center max-w-4xl mx-auto space-y-8`. Headline `text-6xl md:text-8xl font-extrabold tracking-tighter`. Buttons centered `flex flex-col sm:flex-row gap-4 justify-center`.",
+"hero-startup-dark": "Dark Startup Hero: Transparent background. `text-5xl font-semibold`. Use a blurred glowing orb `bg-purple-600/30 w-96 h-96 blur-3xl rounded-full absolute -top-10 -left-10 -z-10` behind the text.",
 }
 
 FOOTERS = {
@@ -454,7 +786,11 @@ FOOTERS = {
     "branded-footer": "Branded footer: Footer featuring the brand's primary gradient or color prominently, with white text and clear link hierarchy.",
     "accordion-footer": "Accordion footer: Collapsible link sections for mobile-first design, expanding on tap/click to reveal sub-links.",
     "map-footer": "Map footer: Embedded map or location visual alongside contact information and quick links.",
-    "app-download-footer": "App download footer: Prominent app store badges (iOS/Android) as the main CTA alongside minimal footer links."
+    "app-download-footer": "App download footer: Prominent app store badges (iOS/Android) as the main CTA alongside minimal footer links.",
+
+
+"footer-corporate-fat": "Fat Corporate Footer: `border-t border-zinc-800 pt-16 pb-8`. Container `grid grid-cols-1 md:grid-cols-4 lg:grid-cols-5 gap-8`. 1 column for brand, 3 for links, 1 for newsletter.",
+"footer-minimal-centered": "Minimal Centered Footer: `py-12 flex flex-col items-center justify-center space-y-6 text-center text-sm text-zinc-500 border-t border-zinc-200/10`.",
 }
 
 SECTIONS = {
@@ -489,7 +825,8 @@ SECTIONS = {
     "pagination": "Pagination controls: Numbered page navigation with prev/next buttons, current page highlight, and ellipsis for gaps.",
     "cookie-banner": "Cookie consent banner: Fixed bottom or overlay banner with accept/reject buttons and privacy link.",
     "login-form": "Login form: Email/password fields, remember me checkbox, forgot password link, and social login options.",
-    "signup-form": "Signup form: Name, email, password, confirm password with terms checkbox and social signup alternatives."
+    "signup-form": "Signup form: Name, email, password, confirm password with terms checkbox and social signup alternatives.",
+
 }
 
 HOVER_EFFECTS = {
@@ -514,7 +851,39 @@ HOVER_EFFECTS = {
     "brightness": "Brightness change on hover: `hover:brightness-110 transition-all duration-300` for subtle lightening.",
     "ring": "Ring outline on hover: `hover:ring-2 hover:ring-blue-500 hover:ring-offset-2 transition-all duration-300`.",
     "expand": "Expand on hover: `hover:px-10 hover:py-6 transition-all duration-300` for growing padding effect.",
-    "morph": "Shape morph on hover: `rounded-lg hover:rounded-full transition-all duration-500` for shape-shifting elements."
+    "morph": "Shape morph on hover: `rounded-lg hover:rounded-full transition-all duration-500` for shape-shifting elements.",
+
+    "hover-scale-up-slight-v2": "Use `transition-all duration-300 hover:scale-up-slight` for interactive feel.",
+    "hover-scale-up-moderate-v2": "Use `transition-all duration-300 hover:scale-up-moderate` for interactive feel.",
+    "hover-scale-up-extreme-v2": "Use `transition-all duration-300 hover:scale-up-extreme` for interactive feel.",
+    "hover-scale-down-slight-v2": "Use `transition-all duration-300 hover:scale-down-slight` for interactive feel.",
+    "hover-scale-down-moderate-v2": "Use `transition-all duration-300 hover:scale-down-moderate` for interactive feel.",
+    "hover-scale-down-extreme-v2": "Use `transition-all duration-300 hover:scale-down-extreme` for interactive feel.",
+    "hover-glow-slight-v2": "Use `transition-all duration-300 hover:glow-slight` for interactive feel.",
+    "hover-glow-moderate-v2": "Use `transition-all duration-300 hover:glow-moderate` for interactive feel.",
+    "hover-glow-extreme-v2": "Use `transition-all duration-300 hover:glow-extreme` for interactive feel.",
+    "hover-lift-slight-v2": "Use `transition-all duration-300 hover:lift-slight` for interactive feel.",
+    "hover-lift-moderate-v2": "Use `transition-all duration-300 hover:lift-moderate` for interactive feel.",
+    "hover-lift-extreme-v2": "Use `transition-all duration-300 hover:lift-extreme` for interactive feel.",
+    "hover-sink-slight-v2": "Use `transition-all duration-300 hover:sink-slight` for interactive feel.",
+    "hover-sink-moderate-v2": "Use `transition-all duration-300 hover:sink-moderate` for interactive feel.",
+    "hover-sink-extreme-v2": "Use `transition-all duration-300 hover:sink-extreme` for interactive feel.",
+    "hover-rotate-slight-v2": "Use `transition-all duration-300 hover:rotate-slight` for interactive feel.",
+    "hover-rotate-moderate-v2": "Use `transition-all duration-300 hover:rotate-moderate` for interactive feel.",
+    "hover-rotate-extreme-v2": "Use `transition-all duration-300 hover:rotate-extreme` for interactive feel.",
+    "hover-flip-slight-v2": "Use `transition-all duration-300 hover:flip-slight` for interactive feel.",
+    "hover-flip-moderate-v2": "Use `transition-all duration-300 hover:flip-moderate` for interactive feel.",
+    "hover-flip-extreme-v2": "Use `transition-all duration-300 hover:flip-extreme` for interactive feel.",
+    "hover-blur-slight-v2": "Use `transition-all duration-300 hover:blur-slight` for interactive feel.",
+    "hover-blur-moderate-v2": "Use `transition-all duration-300 hover:blur-moderate` for interactive feel.",
+    "hover-blur-extreme-v2": "Use `transition-all duration-300 hover:blur-extreme` for interactive feel.",
+    "hover-brighten-slight-v2": "Use `transition-all duration-300 hover:brighten-slight` for interactive feel.",
+    "hover-brighten-moderate-v2": "Use `transition-all duration-300 hover:brighten-moderate` for interactive feel.",
+    "hover-brighten-extreme-v2": "Use `transition-all duration-300 hover:brighten-extreme` for interactive feel.",
+    "hover-darken-slight-v2": "Use `transition-all duration-300 hover:darken-slight` for interactive feel.",
+    "hover-darken-moderate-v2": "Use `transition-all duration-300 hover:darken-moderate` for interactive feel.",
+    "hover-darken-extreme-v2": "Use `transition-all duration-300 hover:darken-extreme` for interactive feel.",
+
 }
 
 BACKGROUNDS = {
@@ -536,7 +905,13 @@ BACKGROUNDS = {
     "confetti": "Confetti: Scattered small colored shapes (circles, squares, triangles) using multiple box-shadows for celebration themes.",
     "aurora-bg": "Aurora background: Animated flowing gradient blobs in greens, blues, and purples on a dark canvas.",
     "marble": "Marble texture: Subtle veined marble pattern using layered CSS gradients in whites and grays.",
-    "paper": "Paper texture: Subtle off-white background with noise overlay simulating real paper."
+    "paper": "Paper texture: Subtle off-white background with noise overlay simulating real paper.",
+
+
+"premium-mesh": "Premium mesh gradient: Soft, slow-moving blurred orbs in professional blues and purples over a slate background.",
+"professional-grid": "Professional grid: Very faint subtle grid lines (`bg-[length:30px_30px] border-zinc-100`) on a pure white background for structured precision.",
+"comfort-warm": "Comfortable warm: A solid, soft off-white `bg-stone-50` with subtle noise texture to reduce glare and eye strain.",
+"luxury-velvet": "Luxury velvet: Deep, rich `bg-zinc-950` with a very subtle radial gradient fading to pure black at the edges.",
 }
 
 GRADIENTS = {
@@ -567,7 +942,80 @@ GRADIENTS = {
     "electric": "Use `bg-gradient-to-r from-yellow-400 via-lime-400 to-green-400` for electric charge.",
     "abyss": "Use `bg-gradient-to-r from-slate-950 via-blue-950 to-indigo-950` for deep abyss.",
     "sakura": "Use `bg-gradient-to-r from-pink-300 via-rose-200 to-pink-100` for cherry blossom.",
-    "holographic": "Use `bg-gradient-to-r from-pink-400 via-blue-400 via-green-400 to-yellow-400` with animation for holographic shimmer."
+    "holographic": "Use `bg-gradient-to-r from-pink-400 via-blue-400 via-green-400 to-yellow-400` with animation for holographic shimmer.",
+
+    "gradient-red-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to purple-500. Rich vibrant transition.",
+    "gradient-red-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to indigo-500. Rich vibrant transition.",
+    "gradient-red-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to blue-500. Rich vibrant transition.",
+    "gradient-red-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to teal-500. Rich vibrant transition.",
+    "gradient-red-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to green-500. Rich vibrant transition.",
+    "gradient-red-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to yellow-500. Rich vibrant transition.",
+    "gradient-red-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to orange-500. Rich vibrant transition.",
+    "gradient-red-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to red-500. Rich vibrant transition.",
+    "gradient-orange-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to pink-500. Rich vibrant transition.",
+    "gradient-orange-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to indigo-500. Rich vibrant transition.",
+    "gradient-orange-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to blue-500. Rich vibrant transition.",
+    "gradient-orange-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to teal-500. Rich vibrant transition.",
+    "gradient-orange-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to green-500. Rich vibrant transition.",
+    "gradient-orange-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to yellow-500. Rich vibrant transition.",
+    "gradient-orange-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to orange-500. Rich vibrant transition.",
+    "gradient-orange-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to red-500. Rich vibrant transition.",
+    "gradient-yellow-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to pink-500. Rich vibrant transition.",
+    "gradient-yellow-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to purple-500. Rich vibrant transition.",
+    "gradient-yellow-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to blue-500. Rich vibrant transition.",
+    "gradient-yellow-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to teal-500. Rich vibrant transition.",
+    "gradient-yellow-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to green-500. Rich vibrant transition.",
+    "gradient-yellow-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to yellow-500. Rich vibrant transition.",
+    "gradient-yellow-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to orange-500. Rich vibrant transition.",
+    "gradient-yellow-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to red-500. Rich vibrant transition.",
+    "gradient-green-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to pink-500. Rich vibrant transition.",
+    "gradient-green-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to purple-500. Rich vibrant transition.",
+    "gradient-green-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to indigo-500. Rich vibrant transition.",
+    "gradient-green-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to teal-500. Rich vibrant transition.",
+    "gradient-green-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to green-500. Rich vibrant transition.",
+    "gradient-green-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to yellow-500. Rich vibrant transition.",
+    "gradient-green-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to orange-500. Rich vibrant transition.",
+    "gradient-green-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to red-500. Rich vibrant transition.",
+    "gradient-teal-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to pink-500. Rich vibrant transition.",
+    "gradient-teal-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to purple-500. Rich vibrant transition.",
+    "gradient-teal-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to indigo-500. Rich vibrant transition.",
+    "gradient-teal-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to blue-500. Rich vibrant transition.",
+    "gradient-teal-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to green-500. Rich vibrant transition.",
+    "gradient-teal-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to yellow-500. Rich vibrant transition.",
+    "gradient-teal-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to orange-500. Rich vibrant transition.",
+    "gradient-teal-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to red-500. Rich vibrant transition.",
+    "gradient-blue-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to pink-500. Rich vibrant transition.",
+    "gradient-blue-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to purple-500. Rich vibrant transition.",
+    "gradient-blue-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to indigo-500. Rich vibrant transition.",
+    "gradient-blue-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to blue-500. Rich vibrant transition.",
+    "gradient-blue-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to teal-500. Rich vibrant transition.",
+    "gradient-blue-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to yellow-500. Rich vibrant transition.",
+    "gradient-blue-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to orange-500. Rich vibrant transition.",
+    "gradient-blue-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to red-500. Rich vibrant transition.",
+    "gradient-indigo-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to pink-500. Rich vibrant transition.",
+    "gradient-indigo-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to purple-500. Rich vibrant transition.",
+    "gradient-indigo-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to indigo-500. Rich vibrant transition.",
+    "gradient-indigo-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to blue-500. Rich vibrant transition.",
+    "gradient-indigo-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to teal-500. Rich vibrant transition.",
+    "gradient-indigo-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to green-500. Rich vibrant transition.",
+    "gradient-indigo-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to orange-500. Rich vibrant transition.",
+    "gradient-indigo-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to red-500. Rich vibrant transition.",
+    "gradient-purple-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to pink-500. Rich vibrant transition.",
+    "gradient-purple-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to purple-500. Rich vibrant transition.",
+    "gradient-purple-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to indigo-500. Rich vibrant transition.",
+    "gradient-purple-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to blue-500. Rich vibrant transition.",
+    "gradient-purple-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to teal-500. Rich vibrant transition.",
+    "gradient-purple-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to green-500. Rich vibrant transition.",
+    "gradient-purple-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to yellow-500. Rich vibrant transition.",
+    "gradient-purple-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to red-500. Rich vibrant transition.",
+    "gradient-pink-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to pink-500. Rich vibrant transition.",
+    "gradient-pink-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to purple-500. Rich vibrant transition.",
+    "gradient-pink-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to indigo-500. Rich vibrant transition.",
+    "gradient-pink-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to blue-500. Rich vibrant transition.",
+    "gradient-pink-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to teal-500. Rich vibrant transition.",
+    "gradient-pink-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to green-500. Rich vibrant transition.",
+    "gradient-pink-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to yellow-500. Rich vibrant transition.",
+    "gradient-pink-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to orange-500. Rich vibrant transition.",
 }
 
 INDUSTRIES = {
@@ -642,7 +1090,8 @@ INDUSTRIES = {
     "hosting": "Use tech 'cyber' or 'corporate' styles. Server specs tables, uptime counters, pricing comparisons, and trust badges.",
     "dating": "Use warm 'rose', 'sakura', or 'candy' themes. Profile cards, match percentages, swipe-style interactions, and heart motifs.",
     "astrology": "Use mystical 'midnight', 'galaxy', or 'amethyst' themes. Star charts, zodiac icons, celestial patterns, and serif fonts.",
-    "crypto-exchange": "Use dark 'obsidian' or 'cyber' themes. Live price tickers, candlestick chart motifs, trading UI elements, and green/red indicators."
+    "crypto-exchange": "Use dark 'obsidian' or 'cyber' themes. Live price tickers, candlestick chart motifs, trading UI elements, and green/red indicators.",
+
 }
 
 MOODS = {
@@ -687,7 +1136,8 @@ MOODS = {
     "artsy": "Use creative asymmetric layouts, mixed fonts, splatter effects, hand-drawn elements, and artistic color choices.",
     "scientific": "Use data-visualization inspired layouts, monospace fonts, chart elements, grid backgrounds, and clinical blue/gray tones.",
     "magical": "Use deep purples and golds, sparkle/star particle effects, glowing elements, and enchanting gradient backgrounds.",
-    "vintage": "Use sepia tones, aged paper textures, ornamental borders, classic serif fonts, and film-grain overlays."
+    "vintage": "Use sepia tones, aged paper textures, ornamental borders, classic serif fonts, and film-grain overlays.",
+
 }
 
 LAYOUTS = {
@@ -710,7 +1160,15 @@ LAYOUTS = {
     "one-page": "Use a smooth single-page scroll layout: all content on one page with section anchors, smooth scroll behavior, and a fixed nav with section indicators.",
     "grid-gallery": "Use a uniform grid gallery: equal-sized cards in a responsive CSS grid with hover overlay effects for portfolios and image-heavy sites.",
     "f-pattern": "Use an F-pattern reading layout: important content along the top and left, supporting content on the right, following natural eye-scanning patterns.",
-    "hero-cards": "Use a hero-with-cards layout: large hero section followed immediately by 3-4 feature cards that overlap the hero bottom edge using negative margin-top."
+    "hero-cards": "Use a hero-with-cards layout: large hero section followed immediately by 3-4 feature cards that overlap the hero bottom edge using negative margin-top.",
+
+
+
+
+"bento-grid-3x3": "Bento box grid: `grid grid-cols-1 md:grid-cols-3 gap-4 md:auto-rows-[250px]`. Make the first item span 2 columns with `md:col-span-2` and the last span 2 rows with `md:row-span-2`.",
+"zig-zag-features": "Zig-zag section: Use a flex container with alternating `md:flex-row` and `md:flex-row-reverse` to create a zig-zag image/text layout.",
+"masonry-columns": "Masonry layout: Use `columns-1 md:columns-2 lg:columns-3 gap-6 space-y-6` on the container, and `break-inside-avoid` on the children.",
+"split-hero": "Split hero layout: `min-h-[80vh] grid grid-cols-1 lg:grid-cols-2 gap-12 items-center`. Left side text, right side visual.",
 }
 
 NAV_STYLES = {
@@ -727,44 +1185,59 @@ NAV_STYLES = {
     "tab-nav": "Use tab-style navigation: horizontal tabs at the top of content sections with active tab indicator, underline or filled style, and smooth content switching.",
     "mega-menu": "Use a mega dropdown menu: hovering over nav items reveals a large multi-column dropdown with categorized links, images, and featured content.",
     "progress-nav": "Use a progress-bar navigation: a thin horizontal bar at the very top showing scroll progress or step completion percentage.",
-    "animated-underline": "Use animated underline navigation: clean text links where a colored underline slides in from left on hover with smooth CSS transitions."
+    "animated-underline": "Use animated underline navigation: clean text links where a colored underline slides in from left on hover with smooth CSS transitions.",
+
+
+"nav-floating-pill": "Floating Pill Nav: `fixed top-6 left-1/2 -translate-x-1/2 w-[90%] max-w-3xl rounded-full bg-zinc-900/80 backdrop-blur-md border border-zinc-700/50 px-6 py-3 flex items-center justify-between z-50 shadow-2xl`.",
+"nav-transparent-blur": "Transparent Blur Nav: `fixed top-0 w-full bg-white/5 backdrop-blur-lg border-b border-white/10 z-50 px-8 py-4 flex items-center justify-between`.",
 }
 
 def scan_query_for_elements(query: str) -> str:
-    """Scans the user query for keywords matching colors, animations, styles, effects, and moods, returning a compiled directive."""
+    """Scans the user query for keywords. If no explicit keywords match a category, it dynamically injects a random high-end element from that category to guarantee maximum variety and dynamic output."""
+    import random
     query_lower = query.lower()
     directives = []
     
-    # Check for layouts
-    matched_layouts = []
-    for layout_name, description in LAYOUTS.items():
-        if layout_name in query_lower:
-            matched_layouts.append(f"Layout '{layout_name}': {description}")
-            
-    if not matched_layouts:
-        import random
-        random_layout = random.choice(list(LAYOUTS.keys()))
-        matched_layouts.append(f"Layout '{random_layout}' (Randomly Selected for variety): {LAYOUTS[random_layout]}")
-        
-    if matched_layouts:
-        directives.append("=== DESIGN LAYOUT & WIREFRAME ===")
-        directives.extend(matched_layouts)
+    categories = {
+        "LAYOUTS": (LAYOUTS, "=== DESIGN LAYOUT ===", 1),
+        "NAV_STYLES": (NAV_STYLES, "=== NAVIGATION STYLE ===", 1),
+        "COLORS": (COLORS, "=== COLOR THEME ===", 1),
+        "ANIMATIONS": (ANIMATIONS, "=== ANIMATIONS ===", 2),
+        "STYLES": (STYLES, "=== DESIGN STYLE ===", 1),
+        "EFFECTS": (EFFECTS, "=== EFFECTS ===", 1),
+        "TYPOGRAPHY": (TYPOGRAPHY, "=== TYPOGRAPHY ===", 1),
+        "BUTTONS": (BUTTONS, "=== BUTTON STYLES ===", 1),
+        "HEROES": (HEROES, "=== HERO SECTION ===", 1),
+        "FOOTERS": (FOOTERS, "=== FOOTER STYLE ===", 1),
+        "SECTIONS": (SECTIONS, "=== SECTION COMPONENTS ===", 1),
+        "HOVER_EFFECTS": (HOVER_EFFECTS, "=== HOVER EFFECTS ===", 1),
+        "BACKGROUNDS": (BACKGROUNDS, "=== BACKGROUNDS ===", 1),
+        "GRADIENTS": (GRADIENTS, "=== GRADIENTS ===", 1)
+    }
 
-    # Check for nav styles
-    matched_navs = []
-    for nav_name, description in NAV_STYLES.items():
-        if nav_name in query_lower:
-            matched_navs.append(f"Navigation '{nav_name}': {description}")
-            
-    if not matched_navs:
-        import random
-        random_nav = random.choice(list(NAV_STYLES.keys()))
-        matched_navs.append(f"Navigation '{random_nav}' (Randomly Selected for variety): {NAV_STYLES[random_nav]}")
-        
-    if matched_navs:
-        directives.append("=== NAVIGATION STYLE ===")
-        directives.extend(matched_navs)
-    
+    for cat_name, (cat_dict, header, count) in categories.items():
+        matched = []
+        # Check explicit matches
+        for item_name, rules in cat_dict.items():
+            if item_name.replace("-", " ") in query_lower or item_name in query_lower:
+                matched.append(f"{cat_name[:-1]} '{item_name}': {rules}")
+                
+        # For colors, also check hex codes
+        if cat_name == "COLORS":
+            hex_colors = re.findall(r'#(?:[0-9a-fA-F]{3}){1,2}\b', query)
+            if hex_colors:
+                matched.append(f"Requested exact Hex Colors: {', '.join(hex_colors)}. You MUST use these exact colors using Tailwind arbitrary values.")
+                
+        # If no explicit matches, force dynamic random injection
+        if not matched and len(cat_dict) > 0:
+            random_keys = random.sample(list(cat_dict.keys()), min(count, len(cat_dict)))
+            for rk in random_keys:
+                matched.append(f"{cat_name[:-1]} '{rk}' (Dynamically Selected for variety):\n{cat_dict[rk]}")
+
+        if matched:
+            directives.append(header)
+            directives.extend(matched)
+
     # Check for negations
     negation_words = ["no ", "without ", "don't ", "dont ", "avoid ", "remove ", "not "]
     if any(word in query_lower for word in negation_words):
@@ -776,196 +1249,10 @@ def scan_query_for_elements(query: str) -> str:
     if any(word in query_lower for word in wow_words):
         directives.append("=== CREATIVE FREEDOM ===")
         directives.append("The user has asked for a visually stunning, top-tier result. You have full creative freedom to utilize the most advanced, premium Tailwind CSS techniques, complex micro-animations, and striking layouts to WOW the user.")
-    
-    # Check for colors
-    matched_colors = []
-    for color_name, description in COLORS.items():
-        if color_name in query_lower:
-            matched_colors.append(f"Theme '{color_name}': {description}")
-            
-    # Extract hex codes dynamically
-    hex_colors = re.findall(r'#(?:[0-9a-fA-F]{3}){1,2}\b', query)
-    if hex_colors:
-        matched_colors.append(f"Requested exact Hex Colors: {', '.join(hex_colors)}. You MUST use these exact colors using Tailwind arbitrary values (e.g., bg-[{hex_colors[0]}] or text-[{hex_colors[0]}]).")
-        
-    # Catch-all rule for custom/unrecognized colors
-    if "color" in query_lower or "theme" in query_lower or "palette" in query_lower or matched_colors or hex_colors:
-        matched_colors.append("Dynamic Colors: If the user requested a specific color by name (e.g., 'chartreuse', 'mint', 'periwinkle') that is not explicitly defined above, you MUST intelligently infer its hex code and use it via Tailwind arbitrary values (e.g., bg-[#xxx]).")
 
-    # If no colors or hex colors matched, select a random theme to inject variety
-    if not matched_colors and not hex_colors:
-        import random
-        random_color = random.choice(list(COLORS.keys()))
-        matched_colors.append(f"Theme '{random_color}' (Randomly Selected for variety): {COLORS[random_color]}")
-
-    if matched_colors:
-        directives.append("=== REQUESTED COLORS & THEMES ===")
-        directives.extend(matched_colors)
-        
-    # Check for animations
-    matched_animations = []
-    for anim_name, css_code in ANIMATIONS.items():
-        if anim_name in query_lower:
-            matched_animations.append(f"Animation '{anim_name}':\n{css_code}")
-            
-    if "animation" in query_lower or "animate" in query_lower or not matched_animations:
-        if not matched_animations:
-            import random
-            random_anims = random.sample(list(ANIMATIONS.keys()), 2)
-            for anim in random_anims:
-                matched_animations.append(f"Animation '{anim}' (Randomly Selected for variety):\n{ANIMATIONS[anim]}")
-            
-    if matched_animations:
-        directives.append("=== REQUESTED ANIMATIONS ===")
-        directives.extend(matched_animations)
-        
-    # Check for styles
-    matched_styles = []
-    for style_name, rules in STYLES.items():
-        if style_name in query_lower:
-            matched_styles.append(f"Style '{style_name}': {rules}")
-            
-    if not matched_styles:
-        import random
-        random_style = random.choice(list(STYLES.keys()))
-        matched_styles.append(f"Style '{random_style}' (Randomly Selected for variety): {STYLES[random_style]}")
-            
-    if matched_styles:
-        directives.append("=== REQUESTED DESIGN STYLES ===")
-        directives.extend(matched_styles)
-        
-    # Check for effects
-    matched_effects = []
-    for effect_name, rules in EFFECTS.items():
-        if effect_name in query_lower:
-            matched_effects.append(f"Effect '{effect_name}': {rules}")
-            
-    if matched_effects:
-        directives.append("=== REQUESTED EFFECTS ===")
-        directives.extend(matched_effects)
-
-    # Check for typography
-    matched_typo = []
-    for typo_name, rules in TYPOGRAPHY.items():
-        if re.search(r'\b' + re.escape(typo_name) + r'\b', query_lower):
-            matched_typo.append(f"Typography '{typo_name}': {rules}")
-    if "font" in query_lower or "typography" in query_lower:
-        if not matched_typo:
-            import random
-            rand_typo = random.choice(list(TYPOGRAPHY.keys()))
-            matched_typo.append(f"Typography '{rand_typo}' (Randomly Selected): {TYPOGRAPHY[rand_typo]}")
-    if matched_typo:
-        directives.append("=== TYPOGRAPHY ===")
-        directives.extend(matched_typo)
-
-    # Check for button styles
-    matched_buttons = []
-    for btn_name, rules in BUTTONS.items():
-        if btn_name + " button" in query_lower or btn_name + " btn" in query_lower:
-            matched_buttons.append(f"Button '{btn_name}': {rules}")
-    if "button" in query_lower or "btn" in query_lower or "cta" in query_lower:
-        if not matched_buttons:
-            import random
-            rand_btn = random.choice(list(BUTTONS.keys()))
-            matched_buttons.append(f"Button '{rand_btn}' (Randomly Selected): {BUTTONS[rand_btn]}")
-    if matched_buttons:
-        directives.append("=== BUTTON STYLES ===")
-        directives.extend(matched_buttons)
-
-    # Check for hero styles
-    matched_heroes = []
-    for hero_name, rules in HEROES.items():
-        if hero_name in query_lower:
-            matched_heroes.append(f"Hero '{hero_name}': {rules}")
-    if "hero" in query_lower or "landing" in query_lower or "header" in query_lower:
-        if not matched_heroes:
-            import random
-            rand_hero = random.choice(list(HEROES.keys()))
-            matched_heroes.append(f"Hero '{rand_hero}' (Randomly Selected): {HEROES[rand_hero]}")
-    if matched_heroes:
-        directives.append("=== HERO SECTION STYLE ===")
-        directives.extend(matched_heroes)
-
-    # Check for footer styles
-    matched_footers = []
-    for footer_name, rules in FOOTERS.items():
-        if footer_name in query_lower:
-            matched_footers.append(f"Footer '{footer_name}': {rules}")
-    if "footer" in query_lower:
-        if not matched_footers:
-            import random
-            rand_footer = random.choice(list(FOOTERS.keys()))
-            matched_footers.append(f"Footer '{rand_footer}' (Randomly Selected): {FOOTERS[rand_footer]}")
-    if matched_footers:
-        directives.append("=== FOOTER STYLE ===")
-        directives.extend(matched_footers)
-
-    # Check for section types
-    matched_sections = []
-    for sec_name, rules in SECTIONS.items():
-        if sec_name in query_lower:
-            matched_sections.append(f"Section '{sec_name}': {rules}")
-    section_keywords = ["pricing", "testimonial", "faq", "feature", "team", "contact", "blog", "gallery", "timeline", "stats", "newsletter"]
-    for kw in section_keywords:
-        if kw in query_lower:
-            for sec_name, rules in SECTIONS.items():
-                if kw in sec_name and f"Section '{sec_name}'" not in str(matched_sections):
-                    matched_sections.append(f"Section '{sec_name}': {rules}")
-    if matched_sections:
-        directives.append("=== SECTION COMPONENTS ===")
-        directives.extend(matched_sections)
-
-    # Check for hover effects
-    matched_hovers = []
-    for hover_name, rules in HOVER_EFFECTS.items():
-        if hover_name in query_lower and "hover" in query_lower:
-            matched_hovers.append(f"Hover Effect '{hover_name}': {rules}")
-    if matched_hovers:
-        directives.append("=== HOVER EFFECTS ===")
-        directives.extend(matched_hovers)
-
-    # Check for background patterns
-    matched_bgs = []
-    for bg_name, rules in BACKGROUNDS.items():
-        if bg_name in query_lower:
-            matched_bgs.append(f"Background '{bg_name}': {rules}")
-    if "background" in query_lower or "bg" in query_lower or "pattern" in query_lower:
-        if not matched_bgs:
-            import random
-            rand_bg = random.choice(list(BACKGROUNDS.keys()))
-            matched_bgs.append(f"Background '{rand_bg}' (Randomly Selected): {BACKGROUNDS[rand_bg]}")
-    if matched_bgs:
-        directives.append("=== BACKGROUND PATTERNS ===")
-        directives.extend(matched_bgs)
-
-    # Check for gradients
-    matched_grads = []
-    for grad_name, rules in GRADIENTS.items():
-        if grad_name + " gradient" in query_lower:
-            matched_grads.append(f"Gradient '{grad_name}': {rules}")
-    if "gradient" in query_lower:
-        if not matched_grads:
-            import random
-            rand_grad = random.choice(list(GRADIENTS.keys()))
-            matched_grads.append(f"Gradient '{rand_grad}' (Randomly Selected): {GRADIENTS[rand_grad]}")
-    if matched_grads:
-        directives.append("=== GRADIENT PRESETS ===")
-        directives.extend(matched_grads)
-        
-    # Check for moods
-    matched_moods = []
-    for mood_name, rules in MOODS.items():
-        if re.search(r'\b' + re.escape(mood_name) + r'\b', query_lower):
-            matched_moods.append(f"Mood '{mood_name}': {rules}")
-            
-    if matched_moods:
-        directives.append("=== MOOD & VIBE ADAPTATION ===")
-        directives.extend(matched_moods)
-        
     # Check for industry/domain
     matched_industries = []
     for industry_name, rules in INDUSTRIES.items():
-        # Use word boundaries for shorter industry names to avoid false positives
         if re.search(r'\b' + re.escape(industry_name) + r'\b', query_lower):
             matched_industries.append(f"Industry '{industry_name}': {rules}")
             
@@ -973,13 +1260,8 @@ def scan_query_for_elements(query: str) -> str:
         directives.append("=== INDUSTRY & DOMAIN ADAPTATION ===")
         directives.extend(matched_industries)
         directives.append("CRITICAL OVERRIDE: If the user explicitly requested specific colors, animations, effects, or styles (listed above), those specific choices MUST OVERRIDE any conflicting industry defaults. Only use the industry defaults to fill in the gaps for elements the user did not explicitly specify.")
-    elif "for" in query_lower or "website" in query_lower or "page" in query_lower:
-        # Generic fallback
-        directives.append("=== INDUSTRY & DOMAIN ADAPTATION ===")
-        directives.append("If the user mentions a specific industry or purpose (e.g. sales, blog, agency), you MUST automatically select the highest-converting, most professional color palette, typography, and layout style tailored perfectly for that industry.")
-        directives.append("CRITICAL OVERRIDE: If the user explicitly requested specific colors, animations, effects, or styles (listed above), those specific choices MUST OVERRIDE any conflicting industry defaults. Only use the industry defaults to fill in the gaps for elements the user did not explicitly specify.")
-
+        
     if directives:
-        return "\\n\\n[ELEMENTS DATABASE DIRECTIVES (MANDATORY)]\\n" + "\\n".join(directives) + "\\n"
+        return "\n\n[ELEMENTS DATABASE DIRECTIVES (MANDATORY)]\n" + "\n".join(directives) + "\n"
     
     return ""
