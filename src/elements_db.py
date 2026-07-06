@@ -494,12 +494,12 @@ STYLES = {
 
     "card-soft-shadow-1": "Card style: `bg-white rounded-2xl shadow-[0_2px_6px_-1px_rgba(0,0,0,0.1)] border border-gray-100 p-6`.",
     "card-hard-brutal-1": "Brutalist card: `bg-zinc-100 rounded-none border-4 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] p-6`.",
+    "style-modern-brutalism": "MODERN BRUTALIST STYLE: Use flat, bold layout styles: `bg-white border-4 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] rounded-none text-black font-extrabold` for elements, and bright, raw background colors.",
+    "style-ethereal-glass": "ETHEREAL GLASS STYLE: Use a frosted glass vibe: `bg-white/10 backdrop-blur-md border border-white/20 shadow-2xl rounded-2xl text-white`.",
+    "style-retro-terminal": "RETRO TERMINAL STYLE: Use a retro computer aesthetic: `bg-black border-2 border-emerald-500 rounded-md text-emerald-400 font-mono shadow-[0_0_10px_rgba(16,185,129,0.3)]`.",
+    "style-neumorphic-clay": "NEUMORPHIC CLAY STYLE: Use soft 3D clay-like buttons and panels: `bg-[#e0e5ec] rounded-2xl shadow-[6px_6px_12px_#cacaca,-6px_-6px_12px_#ffffff] border border-white/40 text-slate-700`.",
 
 
-"style-extreme-brutalism": "BRUTALIST ARCHITECTURE: `bg-[#FF5722] border-8 border-black shadow-[15px_15px_0px_0px_rgba(0,0,0,1)] rounded-none text-black font-extrabold`. Extremely harsh, aggressive, offset shadows, zero curves.",
-"style-ethereal-glass": "ETHEREAL GLASSMORPHISM: `bg-white/5 backdrop-blur-3xl border border-white/20 shadow-[0_30px_60px_-10px_rgba(255,255,255,0.1)] rounded-[3rem] text-white/90`. Ghostly, weightless, heavily blurred, ultra-luxurious.",
-"style-retro-terminal": "RETRO TERMINAL: `bg-black border border-[#00FF41] rounded-sm text-[#00FF41] font-mono shadow-[0_0_15px_#00FF41]`. CRT monitor aesthetic, hacking vibes, strict green-on-black.",
-"style-neumorphic-clay": "CLAYMORPHISM: `bg-[#e0e5ec] rounded-[40px] shadow-[9px_9px_16px_rgb(163,177,198,0.6),-9px_-9px_16px_rgba(255,255,255,0.5)] border border-white/50 text-[#4D5A68]`. Thick, doughy, extruded soft 3D buttons.",
 }
 
 EFFECTS = {
@@ -828,8 +828,6 @@ TYPOGRAPHY = {
     "typo-mono-widest-loose-semibold": "Typography preset: `font-mono tracking-widest leading-loose font-semibold`.",
     "typo-mono-widest-loose-extrabold": "Typography preset: `font-mono tracking-widest leading-loose font-extrabold`.",
 
-"typo-mega-swiss": "SWISS MEGA-TYPO: Use absolutely massive font sizes (`text-[10vw] md:text-[8rem]`) with negative tracking (`tracking-tighter`), squashed line height (`leading-[0.8]`), using `font-sans font-black uppercase`. Text acts as structural background elements.",
-"typo-elegant-script": "ELEGANT POETRY: Mix `font-serif italic tracking-widest text-sm text-zinc-400 uppercase` for kickers, and standard delicate `font-serif font-light text-6xl` for headings. Maximum white space.",
 }
 
 BUTTONS = {
@@ -891,8 +889,6 @@ HEROES = {
 "hero-saas-modern": "Modern SaaS Hero: `text-center max-w-4xl mx-auto space-y-8`. Headline `text-6xl md:text-8xl font-extrabold tracking-tighter`. Buttons centered `flex flex-col sm:flex-row gap-4 justify-center`.",
 "hero-startup-dark": "Dark Startup Hero: Transparent background. `text-5xl font-semibold`. Use a blurred glowing orb `bg-purple-600/30 w-96 h-96 blur-3xl rounded-full absolute -top-10 -left-10 -z-10` behind the text.",
 
-"hero-immersive-video-split": "SPLIT IMMERSIVE: Left 50% is a solid dark block with massive text. Right 50% is a bright, vibrant CSS gradient mesh (`bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-amber-400 via-rose-500 to-fuchsia-600`) that takes up the entire height of the viewport.",
-"hero-centered-terminal": "CENTERED COMMAND PROMPT: `min-h-screen flex items-center justify-center bg-black`. A single small 600px wide box imitating a terminal window, dripping with hacker lore.",
 }
 
 FOOTERS = {
@@ -1043,8 +1039,6 @@ BACKGROUNDS = {
     "bg-grid-dark-10px_10px": "Dark grid pattern: `bg-[linear-gradient(to_right,#27272a_1px,transparent_1px),linear-gradient(to_bottom,#27272a_1px,transparent_1px)] [background-size:10px_10px] bg-zinc-950 text-white`.",
 
 
-"bg-animated-aurora": "AURORA BOREALIS: Multiple massive, slow-moving blurred orbs of cyan, purple, and green (`w-[50vw] h-[50vw] blur-[100px]`) floating behind the main content using `@keyframes`." ,
-"bg-topographic-paper": "TOPOGRAPHIC PAPER: A warm, cream background `bg-[#f4f1ea]` overlaid with a highly complex SVG or CSS repeating pattern resembling topographic map lines or crushed paper. Text is deep dark brown.",
 }
 
 GRADIENTS = {
@@ -1333,10 +1327,9 @@ LAYOUTS = {
 "zig-zag-features": "Zig-zag section: Use a flex container with alternating `md:flex-row` and `md:flex-row-reverse` to create a zig-zag image/text layout.",
 "masonry-columns": "Masonry layout: Use `columns-1 md:columns-2 lg:columns-3 gap-6 space-y-6` on the container, and `break-inside-avoid` on the children.",
 "split-hero": "Split hero layout: `min-h-[80vh] grid grid-cols-1 lg:grid-cols-2 gap-12 items-center`. Left side text, right side visual.",
+    "layout-bento-chaos": "BENTO BOX GRID: Use a dynamic, irregular grid of cards. Set container to `grid grid-cols-1 md:grid-cols-3 gap-6`. Set different col-spans and row-spans on the child cards to make them asymmetrical, e.g. `md:col-span-2 md:row-span-1` on the main feature card, and `md:col-span-1 md:row-span-2` on the sidebar card.",
 
-"layout-asymmetric-magazine": "ASYMMETRIC EDITORIAL: Extreme whitespace. Grid lines break randomly. First card takes up `md:col-span-3`, next takes `md:col-span-1`. Text blocks overlap images using negative margins (`-mt-24 z-10`). No standard straight rows.",
-"layout-horizontal-scroll": "HORIZONTAL TIMELINE: Force a wide side-scrolling container `flex overflow-x-auto snap-x snap-mandatory gap-16 pb-12 w-full`. Elements are `min-w-[80vw] md:min-w-[40vw] snap-center`.",
-"layout-bento-chaos": "CHAOS BENTO: A highly dense, irregular 4x4 grid. `grid grid-cols-2 md:grid-cols-4 gap-2`. Some elements `row-span-2 col-span-2`, others `row-span-1 col-span-1`. Packed completely tight like a dense instrument panel.",
+
 }
 
 NAV_STYLES = {
