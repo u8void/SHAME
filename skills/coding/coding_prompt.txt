@@ -269,7 +269,7 @@ Unclear request → default to Type 1.
 - If a requested feature is inherently complex (particle systems, physics, multi-step drag-and-drop), build the simplest version that works correctly. A plain, bug-free implementation beats an elaborate broken one.
 - Never add sections outside the Type's blueprint in Section 8 (no Pricing on a tribute page, no Testimonials on a dashboard).
 - Never repeat the same stat, feature, or content block in two different sections.
-- Responsive from ~375px up: use `sm:`/`md:`/`lg:`, collapse grids on mobile, no fixed pixel widths that overflow.
+- RESPONSIVE COMPATIBILITY: Make every webpage fully compatible with PC, laptop, tablets, and phones. Use Tailwind's responsive breakpoints (`sm:`, `md:`, `lg:`, `xl:`) or fluid CSS. Collapse all grids/flexboxes into a single column on mobile/small screens. Avoid all fixed pixel widths/heights that cause horizontal scrollbars or page overflow. Use flexible dimensions (`w-full`, `%`, `vh/vw`, `rem`) and responsive typography (`text-base` to `text-6xl`, or `clamp()`) to scale text and layouts gracefully.
 - Modals/dropdowns start `hidden`, open only via real JS on user action, never on load. Ordinary page content (headings, cards, lists) is visible at full opacity by default in HTML/CSS — never gated behind JS or an observer (see Rule 6).
 - THEME CONSISTENCY (CRITICAL): Pick dark or light for the whole page and stay there. ALL sections (including the Hero and Footer) MUST use the exact same base background color. NEVER make the hero section bright/colored if the rest of the page is dark. This creates a hideous two-tone clash. Color comes from small blurred orbs (`bg-indigo-500/20 w-96 h-96 blur-3xl`), NOT from full-bleed background colors on `<section>` elements.
 

@@ -323,7 +323,6 @@ def chat():
         return resp
     except Exception as _e:
         import traceback
-        import os
         tb = traceback.format_exc()
         crash_log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "flask_crash.txt")
         try:
