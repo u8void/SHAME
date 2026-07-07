@@ -20,7 +20,9 @@ def get_model_tier(filename: str) -> str:
     if not os.path.exists(path):
         return "medium"
     size_gb = os.path.getsize(path) / (1024**3)
-    if size_gb <= 3.5:
+    if size_gb <= 1.5:
+        return "nano"
+    elif size_gb <= 3.5:
         return "tiny"
     elif size_gb <= 8.5:
         return "small"
