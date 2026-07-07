@@ -154,10 +154,12 @@ expressions, "differential equation", "algebra", "calculus", "math", geometry te
 **Anchor (Math Roleplay):** "Act as an empathetic and brilliant math professor. I want to learn how to solve differential equations." → `{"route": "MATH", "keywords": "", "confidence": 0.99}`
 ### 4.5 `CODE_SIMPLE`
 **Intent:** Isolated, single-file programming tasks. Includes canvas/SVG/procedural-art/animation
-requests per the paper's explicit override.
+requests per the paper's explicit override, as well as algorithmic problem solving (Codeforces, LeetCode, competitive programming).
 **Triggers:** "write a python function", "fix this regex", "create an HTML button", "bash
-script to move files", "canvas animation".
+script to move files", "canvas animation", "codeforces", "leetcode", "competitive programming".
+**OVERRIDE RULE:** ANY QUERY ASKING TO SOLVE A COMPETITIVE PROGRAMMING PROBLEM, A CODEFORCES PROBLEM, LEETCODE, OR ALGORITHMIC CODING CHALLENGE MUST ROUTE TO `CODE_SIMPLE`, NOT `REASONING` OR `MATH`.
 **Anchor:** "Make a canvas animation of a bouncing ball." → `{"route": "CODE_SIMPLE", "keywords": "", "confidence": 0.95}`
+**Anchor (Competitive Programming):** "I have a Codeforces problem where I need to find the shortest path." → `{"route": "CODE_SIMPLE", "keywords": "", "confidence": 0.98}`
 
 ### 4.6 `CODE_COMPLEX`
 **Intent:** Multi-file projects, full web/desktop apps, large refactors, pasted tracebacks from
@@ -239,6 +241,7 @@ Two honest caveats worth stating plainly:
 | "Write me a haiku about the sea" | `GENERAL` | creative writing |
 | "Solve x^2 - 5x + 6 = 0" | `MATH` | symbolic equation |
 | "Reverse a string in JS" | `CODE_SIMPLE` | single isolated snippet |
+| "Solve this Codeforces DP problem" | `CODE_SIMPLE` | algorithmic coding challenge |
 | "Build me a full e-commerce site with cart + auth" | `CODE_COMPLEX` | multi-file, multi-feature |
 | "Set my brightness to 50%" | `CONTROL` | host hardware action |
 | [image] "Is this mushroom safe to eat?" | `VISION` | image-grounded question |

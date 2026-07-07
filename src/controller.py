@@ -363,6 +363,11 @@ ROUTER_KEYWORDS: dict = {
         "django",
         "mlx",
         "pytorch",
+        "c++",
+        "cpp",
+        "codeforces",
+        "leetcode",
+        "competitive",
     ],
     "finance": [
         "tax",
