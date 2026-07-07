@@ -398,27 +398,23 @@ def _cpu_only_params(total_ram_gb: float, physical_cores: int, logical_cores: in
 
 def _recommend_size(total_ram_gb: float, vram_gb: float, backend: AccelBackend) -> str:
     
+    if backend == AccelBackend.CPU:
+        return "nano"
+
     if backend == AccelBackend.CUDA and vram_gb > 0:
         memory = vram_gb
-    elif backend == AccelBackend.METAL:
-        
-        memory = total_ram_gb
     else:
         memory = total_ram_gb
 
-    
-    
-    
-    
-    
-    
-    if memory < 6:
+    if memory < 4:
+        return "nano"
+    elif memory < 8:
         return "tiny"
-    elif memory < 12:
+    elif memory < 16:
         return "small"
-    elif memory < 22:
+    elif memory < 24:
         return "medium"
-    elif memory < 40:
+    elif memory < 48:
         return "large"
     else:
         return "max"
