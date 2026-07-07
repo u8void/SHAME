@@ -73,7 +73,8 @@
             if (idx === -1) idx = 1;
             csFields.performance_profile.value = idx;
             const display_vals = ['Low', 'Balanced', 'High'];
-            document.getElementById('val_performance_profile').innerText = display_vals[idx];
+            const valEl = document.getElementById('val_performance_profile');
+            if (valEl) valEl.innerText = display_vals[idx];
         }
 
         if (csFields.code_review) {
