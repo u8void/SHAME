@@ -109,7 +109,18 @@ def _init_oi():
                 return
             
             if not _model_pool:
-                load_model(ModelRole.CONTROL)
+                try:
+                    load_model(ModelRole.CONTROL)
+                except FileNotFoundError:
+                    yield {
+                        "choices": [
+                            {
+                                "delta": {"content": "Controller disabled: Control model not found."},
+                                "finish_reason": "stop"
+                            }
+                        ]
+                    }
+                    return
                 
             active_role = next(reversed(_model_pool))
             model_obj = _model_pool[active_role]
@@ -983,7 +994,11 @@ def _prime_oi_with_control():
 
 def _generate_control_action(messages: list, user_query: str = "", max_tokens: int = 1024) -> str:
     logger.info("[Model] Using CONTROL model for control action")
-    llm = load_model(ModelRole.CONTROL)
+    try:
+        llm = load_model(ModelRole.CONTROL)
+    except FileNotFoundError:
+        logger.warning("[Model] Controller disabled: Control model not found.")
+        return ""
 
     out = ""
     for chunk in llm.create_chat_completion(
