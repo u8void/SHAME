@@ -553,11 +553,11 @@ def apply_to_config(cfg: dict, hw: Optional[HardwareProfile] = None) -> dict:
     if profile == "speed":
         n_threads = min(hw.logical_cores, hw.physical_cores + 2)
         n_threads_batch = n_threads
-        kv_quant = "f16" if hw.total_vram_gb > 8 else "q8_0"
+        kv_quant = "q8_0"  # Faster memory bandwidth
         flash_attn = True
     elif profile == "memory":
-        n_threads = max(1, hw.physical_cores - 1)
-        kv_quant = "q4_0"
+        # Prioritize model intelligence and recall precision
+        kv_quant = "f16"
 
     def _auto_or_missing(key, fallback):
         v = cfg.get(key)
