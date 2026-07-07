@@ -216,14 +216,14 @@
                 </label>
             </div>
 
-            <p class="settings-section-label" style="margin-top: 20px;">Hardware Performance</p>
+            <p class="settings-section-label" style="margin-top: 20px;">Model Performance</p>
             <div class="settings-field">
                 <label for="cs_performance_profile">
                     <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
-                        <span>Performance Profile</span>
+                        <span>Intelligence vs Speed</span>
                         <span id="val_performance_profile" style="color:var(--iris-purple); font-weight:bold;">Balanced</span>
                     </div>
-                    <span class="field-hint">Adjust hardware allocation dynamically based on your priority.</span>
+                    <span class="field-hint">High = smarter but slower. Low = faster but stupider.</span>
                 </label>
                 <input type="range" id="cs_performance_profile" value="1" min="0" max="2" step="1"
                     oninput="const vals=['Low', 'Balanced', 'High']; document.getElementById('val_performance_profile').innerText = vals[this.value]">
