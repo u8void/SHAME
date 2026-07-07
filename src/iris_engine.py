@@ -594,6 +594,7 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
         logger.info(f"[Iris] Downloading {filename} ...")
 
     sources = []
+    download_info = get_size_config_download_info(filename)
     if download_info:
         url, remote_name = download_info
         hf_parsed = _parse_hf_url(url)
