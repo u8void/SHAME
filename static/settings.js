@@ -68,7 +68,12 @@
         }
 
         if (csFields.performance_profile) {
-            csFields.performance_profile.value = s.performance_profile || 'balanced';
+            const pp_vals = ['low', 'balanced', 'high'];
+            let idx = pp_vals.indexOf(String(s.performance_profile || 'balanced').toLowerCase());
+            if (idx === -1) idx = 1;
+            csFields.performance_profile.value = idx;
+            const display_vals = ['Low', 'Balanced', 'High'];
+            document.getElementById('val_performance_profile').innerText = display_vals[idx];
         }
 
         if (csFields.code_review) {
@@ -163,7 +168,8 @@
         const cp_map = ['low','medium','aggressive'];
         s.compacting_profile = cp_map[parseInt(csFields.compacting_profile?.value) || 1] || 'medium';
 
-        s.performance_profile = csFields.performance_profile?.value || 'balanced';
+        const pp_map = ['low', 'balanced', 'high'];
+        s.performance_profile = pp_map[parseInt(csFields.performance_profile?.value) || 1] || 'balanced';
 
         localStorage.setItem('iris_chat_settings', JSON.stringify(s));
         if (window.setChatSettings) window.setChatSettings(s);

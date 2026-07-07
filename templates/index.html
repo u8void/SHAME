@@ -221,14 +221,12 @@
                 <label for="cs_performance_profile">
                     <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
                         <span>Performance Profile</span>
-                        <select id="cs_performance_profile" style="background: var(--iris-surface-hover); color: white; border: 1px solid var(--iris-border); padding: 5px 10px; border-radius: 8px;">
-                            <option value="low">Low (Fastest TPS / Lower Precision)</option>
-                            <option value="balanced">Balanced (Stable/Good Memory)</option>
-                            <option value="high">High (Max Context / High Intelligence)</option>
-                        </select>
+                        <span id="val_performance_profile" style="color:var(--iris-purple); font-weight:bold;">Balanced</span>
                     </div>
                     <span class="field-hint">Adjust hardware allocation dynamically based on your priority.</span>
                 </label>
+                <input type="range" id="cs_performance_profile" value="1" min="0" max="2" step="1"
+                    oninput="const vals=['Low', 'Balanced', 'High']; document.getElementById('val_performance_profile').innerText = vals[this.value]">
             </div>
 
             <p class="settings-section-label" style="margin-top: 20px;">Generation</p>
