@@ -216,6 +216,21 @@
                 </label>
             </div>
 
+            <p class="settings-section-label" style="margin-top: 20px;">Hardware Performance</p>
+            <div class="settings-field">
+                <label for="cs_performance_profile">
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Performance Profile</span>
+                        <select id="cs_performance_profile" style="background: var(--iris-surface-hover); color: white; border: 1px solid var(--iris-border); padding: 5px 10px; border-radius: 8px;">
+                            <option value="speed">Speed (Fastest TPS)</option>
+                            <option value="balanced">Balanced (Stable/Good Memory)</option>
+                            <option value="memory">Memory (Max Context / Intelligence)</option>
+                        </select>
+                    </div>
+                    <span class="field-hint">Adjust hardware allocation dynamically based on your priority.</span>
+                </label>
+            </div>
+
             <p class="settings-section-label" style="margin-top: 20px;">Generation</p>
 
             <div class="settings-field">
