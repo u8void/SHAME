@@ -15,8 +15,40 @@ import pickle
 import platform
 import os
 
-def _load_skill_prompt(skill_path: str) -> str:
-    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills", skill_path)
+def get_model_tier(filename: str) -> str:
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", filename)
+    if not os.path.exists(path):
+        return "medium"
+    size_gb = os.path.getsize(path) / (1024**3)
+    if size_gb <= 3.5:
+        return "tiny"
+    elif size_gb <= 8.5:
+        return "small"
+    elif size_gb <= 15.5:
+        return "medium"
+    elif size_gb <= 30.0:
+        return "large"
+    else:
+        return "max"
+
+def _load_skill_prompt(skill_path: str, role: "ModelRole" = None) -> str:
+    base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills")
+    if role:
+        try:
+            # We access _get_model_filename at runtime to avoid circular/initialization issues
+            filename = _get_model_filename(role)
+            if filename:
+                tier = get_model_tier(filename)
+                parts = skill_path.split("/")
+                if len(parts) >= 2:
+                    tier_path = os.path.join(base_dir, parts[0], tier, "/".join(parts[1:]))
+                    if os.path.exists(tier_path):
+                        with open(tier_path, "r", encoding="utf-8") as f:
+                            return f.read()
+        except Exception as e:
+            logger.debug(f"Could not load tier-specific skill prompt: {e}")
+
+    path = os.path.join(base_dir, skill_path)
     try:
         with open(path, "r", encoding="utf-8") as f:
             return f.read()

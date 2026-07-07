@@ -26,13 +26,10 @@ classification, so it isn't a routing guess at all.
 
 import os
 
-_triage_guide_path = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills", "triage", "triage_routing_guide.md"
-)
-try:
-    with open(_triage_guide_path, "r", encoding="utf-8") as _f:
-        TRIAGE_SYSTEM_PROMPT = _f.read()
-except Exception:
+from src.iris_engine import _load_skill_prompt, ModelRole
+
+TRIAGE_SYSTEM_PROMPT = _load_skill_prompt("triage/triage_routing_guide.md", role=ModelRole.TRIAGE)
+if not TRIAGE_SYSTEM_PROMPT:
     # Fallback used only if the routing guide can't be read from disk. Mirrors the
     # real guide's JSON contract exactly, so behavior doesn't silently diverge
     # (the old fallback used a completely different bracket-tag format).

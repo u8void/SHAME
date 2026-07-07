@@ -15,13 +15,8 @@ SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 
 
 def _load_prompt(filename: str) -> str:
-    path = os.path.join(SKILLS_DIR, filename)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        logger.warning(f"Prompt file not found: {path}")
-        return ""
+    from src.iris_engine import _load_skill_prompt, ModelRole
+    return _load_skill_prompt(f"coding/{filename}", role=ModelRole.CODE)
 
 _REFUSAL_RE = re.compile(
     r"\b(i'?m sorry,?\s*but\s*i\s*(?:can'?t|cannot|won'?t|am unable to)|"

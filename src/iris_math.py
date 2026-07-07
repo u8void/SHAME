@@ -2,11 +2,11 @@ import re
 from typing import Generator, Dict, Any
 from src.iris_engine import ModelRole, load_model, unload_model, _keep_loaded, _stream_tokens, load_generation_config
 from src.iris_engine import detect_user_language, _language_directive
-from src.iris_engine import _quality_guard, translate_text, _load_skill_prompt
+from src.iris_engine import _quality_guard, translate_text, _load_skill_prompt, ModelRole
 
 
 def get_math_prompt(identity: str) -> str:
-    prompt = _load_skill_prompt("math/math_prompt.txt")
+    prompt = _load_skill_prompt("math/math_prompt.txt", role=ModelRole.MATH)
     return f"{identity}\n{prompt}"
 
 
