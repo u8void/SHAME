@@ -317,6 +317,20 @@
                 <input type="range" id="cs_compacting_profile" value="1" min="0" max="2" step="1"
                     oninput="const vals=['Low','Medium','Aggressive']; document.getElementById('val_compacting_profile').innerText = vals[this.value]">
             </div>
+            <div class="settings-field"
+                style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding:12px 0; gap: 16px;">
+                <label for="cs_keep_triage_loaded"
+                    style="margin:0; cursor:pointer; flex: 1; display: flex; flex-direction: column; gap: 4px;">
+                    <span id="keep_triage" style="color: var(--text-primary);">Keep Triage Loaded</span>
+                    <span class="field-hint">When enabled, keeps the routing model in memory for faster responses, at the cost of using memory constantly.</span>
+                </label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <label class="toggle-label" style="margin:0;">
+                        <input type="checkbox" id="cs_keep_triage_loaded">
+                        <div class="toggle-track"></div>
+                    </label>
+                </div>
+            </div>
 
             <p class="settings-section-label" style="margin-top:20px">Code Quality</p>
             <div class="settings-field"
@@ -336,20 +350,6 @@
                 </div>
             </div>
 
-            <div class="settings-field"
-                style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding:12px 0; gap: 16px;">
-                <label for="cs_keep_triage_loaded"
-                    style="margin:0; cursor:pointer; flex: 1; display: flex; flex-direction: column; gap: 4px;">
-                    <span id="keep_triage" style="color: var(--text-primary);">Keep Triage Loaded</span>
-                    <span class="field-hint">When enabled, keeps the routing model in memory for faster responses, at the cost of using memory constantly.</span>
-                </label>
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <label class="toggle-label" style="margin:0;">
-                        <input type="checkbox" id="cs_keep_triage_loaded">
-                        <div class="toggle-track"></div>
-                    </label>
-                </div>
-            </div>
             <button class="settings-save-btn" id="saveChatSettingsBtn">Save Global Settings</button>
         </div>
 
