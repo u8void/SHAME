@@ -43,11 +43,6 @@ class ChipFamily(str, Enum):
     ARM_CPU         = "arm_cpu"
     UNKNOWN         = "unknown"
 
-
-
-
-
-
 @dataclass
 class HardwareProfile:
     
@@ -550,12 +545,12 @@ def apply_to_config(cfg: dict, hw: Optional[HardwareProfile] = None) -> dict:
     kv_quant = hw.kv_quant
     flash_attn = hw.flash_attn
 
-    if profile == "speed":
+    if profile == "low":
         n_threads = min(hw.logical_cores, hw.physical_cores + 2)
         n_threads_batch = n_threads
         kv_quant = "q8_0"  # Faster memory bandwidth
         flash_attn = True
-    elif profile == "memory":
+    elif profile == "high":
         # Prioritize model intelligence and recall precision
         kv_quant = "f16"
 
