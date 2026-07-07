@@ -398,9 +398,6 @@ def _cpu_only_params(total_ram_gb: float, physical_cores: int, logical_cores: in
 
 def _recommend_size(total_ram_gb: float, vram_gb: float, backend: AccelBackend) -> str:
     
-    if backend == AccelBackend.CPU:
-        return "nano"
-
     if backend == AccelBackend.CUDA and vram_gb > 0:
         memory = vram_gb
     else:
