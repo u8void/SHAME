@@ -5,7 +5,7 @@ from src.iris_engine import ModelRole, load_model, unload_model, _keep_loaded, _
 from src.iris_engine import detect_user_language, _language_directive, translate_text, _load_skill_prompt, ModelRole
 
 def get_general_prompt(identity: str) -> str:
-    prompt = _load_skill_prompt("general/general_prompt.txt", role=ModelRole.GENERAL)
+    prompt = _load_skill_prompt("general/general_prompt.txt")
     return f"{identity}\n{prompt}"
 
 def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -> Generator[Dict[str, str], None, None]:

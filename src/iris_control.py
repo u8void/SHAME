@@ -5,7 +5,7 @@ from src.iris_engine import ModelRole, load_model, unload_model, _keep_loaded, _
 logger = logging.getLogger('iris')
 
 def get_control_prompt(identity: str = "") -> str:
-    prompt = _load_skill_prompt("control/control_prompt.txt", role=ModelRole.CONTROL)
+    prompt = _load_skill_prompt("control/control_prompt.txt")
     return f"{identity}\n{prompt}"
 
 

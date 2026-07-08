@@ -6,7 +6,7 @@ from src.iris_engine import _quality_guard, translate_text, _load_skill_prompt, 
 
 
 def get_math_prompt(identity: str) -> str:
-    prompt = _load_skill_prompt("math/math_prompt.txt", role=ModelRole.MATH)
+    prompt = _load_skill_prompt("math/math_prompt.txt")
     return f"{identity}\n{prompt}"
 
 

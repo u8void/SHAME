@@ -1,7 +1,7 @@
 from src.iris_engine import _load_skill_prompt, ModelRole
 
 def get_reasoning_prompt(identity: str) -> str:
-    prompt = _load_skill_prompt("reasoning/reasoning_prompt.txt", role=ModelRole.REASONING)
+    prompt = _load_skill_prompt("reasoning/reasoning_prompt.txt")
     return f"{identity}\n{prompt}"
 
 
