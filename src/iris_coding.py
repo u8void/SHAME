@@ -929,7 +929,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
     if context:
         final_query = (
             f"<retrieved_context>\n{context}\n</retrieved_context>\n\n"
-            f"You may use the reference architectures and templates provided in the retrieved context above as a guide, but you MUST prioritize and perfectly fulfill the exact requirements, design, animations, and styling requested by the user in their query.\n\n"
+            f"CRITICAL RAG OVERRIDE: The <retrieved_context> above contains advanced reference architectures. You may use them as a structural guide for layouts and Tailwind tricks, but you MUST NOT copy the text, branding, names, or specific topic of the examples! You MUST completely change the content to perfectly fulfill the exact requirements requested by the user. (e.g., If the user asks for a 'restaurant', DO NOT build the 'cocktail bar' from the context!)\n\n"
             f"{final_query}"
         )
         

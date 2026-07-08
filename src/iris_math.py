@@ -106,10 +106,9 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     visible_answer = full.strip()
     visible_answer = re.sub(r'</?think>', '', visible_answer, flags=re.IGNORECASE).strip()
     
-    # Strip any rogue markdown code blocks (to prevent file card rendering), even if unclosed
-    visible_answer = re.sub(r'```[\s\S]*?(?:```|$)', '', visible_answer, flags=re.IGNORECASE)
-    # Strip any HTML tags with their content (span, div, etc.) - aggressive cleanup
-    visible_answer = re.sub(r'<(?:span|div|section|article)[^>]*>[\s\S]*?</(?:span|div|section|article)>', '', visible_answer, flags=re.IGNORECASE)
+    # Strip any rogue HTML span tags (both raw and HTML-encoded), handling typos
+    visible_answer = re.sub(r'</?span[\s\S]*?(?:>|&gt;|$)', '', visible_answer, flags=re.IGNORECASE)
+    visible_answer = re.sub(r'&lt;/?span[\s\S]*?(?:>|&gt;|$)', '', visible_answer, flags=re.IGNORECASE).strip()
     # Also strip any remaining orphaned HTML tags
     visible_answer = re.sub(r'</?(?:span|div|section|article|style|script)[^>]*>', '', visible_answer, flags=re.IGNORECASE)
     # Strip HTML-encoded angle brackets

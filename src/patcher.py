@@ -10,9 +10,10 @@ logger = logging.getLogger(__name__)
 # "<<<<<<< SEARCH" / "=======" / ">>>>>>> REPLACE" style are accepted. A small model is
 # far more likely to default to the labeled Aider style from its own training data than
 # to reliably follow an unfamiliar bare-caret convention, so both must work.
-_OPEN_RE = re.compile(r'^\s*<{3,}[^\n]*$')
-_SEP_RE = re.compile(r'^\s*={3,}[^\n]*$')
-_CLOSE_RE = re.compile(r'^\s*>{3,}[^\n]*$')
+# We also accept <SEARCH>, </SEARCH>, <====, <REPLACE>, etc. which tiny models invent.
+_OPEN_RE = re.compile(r'^\s*(?:<{3,}[^\n]*|<SEARCH>)$', re.IGNORECASE)
+_SEP_RE = re.compile(r'^\s*(?:={3,}[^\n]*|<====*|</SEARCH>|<REPLACE>)$', re.IGNORECASE)
+_CLOSE_RE = re.compile(r'^\s*(?:>{3,}[^\n]*|</REPLACE>|====>)$', re.IGNORECASE)
 _FENCE_RE = re.compile(r'^\s*```\w*\s*$')
 
 

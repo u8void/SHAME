@@ -139,6 +139,13 @@ def classify_task(
     if history and history[-1].get("role") == "user" and history[-1].get("content", "").strip().startswith("OBSERVATION:"):
         return TaskType.CONTROL, None
 
+    if history:
+        lower_query = query_for_classification.strip().lower()
+        if lower_query in ("continue", "continue.", "go on", "keep going", "more"):
+            last_asst = next((m["content"] for m in reversed(history) if m["role"] == "assistant"), "")
+            if "```" in last_asst or "<file_card" in last_asst or "<coding>" in last_asst:
+                return TaskType.CODING_COMPLEX, None
+
     minimized = _minimize_history(history, max_entries=2)
 
     triage_prompt = (

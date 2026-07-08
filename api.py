@@ -195,13 +195,17 @@ def chat_completions():
                     "content": extract_text(m.get("content", ""))
                 })
                 
-        # Inject context-loss reminder for small models on follow-up edits
         has_assistant_code = any(m["role"] == "assistant" and "```" in m["content"] for m in valid_msgs)
-        if has_assistant_code and valid_msgs and valid_msgs[-1]["role"] == "user":
+        
+        # Do not force a patch if the user is explicitly asking to continue a truncated block
+        is_continue_request = valid_msgs and valid_msgs[-1]["role"] == "user" and valid_msgs[-1]["content"].strip().lower() in ["continue", "go on", "keep going", "continue code"]
+        is_modification_request = valid_msgs and valid_msgs[-1]["role"] == "user" and any(word in valid_msgs[-1]["content"].lower() for word in ["change", "edit", "fix", "update", "add", "remove", "make it", "instead", "replace"])
+        
+        if has_assistant_code and is_modification_request and not is_continue_request:
             reminder = (
                 "\n\n[CRITICAL SYSTEM REMINDER: You are modifying an existing file. "
                 "DO NOT rewrite the entire file or output <!DOCTYPE html>. "
-                "You MUST output exactly one SEARCH/REPLACE block (<<<< ==== >>>>) containing ONLY the lines that change. "
+                "You MUST output exactly one SEARCH/REPLACE block. You MUST strictly use the 4-character markers (<<<<, ====, >>>>). "
                 "The SEARCH block must exactly match the existing code.]"
             )
             valid_msgs[-1]["content"] += reminder

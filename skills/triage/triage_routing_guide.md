@@ -118,14 +118,6 @@ you think about", "how many r's in strawberry", general non-code how-to (recipes
 **Anchor (disambiguation case):** "How do I make a pizza?" → `{"route": "REASONING", "keywords": "", "confidence": 0.93}`
 — the verb "make" does not co-occur with any digital-artifact noun, so this routes here rather
 than to `CODE_SIMPLE`/`CODE_COMPLEX`.
-**Scope of the above anchor (read carefully — this is the single most common misroute):** the
-"make a pizza" example has ZERO digital-artifact noun in it — no "website," "app," "page," or
-"site." It does NOT generalize to "make/build/create a website for a pizza restaurant," "design
-an app for my bakery," or any other request that names a website/app/page alongside a food or
-business noun. In those cases the food/business word ("pizza," "restaurant," "bakery," "law
-firm") describes what the site is ABOUT, not what the user is asking FOR — the artifact noun
-("website"/"app"/"page"/"site") always wins and the route is `CODE_SIMPLE`/`CODE_COMPLEX`, never
-`REASONING`. See the disambiguation rule under 4.6 for the full test.
 **Safety note:** Sensitive, harmful, or policy-edge-case prompts are **not** specially routed
 around safety — they land in `REASONING` (or whichever domain role fits) like any other query,
 and that role applies its own normal judgment. The router does not carry a "never refuse"
@@ -165,11 +157,10 @@ script to move files", "canvas animation", "codeforces", "leetcode", "competitiv
 ### 4.6 `CODE_COMPLEX`
 **Intent:** Multi-file projects, full web/desktop apps, large refactors, pasted tracebacks from
 substantial codebases.
-**Triggers:** "build an app", "create a website", "full project", "entire project", large
-traceback paste.
+**Triggers:** "build an app", "create a website", "create a restaurant website", "full project", "entire project", large traceback paste.
 **CRITICAL DISAMBIGUATION — artifact noun beats subject-matter noun:** A request is judged by
 what the user wants PRODUCED, not by what the content is ABOUT. "Create a website for a pizza
-restaurant," "build an app for my bakery," "design a landing page for my law firm," and "make a
+restaurant," "create a restaurant website," "build an app for my bakery," "design a landing page for my law firm," and "make a
 site for an Italian restaurant" are ALL `CODE_COMPLEX` (or `CODE_SIMPLE` if the scope is a single
 small snippet) — "website"/"app"/"page"/"site" is the deciding artifact noun, full stop. The fact
 that the subject matter is food, retail, or law is irrelevant to routing and must never push the
@@ -179,6 +170,8 @@ not a coding request. The test: does the query name a digital artifact (website,
 program, script, tool)? If yes, that noun determines the route regardless of topic/domain. If no
 such noun is present, fall through to the normal `REASONING`/`GENERAL` logic.
 **Anchor:** "Build a complete full-stack app with React and Node." → `{"route": "CODE_COMPLEX", "keywords": "", "confidence": 0.97}`
+**Anchor:** "Create a restaurant website" → `{"route": "CODE_COMPLEX", "keywords": "", "confidence": 0.98}`
+**Conversational Code Modification Rule:** If the Conversation History Context shows that the Assistant just outputted code (e.g. ````python`, `[truncated]`, `<file_card`), AND the user's new query asks to change, edit, fix, update, or "make it X" (e.g. "make it like a chat", "add a button", "change the color to blue"), the route MUST be `CODE_COMPLEX` or `CODE_SIMPLE`. Do NOT route conversational code edits to `REASONING` just because the user omitted the word "code" or "script", because the context makes it clear they are asking to modify the code artifact.
 **Disambiguation rule:** "write a script to delete files" → `CODE_COMPLEX`/`CODE_SIMPLE`
 (they're asking for code). "Delete the files in my downloads folder" → `CONTROL` (they're
 asking the system to *act*). The distinguishing test is asked-for-code vs. asked-for-action,

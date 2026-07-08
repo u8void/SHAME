@@ -2525,7 +2525,7 @@ def main():
 
             lower = raw.lower()
 
-            if raw.startswith("/") or lower in (
+            if (raw.startswith("/") and not lower.startswith("/route ")) or lower in (
                 "help",
                 "clear",
                 "exit",

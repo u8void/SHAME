@@ -1565,11 +1565,10 @@ def _stream_tokens(
     base_code = ""
     base_lang = "python"
     for _msg in reversed(full_messages):
-        if _msg.get("role") == "assistant":
-            _blocks = extract_code_blocks(_msg.get("content", ""))
-            if _blocks:
-                base_lang, base_code = _blocks[-1]
-                break
+        _blocks = extract_code_blocks(_msg.get("content", ""))
+        if _blocks:
+            base_lang, base_code = _blocks[-1]
+            break
 
     in_patch = False
     patch_buffer = ""
@@ -1685,7 +1684,7 @@ def _stream_tokens(
         if extra_stop_words:
             stop_list.extend(extra_stop_words)
 
-        actual_max_tokens = None if max_tokens >= 4000 else max_tokens
+        actual_max_tokens = max_tokens
         stream = llm.create_chat_completion(
             messages=full_messages,
             stream=True,
@@ -1913,7 +1912,7 @@ def _stream_tokens(
                                 "content": f"An edit didn't apply ({r.reason}): \"{r.search_preview}\"",
                             }
 
-                    patched_output = f"\n```{base_lang}\n{outcome.code}\n```\n"
+                    patched_output = f"\n```diff\n{final_patch}\n```\n\n```{base_lang}\n{outcome.code}\n```\n"
                     
                     # Yield in chunks to prevent frontend markdown parser from glitching
                     chunk_size = 50
@@ -2167,7 +2166,7 @@ def _stream_tokens(
                         "type": "harness_warning",
                         "content": f"An edit didn't apply ({r.reason}): \"{r.search_preview}\"",
                     }
-            patched_output = f"\n```{base_lang}\n{outcome.code}\n```\n"
+            patched_output = f"\n```diff\n{patch_buffer}\n```\n\n```{base_lang}\n{outcome.code}\n```\n"
             yield {"type": "token", "content": patched_output}
             loop_content += patched_output
             in_patch = False
