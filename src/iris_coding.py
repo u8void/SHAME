@@ -15,8 +15,13 @@ SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 
 
 def _load_prompt(filename: str) -> str:
-    from src.iris_engine import _load_skill_prompt, ModelRole
-    return _load_skill_prompt(f"coding/{filename}", role=ModelRole.CODE)
+    path = os.path.join(SKILLS_DIR, filename)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        logger.warning(f"Prompt file not found: {path}")
+        return ""
 
 _REFUSAL_RE = re.compile(
     r"\b(i'?m sorry,?\s*but\s*i\s*(?:can'?t|cannot|won'?t|am unable to)|"
@@ -671,7 +676,7 @@ def _run_complex_coding(
         yield {"type": "status", "content": "Reviewing final code quality..."}
         _rmsgs = optimized + [
             {"role": "assistant", "content": final_output},
-            {"role": "user", "content": "Final review pass. Fix remaining issues inside a code block with filename. YOU MUST OUTPUT THE ENTIRE COMPLETE FILE WITH ALL ORIGINAL CONTENT INCLUDED (e.g., if it was an HTML file containing HTML/CSS/JS, output the full HTML file). Never output just a snippet. If there are no issues, just output 'No issues found.'"}
+            {"role": "user", "content": "Final review pass. If you find any remaining issues, fix them using SEARCH/REPLACE blocks exactly as instructed above — do not rewrite the whole file. If there are no issues, just output 'No issues found.'"}
         ]
         _rev = ""
         for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris")):
@@ -840,7 +845,7 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
             yield {"type": "status", "content": "Reviewing code quality..."}
             _rmsgs = optimized + [
                 {"role": "assistant", "content": full},
-                {"role": "user", "content": "Review this code for correctness, edge cases, performance, and best practices. Fix issues inside a code block with filename comment. YOU MUST OUTPUT THE ENTIRE COMPLETE FILE WITH ALL ORIGINAL CONTENT INCLUDED (e.g., if it was an HTML file containing HTML/CSS/JS, output the full HTML file). Never output just a snippet. If there are no issues, just output 'No issues found.'"}
+                {"role": "user", "content": "Review this code for correctness, edge cases, performance, and best practices. If you find issues, fix them using SEARCH/REPLACE blocks exactly as instructed above — do not rewrite the whole file. If there are no issues, just output 'No issues found.'"}
             ]
             _rev = ""
             for ev in _stream_tokens(ModelRole.CODE, _rmsgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=get_reviewer_prompt("Iris")):

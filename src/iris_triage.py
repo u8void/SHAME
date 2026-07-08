@@ -28,7 +28,7 @@ import os
 
 from src.iris_engine import _load_skill_prompt, ModelRole
 
-TRIAGE_SYSTEM_PROMPT = _load_skill_prompt("triage/triage_routing_guide.md", role=ModelRole.TRIAGE)
+TRIAGE_SYSTEM_PROMPT = _load_skill_prompt("triage/triage_routing_guide.md")
 if not TRIAGE_SYSTEM_PROMPT:
     # Fallback used only if the routing guide can't be read from disk. Mirrors the
     # real guide's JSON contract exactly, so behavior doesn't silently diverge

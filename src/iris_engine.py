@@ -15,42 +15,8 @@ import pickle
 import platform
 import os
 
-def get_model_tier(filename: str) -> str:
-    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", filename)
-    if not os.path.exists(path):
-        return "medium"
-    size_gb = os.path.getsize(path) / (1024**3)
-    if size_gb <= 1.5:
-        return "nano"
-    elif size_gb <= 3.5:
-        return "tiny"
-    elif size_gb <= 8.5:
-        return "small"
-    elif size_gb <= 15.5:
-        return "medium"
-    elif size_gb <= 30.0:
-        return "large"
-    else:
-        return "max"
-
-def _load_skill_prompt(skill_path: str, role: "ModelRole" = None) -> str:
-    base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills")
-    if role:
-        try:
-            # We access _get_model_filename at runtime to avoid circular/initialization issues
-            filename = _get_model_filename(role)
-            if filename:
-                tier = get_model_tier(filename)
-                parts = skill_path.split("/")
-                if len(parts) >= 2:
-                    tier_path = os.path.join(base_dir, parts[0], tier, "/".join(parts[1:]))
-                    if os.path.exists(tier_path):
-                        with open(tier_path, "r", encoding="utf-8") as f:
-                            return f.read()
-        except Exception as e:
-            logger.debug(f"Could not load tier-specific skill prompt: {e}")
-
-    path = os.path.join(base_dir, skill_path)
+def _load_skill_prompt(skill_path: str) -> str:
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills", skill_path)
     try:
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
@@ -628,7 +594,6 @@ def download_gguf(filename: str, quiet: bool = False) -> bool:
         logger.info(f"[Iris] Downloading {filename} ...")
 
     sources = []
-    download_info = get_size_config_download_info(filename)
     if download_info:
         url, remote_name = download_info
         hf_parsed = _parse_hf_url(url)
@@ -1582,6 +1547,36 @@ def _stream_tokens(
 
     full_messages = [{"role": "system", "content": sys_prompt}] + sanitized_messages
 
+    # --- SEARCH/REPLACE patch state --------------------------------------------------
+    # base_code/base_lang are computed ONCE here, from the conversation as it stood
+    # before this turn's own generation begins, and reused across every loop_idx retry
+    # below. Recomputing them inside the retry loop used to be a bug: once a "continue
+    # where you left off" retry appended THIS turn's own (possibly patch-wrapped)
+    # partial output back into full_messages, the next rescan could pick that up as
+    # "base_code" instead of the real prior file, corrupting any patch applied after.
+    #
+    # in_patch/patch_buffer are hoisted the same way so a SEARCH/REPLACE block split
+    # across a max_tokens ("length") boundary — very plausible on a small model, which
+    # may burn its whole budget on a long <think> block before ever reaching the patch —
+    # survives into the next loop_idx instead of being silently (and wrongly) finalized
+    # the moment the token budget runs out.
+    from .patcher import apply_patch
+
+    base_code = ""
+    base_lang = "python"
+    for _msg in reversed(full_messages):
+        if _msg.get("role") == "assistant":
+            _blocks = extract_code_blocks(_msg.get("content", ""))
+            if _blocks:
+                base_lang, base_code = _blocks[-1]
+                break
+
+    in_patch = False
+    patch_buffer = ""
+    patches_applied_this_turn = 0
+    patches_failed_this_turn = 0
+    _MAX_PATCHES_PER_TURN = 25  # runaway-loop guard only, not a real per-request limit
+
     cfg = load_generation_config()
     model_cfg = cfg.get("model_settings", {}).get(role.value, {})
 
@@ -1678,16 +1673,6 @@ def _stream_tokens(
             else _reserved_tokens,
         )
 
-        from .patcher import apply_patch
-        base_code = ""
-        base_lang = "python"
-        for msg in reversed(full_messages):
-            if msg.get("role") == "assistant":
-                blocks = extract_code_blocks(msg.get("content", ""))
-                if blocks:
-                    base_lang, base_code = blocks[-1]
-                    break
-
         logger.debug(f"[Model Start] Role: {role.value.upper()} | Model: {model_name}")
         stop_list = [
             "</s>",
@@ -1716,6 +1701,7 @@ def _stream_tokens(
             stop=stop_list,
         )
         loop_content = ""
+        raw_turn_text = ""
         finish_reason = "stop"
         buffer = ""
         token_count = 0
@@ -1727,8 +1713,6 @@ def _stream_tokens(
             else True
         )
         continuation_buffer = ""
-        in_patch = False
-        patch_buffer = ""
 
         for chunk in stream:
             choices = chunk.get("choices", [])
@@ -1742,6 +1726,13 @@ def _stream_tokens(
             token = choice.get("delta", {}).get("content", "")
             if not token:
                 continue
+
+            # Raw, unmodified copy of everything generated this loop_idx — used only to
+            # rebuild an accurate "continue where you left off" prompt on truncation.
+            # loop_content below can omit content deliberately kept out of the visible
+            # stream (e.g. an in-progress, not-yet-closed SEARCH/REPLACE block), so it
+            # isn't always a faithful record of what the model actually generated.
+            raw_turn_text += token
 
             token_count += 1
 
@@ -1903,9 +1894,26 @@ def _stream_tokens(
                         idx += 1
                         
                     final_patch = patch_buffer[:idx]
-                    patch_buffer = patch_buffer[idx:]
-                    new_code = apply_patch(base_code, final_patch)
-                    patched_output = f"\n```{base_lang}\n{new_code}\n```\n"
+                    # Anything the model streamed right after the closing marker (e.g. the
+                    # start of another block, or a short note between edits) — don't drop
+                    # it, feed it back through the normal buffer on the next iteration.
+                    leftover = patch_buffer[idx:]
+
+                    outcome = apply_patch(base_code, final_patch)
+                    # Cumulative: a second (or third...) block later this turn patches
+                    # the already-patched file, not the original pre-edit one.
+                    base_code = outcome.code
+                    patches_applied_this_turn += outcome.blocks_applied
+                    patches_failed_this_turn += outcome.blocks_failed
+
+                    for r in outcome.results:
+                        if not r.applied:
+                            yield {
+                                "type": "harness_warning",
+                                "content": f"An edit didn't apply ({r.reason}): \"{r.search_preview}\"",
+                            }
+
+                    patched_output = f"\n```{base_lang}\n{outcome.code}\n```\n"
                     
                     # Yield in chunks to prevent frontend markdown parser from glitching
                     chunk_size = 50
@@ -1914,10 +1922,20 @@ def _stream_tokens(
                         
                     loop_content += patched_output
                     in_patch = False
-                    
-                    # Immediately halt the LLM stream to prevent it from rewriting the file
-                    finish_reason = "stop"
-                    break
+                    patch_buffer = ""
+
+                    # A model editing several separate spots (e.g. multiple colors across
+                    # a page) will legitimately emit several blocks in one turn — unlike
+                    # before, we no longer force-stop after the first one. A generous cap
+                    # still guards against a runaway/repeating model.
+                    if patches_applied_this_turn + patches_failed_this_turn >= _MAX_PATCHES_PER_TURN:
+                        logger.warning(
+                            f"[Patch] Hit the {_MAX_PATCHES_PER_TURN}-patch safety cap for one turn; stopping."
+                        )
+                        finish_reason = "stop"
+                        break
+
+                    buffer = leftover
                 continue
             if think_mode == "hide":
                 while True:
@@ -2133,14 +2151,29 @@ def _stream_tokens(
             stripped_leading_fence = True
             continuation_buffer = ""
 
-        if in_patch:
-            new_code = apply_patch(base_code, patch_buffer)
-            patched_output = f"\n```{base_lang}\n{new_code}\n```\n"
+        if in_patch and finish_reason != "length":
+            # The model stopped (not just ran out of token budget) while still inside an
+            # unterminated SEARCH/REPLACE block — a genuinely malformed patch, not a
+            # truncation. On real truncation (finish_reason == "length") we deliberately
+            # leave in_patch/patch_buffer untouched so the next loop_idx keeps appending
+            # to this SAME block below, instead of us finalizing half of it right now.
+            outcome = apply_patch(base_code, patch_buffer)
+            base_code = outcome.code
+            patches_applied_this_turn += outcome.blocks_applied
+            patches_failed_this_turn += outcome.blocks_failed
+            for r in outcome.results:
+                if not r.applied:
+                    yield {
+                        "type": "harness_warning",
+                        "content": f"An edit didn't apply ({r.reason}): \"{r.search_preview}\"",
+                    }
+            patched_output = f"\n```{base_lang}\n{outcome.code}\n```\n"
             yield {"type": "token", "content": patched_output}
             loop_content += patched_output
             in_patch = False
+            patch_buffer = ""
             buffer = ""
-            
+
         if buffer:
             if think_mode == "hide" and in_thinking:
                 pass
@@ -2209,20 +2242,33 @@ def _stream_tokens(
             yield {"type": "finish", "reason": finish_reason}
 
         if finish_reason == "length":
+            # Use the raw, unmodified text the model generated this loop_idx — not
+            # loop_content, which can omit content deliberately kept out of the visible
+            # stream (an in-progress, not-yet-closed SEARCH/REPLACE block never gets
+            # added to loop_content until it closes). Feeding back anything less than
+            # the true raw text here desyncs "continue where you left off" from where
+            # the model actually left off — costly on a small model mid-patch, which may
+            # then restart the SEARCH block from scratch or act as if it already closed
+            # a block it hadn't.
+            source_text = raw_turn_text if raw_turn_text else loop_content
             content_to_keep = (
-                loop_content[-6000:] if len(loop_content) > 6000 else loop_content
+                source_text[-6000:] if len(source_text) > 6000 else source_text
             )
-            prefix = "...[TRUNCATED]...\n" if len(loop_content) > 6000 else ""
+            prefix = "...[TRUNCATED]...\n" if len(source_text) > 6000 else ""
             full_messages.append(
                 {"role": "assistant", "content": prefix + content_to_keep}
             )
-            full_messages.append(
-                {
-                    "role": "user",
-                    "content": "Continue exactly where you left off, from the very next character. "
-                    "Do not repeat anything.",
-                }
+            continue_note = (
+                "Continue exactly where you left off, from the very next character. "
+                "Do not repeat anything."
             )
+            if in_patch:
+                continue_note += (
+                    " You were in the middle of a SEARCH/REPLACE block — continue "
+                    "that exact block (do not restart it or open a new one) until you "
+                    "reach its '====' separator and/or closing '>>>>' marker."
+                )
+            full_messages.append({"role": "user", "content": continue_note})
         elif finish_reason in ("error_fix", "escape_hatch"):
             continue
         else:
