@@ -1429,6 +1429,12 @@ def scan_query_for_elements(query: str) -> str:
         directives.extend(matched_industries)
         directives.append("CRITICAL OVERRIDE: If the user explicitly requested specific colors, animations, effects, or styles (listed above), those specific choices MUST OVERRIDE any conflicting industry defaults. Only use the industry defaults to fill in the gaps for elements the user did not explicitly specify.")
         
+    directives.append("=== ACCESSIBILITY & CONTRAST (CRITICAL) ===")
+    directives.append("CRITICAL OVERRIDE: You MUST ensure high text contrast. Do NOT use white text on light backgrounds (like light pink, light gray, yellow, or white). Do NOT use dark text on dark backgrounds. If the background is light, you MUST use a dark text color (e.g., text-slate-900, text-gray-800). If the background is dark, use a light text color.")
+
+    directives.append("=== NO PLACEHOLDERS OR LAZY CODING (CRITICAL) ===")
+    directives.append("CRITICAL OVERRIDE: You MUST write complete, functional, and fully-fleshed out code. DO NOT use placeholders (like `{currentYear}` or `[Insert Here]`). DO NOT write incomplete sentences or cut off attributes. You MUST generate the ENTIRE component with realistic dummy data.")
+        
     if directives:
         return "\n\n[ELEMENTS DATABASE DIRECTIVES (MANDATORY)]\n" + "\n".join(directives) + "\n"
     

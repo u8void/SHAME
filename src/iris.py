@@ -100,7 +100,26 @@ def ask_stream(
                 translated_history.append({"role": role, "content": translated_content})
             history = translated_history
 
-    if force_role:
+    task_type_override = None
+    if user_query.strip().startswith("/route "):
+        parts = user_query.strip().split(" ", 2)
+        if len(parts) >= 3:
+            route_name = parts[1].lower()
+            if route_name == "code_complex":
+                route_name = "coding_complex"
+            elif route_name == "code_simple":
+                route_name = "coding_simple"
+
+            for t in TaskType:
+                if t.value.lower() == route_name:
+                    task_type_override = t
+                    user_query = parts[2]
+                    break
+
+    if task_type_override:
+        task_type = task_type_override
+        direct_answer = ""
+    elif force_role:
         if isinstance(force_role, str):
             try:
                 force_role = ModelRole(force_role)
@@ -122,6 +141,7 @@ def ask_stream(
     else:
         from src.iris_triage import classify_task
         task_type, direct_answer = classify_task(user_query, history)
+
     
     gen = None
     if task_type == TaskType.CONTROL:

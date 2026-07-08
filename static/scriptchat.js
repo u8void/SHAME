@@ -613,29 +613,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 return stripTrailingProseLines(content);
             }
 
-            // Python: strip after last def/class/if-__name__/return at indent 0
-            if (['python', 'py'].includes(l)) {
-                while (lastCode >= 0) {
-                    const s = lines[lastCode];
-                    if (s.startsWith('def ') || s.startsWith('class ') || s.startsWith('if __name__') ||
-                        s.startsWith('return ') || s.trim() === 'return') break;
-                    lastCode--;
-                }
-                if (lastCode >= 0) content = lines.slice(0, lastCode + 1).join('\n').trim();
-                return stripTrailingProseLines(content);
-            }
 
-            // JS/TS/JSX/TSX/Vue: strip after last }; } export/module.exports
-            if (['javascript', 'js', 'typescript', 'ts', 'jsx', 'tsx', 'vue'].includes(l)) {
-                while (lastCode >= 0) {
-                    const s = lines[lastCode].trim();
-                    if (s.endsWith('};') || s === '}' || s === '};' || s.endsWith("';") || s.endsWith('";') ||
-                        s.startsWith('export ') || s.startsWith('module.exports')) break;
-                    lastCode--;
-                }
-                if (lastCode >= 0) content = lines.slice(0, lastCode + 1).join('\n').trim();
-                return stripTrailingProseLines(content);
-            }
+
+
 
             // Generic fallback: strip trailing lines that look like English prose
             lastCode = lines.length - 1;
@@ -663,7 +643,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const nextClosing = afterOpen.indexOf('```');
             const nextFileCard = afterOpen.indexOf('<file_card');
             if (nextClosing === -1 || (nextFileCard !== -1 && nextClosing > nextFileCard)) {
-                return '```' + match.slice(1);
+                return '\n```\n' + match;
             }
             return match;
         });
@@ -1268,6 +1248,12 @@ document.addEventListener("DOMContentLoaded", () => {
         const hasFiles = window.selectedFiles.length > 0;
         if (!text && !hasFiles) return;
 
+        // Prevent sending if only /route or /route <role> is provided without a prompt
+        if (!hasFiles && text.match(/^\/route(?:\s+[a-zA-Z_]+)?$/i)) {
+            chatInput.focus();
+            return;
+        }
+
         if (!currentChatId || !chats.find(c => c.id === currentChatId)) {
             startNewChat();
         }
@@ -1607,7 +1593,65 @@ document.addEventListener("DOMContentLoaded", () => {
         chatInput.style.height = 'auto';
         chatInput.style.height = (chatInput.scrollHeight) + 'px';
     };
-    chatInput.addEventListener('input', handleInputResize);
+
+    const routeAutocomplete = document.getElementById("routeAutocomplete");
+    const routeAutocompleteList = document.getElementById("routeAutocompleteList");
+    const availableRoutes = [
+        "code_complex", "code_simple", "math", "reasoning", "general", "control"
+    ];
+
+    chatInput.addEventListener('input', (e) => {
+        handleInputResize();
+        
+        const val = chatInput.value;
+        if (val.startsWith("/route")) {
+            const parts = val.split(" ");
+            const searchStr = parts.length > 1 ? parts[1].toLowerCase() : "";
+            // Hide if they already typed a space after the route
+            if (parts.length > 2) {
+                routeAutocomplete.classList.add("hidden");
+                return;
+            }
+            
+            routeAutocompleteList.innerHTML = "";
+            const matches = availableRoutes.filter(r => r.startsWith(searchStr));
+            
+            if (matches.length > 0) {
+                matches.forEach(route => {
+                    const li = document.createElement("li");
+                    li.className = "route-autocomplete-item";
+                    li.innerHTML = `
+                        <div class="route-icon-wrapper">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="4 17 10 11 4 5"></polyline>
+                                <line x1="12" y1="19" x2="20" y2="19"></line>
+                            </svg>
+                        </div>
+                        <span class="route-cmd">/route</span>
+                        <span class="route-name">${route}</span>
+                    `;
+                    li.addEventListener("click", () => {
+                        chatInput.value = `/route ${route} `;
+                        routeAutocomplete.classList.add("hidden");
+                        chatInput.focus();
+                    });
+                    routeAutocompleteList.appendChild(li);
+                });
+                routeAutocomplete.classList.remove("hidden");
+            } else {
+                routeAutocomplete.classList.add("hidden");
+            }
+        } else {
+            routeAutocomplete.classList.add("hidden");
+        }
+    });
+
+    // Hide autocomplete on blur (delay to allow click to register)
+    chatInput.addEventListener('blur', () => {
+        setTimeout(() => {
+            if (routeAutocomplete) routeAutocomplete.classList.add("hidden");
+        }, 150);
+    });
 
     sendBtn.addEventListener('click', () => {
         if (isGenerating) {
@@ -2087,14 +2131,37 @@ document.addEventListener("DOMContentLoaded", () => {
             previewBtn.style.display = 'none';
         }
 
-        const escaped = code
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
-        document.getElementById('cvCode').innerHTML = escaped;
+        const lines = code.split('\n');
+        
+        const esc = (str) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        
+        let state = 'NORMAL';
+        const formattedLines = lines.map(line => {
+            const trimmed = line.trim();
+            if (trimmed === '<<<<' || trimmed.startsWith('<<<< SEARCH')) {
+                state = 'IN_SEARCH';
+                return `<div class="diff-marker">${esc(line)}</div>`;
+            } else if (trimmed === '====' || trimmed.startsWith('=======')) {
+                state = 'IN_REPLACE';
+                return `<div class="diff-marker">${esc(line)}</div>`;
+            } else if (trimmed === '>>>>' || trimmed.startsWith('>>>> REPLACE')) {
+                state = 'NORMAL';
+                return `<div class="diff-marker">${esc(line)}</div>`;
+            }
+
+            const escaped = esc(line) || ' ';
+            if (state === 'IN_SEARCH') {
+                return `<div class="diff-search-line">${escaped}</div>`;
+            } else if (state === 'IN_REPLACE') {
+                return `<div class="diff-replace-line">${escaped}</div>`;
+            } else {
+                return `<div>${escaped}</div>`;
+            }
+        });
+
+        document.getElementById('cvCode').innerHTML = formattedLines.join('');
 
         // Build line-number gutter
-        const lines = code.split('\n');
         const gutters = document.getElementById('cvGutters');
         gutters.innerHTML = lines
             .map((_, i) => `<div class="code-viewer-gutter-line">${i + 1}</div>`)

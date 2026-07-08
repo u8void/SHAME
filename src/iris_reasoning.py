@@ -1,7 +1,7 @@
 from src.iris_engine import _load_skill_prompt, ModelRole
 
 def get_reasoning_prompt(identity: str) -> str:
-    prompt = _load_skill_prompt("reasoning/reasoning_prompt.txt", role=ModelRole.REASONING)
+    prompt = _load_skill_prompt("reasoning/reasoning_prompt.txt")
     return f"{identity}\n{prompt}"
 
 
@@ -97,8 +97,6 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
         visible_answer = re.sub(r'</?think>', '', visible_answer, flags=re.IGNORECASE).strip()
         visible_answer = re.sub(r'<\|?/?thought(?:_(?:start|end))?\|?>', '', visible_answer, flags=re.IGNORECASE).strip()
 
-        # Strip any rogue markdown code blocks (to prevent file card rendering)
-        visible_answer = re.sub(r'```[\s\S]*?(?:```|$)', '', visible_answer, flags=re.IGNORECASE)
         # Strip any rogue HTML span tags (both raw and HTML-encoded), handling typos
         visible_answer = re.sub(r'</?span[\s\S]*?(?:>|&gt;|$)', '', visible_answer, flags=re.IGNORECASE)
         visible_answer = re.sub(r'&lt;/?span[\s\S]*?(?:>|&gt;|$)', '', visible_answer, flags=re.IGNORECASE).strip()
@@ -166,7 +164,6 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
             retry_answer = retry_full.strip()
             retry_answer = re.sub(r'</?think>', '', retry_answer, flags=re.IGNORECASE).strip()
             
-            retry_answer = re.sub(r'```[\s\S]*?(?:```|$)', '', retry_answer, flags=re.IGNORECASE)
             retry_answer = re.sub(r'</?span[\s\S]*?(?:>|&gt;|$)', '', retry_answer, flags=re.IGNORECASE)
             retry_answer = re.sub(r'&lt;/?span[\s\S]*?(?:>|&gt;|$)', '', retry_answer, flags=re.IGNORECASE).strip()
             

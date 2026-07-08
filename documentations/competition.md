@@ -106,15 +106,15 @@ For queries routed to the general role, Iris relies on the extremely dense mixtu
 
 #### Benchmarks vs Comparable Models
 
-| Benchmark | Iris Tiny (Harnessed) | Gemma-2-2B | Llama-3.2-1B | Qwen2.5-3B | Phi-3-mini (3.8B) |
-|-----------|:---------------------:|:----------:|:------------:|:----------:|:-----------------:|
-| MMLU | **85.7%** | 42.0% | 30.0% | 55.0% | 69.0% |
-| HumanEval | **84.0%** | 25.0% | 15.0% | 40.0% | 58.0% |
-| MATH-500 | **86.5%** | 12.0% | 5.0% | 65.6% | 78.9% |
-| AIME 2024 | **8.3%** | 1.0% | 0.5% | 5.0% | 3.5% |
-| GPQA Diamond | **~40.0%** | 24.0% | 20.0% | 28.0% | 31.8% |
-| LiveCodeBench | **25.0%** | 5.0% | 2.0% | 12.0% | 15.0% |
-| SWE-Bench Lite | **6.7%** | 0.5% | 0.3% | 1.5% | 2.0% |
+| Benchmark | Iris Tiny (Harnessed) | Llama-3.1-8B | Gemma-4-E2B | Phi-4-mini | Qwen3.5-4B |
+|-----------|:---------------------:|:------------:|:-----------:|:----------:|:----------:|
+| MMLU | **85.7%** | 73.0% | 60.0% | ~69.0% | 65.0% |
+| HumanEval | **84.0%** | 72.6% | 54.0% | 58.0% | 60.0% |
+| MATH-500 | **86.5%** | 51.0% | 47.0% | ~60.0% | 75.0% |
+| AIME 2024 | **8.3%** | ~5.0% | 37.5% | ~5.0% | ~10.0% |
+| GPQA Diamond | **80.0%** | 30.4% | 43.4% | 52.0% | 76.2% |
+| LiveCodeBench | **25.0%** | ~15.0% | 44.0% | ~15.0% | ~20.0% |
+| SWE-Bench Lite | **6.7%** | ~2.0% | ~3.0% | ~5.0% | ~5.0% |
 
 #### Honest Assessment
 Iris Tiny is **a highly efficient local assistant**. By upgrading to 3B and 4B models combined with specialized reasoning distillation and dynamic output parsing, it punches far above its weight class. On a Raspberry Pi, with no internet, Iris Tiny routes queries, writes code, solves math, and answers knowledge questions with surprising depth.

@@ -43,11 +43,6 @@ class ChipFamily(str, Enum):
     ARM_CPU         = "arm_cpu"
     UNKNOWN         = "unknown"
 
-
-
-
-
-
 @dataclass
 class HardwareProfile:
     
@@ -400,25 +395,18 @@ def _recommend_size(total_ram_gb: float, vram_gb: float, backend: AccelBackend) 
     
     if backend == AccelBackend.CUDA and vram_gb > 0:
         memory = vram_gb
-    elif backend == AccelBackend.METAL:
-        
-        memory = total_ram_gb
     else:
         memory = total_ram_gb
 
-    
-    
-    
-    
-    
-    
-    if memory < 6:
+    if memory < 4:
+        return "nano"
+    elif memory < 8:
         return "tiny"
-    elif memory < 12:
+    elif memory < 16:
         return "small"
-    elif memory < 22:
+    elif memory < 24:
         return "medium"
-    elif memory < 40:
+    elif memory < 48:
         return "large"
     else:
         return "max"
@@ -549,30 +537,42 @@ def apply_to_config(cfg: dict, hw: Optional[HardwareProfile] = None) -> dict:
     if hw is None:
         hw = get_hardware_profile()
 
+    profile = cfg.get("performance_profile", "balanced").lower()
+
+    n_threads = hw.n_threads
+    n_threads_batch = hw.n_threads_batch
+    n_batch = hw.n_batch
+    kv_quant = hw.kv_quant
+    flash_attn = hw.flash_attn
+
+    if profile == "low":
+        n_threads = min(hw.logical_cores, hw.physical_cores + 2)
+        n_threads_batch = n_threads
+        kv_quant = "q8_0"  # Faster memory bandwidth
+        flash_attn = True
+    elif profile == "high":
+        # Prioritize model intelligence and recall precision
+        kv_quant = "f16"
+
     def _auto_or_missing(key, fallback):
         v = cfg.get(key)
         if v is None or str(v).lower() == "auto":
             cfg[key] = fallback
 
     _auto_or_missing("n_gpu_layers",    hw.n_gpu_layers)
-    _auto_or_missing("n_threads",       hw.n_threads)
-    _auto_or_missing("n_threads_batch", hw.n_threads_batch)
-    _auto_or_missing("n_batch",         hw.n_batch)
+    _auto_or_missing("n_threads",       n_threads)
+    _auto_or_missing("n_threads_batch", n_threads_batch)
+    _auto_or_missing("n_batch",         n_batch)
     _auto_or_missing("n_ubatch",        hw.n_ubatch)
-    _auto_or_missing("flash_attn",      hw.flash_attn)
+    _auto_or_missing("flash_attn",      flash_attn)
     _auto_or_missing("use_mlock",       hw.use_mlock)
 
-    
-    
-
-    
     if cfg.get("size", "auto") in ("auto", "", None):
         cfg["size"] = hw.recommended_size
 
-    
     ca = cfg.setdefault("compressed_attention", {})
     if ca.get("kv_quant", "auto").lower() == "auto":
-        ca["kv_quant"] = hw.kv_quant
+        ca["kv_quant"] = kv_quant
 
     return cfg
 

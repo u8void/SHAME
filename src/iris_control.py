@@ -5,7 +5,7 @@ from src.iris_engine import ModelRole, load_model, unload_model, _keep_loaded, _
 logger = logging.getLogger('iris')
 
 def get_control_prompt(identity: str = "") -> str:
-    prompt = _load_skill_prompt("control/control_prompt.txt", role=ModelRole.CONTROL)
+    prompt = _load_skill_prompt("control/control_prompt.txt")
     return f"{identity}\n{prompt}"
 
 
@@ -41,7 +41,12 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     control_messages.append({"role": "user", "content": enforcement_prompt})
     
     logger.info("[Routing] Loading model (ModelRole.CONTROL) for control action.")
-    control_llm = load_model(ModelRole.CONTROL)
+    try:
+        control_llm = load_model(ModelRole.CONTROL)
+    except FileNotFoundError:
+        yield {"type": "status", "content": "Controller disabled: model missing"}
+        yield {"type": "bot", "content": "I'm sorry, but the computer controller feature is currently disabled because the required control model could not be found locally."}
+        return
     
     action_json = ""
     try:

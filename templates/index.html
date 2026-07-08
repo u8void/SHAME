@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Iris AI Dashboard</title>
     <meta name="description" content="Iris AI: Your intelligent fine-tuned assistant, trained on your data.">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=15">
-    <link rel="stylesheet" href="{{ url_for('static', filename='voice_style.css') }}?v=15">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=21">
+    <link rel="stylesheet" href="{{ url_for('static', filename='voice_style.css') }}?v=21">
 
     <style>
     </style>
@@ -132,7 +132,14 @@
                     <span>Drop files here</span>
                 </div>
                 <div id="imagePreviewContainer" class="image-preview-container"></div>
-                <div class="input-wrapper">
+                
+                <div id="routeAutocomplete" class="route-autocomplete hidden">
+                    <ul id="routeAutocompleteList" class="route-autocomplete-list">
+                        <!-- Options injected via JS -->
+                    </ul>
+                </div>
+
+                <div class="input-wrapper relative">
                     <label for="imageInput" class="action-btn" title="Add file or image">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -214,6 +221,19 @@
                     </div>
                     <span class="field-hint">Switch between AMOLED dark mode and Light mode.</span>
                 </label>
+            </div>
+
+            <p class="settings-section-label" style="margin-top: 20px;">Model Performance</p>
+            <div class="settings-field">
+                <label for="cs_performance_profile">
+                    <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+                        <span>Intelligence vs Speed</span>
+                        <span id="val_performance_profile" style="color:var(--iris-purple); font-weight:bold;">Balanced</span>
+                    </div>
+                    <span class="field-hint">High = smarter but slower. Low = faster but stupider.</span>
+                </label>
+                <input type="range" id="cs_performance_profile" value="1" min="0" max="2" step="1"
+                    oninput="const vals=['Low', 'Balanced', 'High']; document.getElementById('val_performance_profile').innerText = vals[this.value]">
             </div>
 
             <p class="settings-section-label" style="margin-top: 20px;">Generation</p>
@@ -304,6 +324,20 @@
                 <input type="range" id="cs_compacting_profile" value="1" min="0" max="2" step="1"
                     oninput="const vals=['Low','Medium','Aggressive']; document.getElementById('val_compacting_profile').innerText = vals[this.value]">
             </div>
+            <div class="settings-field"
+                style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding:12px 0; gap: 16px;">
+                <label for="cs_keep_triage_loaded"
+                    style="margin:0; cursor:pointer; flex: 1; display: flex; flex-direction: column; gap: 4px;">
+                    <span id="keep_triage" style="color: var(--text-primary);">Keep Triage Loaded</span>
+                    <span class="field-hint">When enabled, keeps the routing model in memory for faster responses, at the cost of using memory constantly.</span>
+                </label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <label class="toggle-label" style="margin:0;">
+                        <input type="checkbox" id="cs_keep_triage_loaded">
+                        <div class="toggle-track"></div>
+                    </label>
+                </div>
+            </div>
 
             <p class="settings-section-label" style="margin-top:20px">Code Quality</p>
             <div class="settings-field"
@@ -323,20 +357,6 @@
                 </div>
             </div>
 
-            <div class="settings-field"
-                style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding:12px 0; gap: 16px;">
-                <label for="cs_keep_triage_loaded"
-                    style="margin:0; cursor:pointer; flex: 1; display: flex; flex-direction: column; gap: 4px;">
-                    <span id="keep_triage" style="color: var(--text-primary);">Keep Triage Loaded</span>
-                    <span class="field-hint">When enabled, keeps the routing model in memory for faster responses, at the cost of using memory constantly.</span>
-                </label>
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <label class="toggle-label" style="margin:0;">
-                        <input type="checkbox" id="cs_keep_triage_loaded">
-                        <div class="toggle-track"></div>
-                    </label>
-                </div>
-            </div>
             <button class="settings-save-btn" id="saveChatSettingsBtn">Save Global Settings</button>
         </div>
 
@@ -565,11 +585,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/marked-katex-extension/lib/index.umd.js"></script>
-    <script src="/static/script.js?v=15"></script>
-    <script src="/static/scriptchat.js?v=15"></script>
-    <script src="/static/voice.js?v=15"></script>
-    <script src="{{ url_for('static', filename='settings.js') }}?v=15"></script>
-    <script src="{{ url_for('static', filename='setup.js') }}?v=15"></script>
+    <script src="/static/script.js?v=16"></script>
+    <script src="/static/scriptchat.js?v=20"></script>
+    <script src="/static/voice.js?v=16"></script>
+    <script src="{{ url_for('static', filename='settings.js') }}?v=16"></script>
+    <script src="{{ url_for('static', filename='setup.js') }}?v=16"></script>
 </body>
 
 </html>

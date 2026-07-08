@@ -30,6 +30,7 @@
         repetition_penalty: document.getElementById('cs_repetition_penalty'),
         n_ctx_allocation  : document.getElementById('cs_n_ctx_allocation'),
         compacting_profile: document.getElementById('cs_compacting_profile'),
+        performance_profile: document.getElementById('cs_performance_profile'),
         code_review       : document.getElementById('cs_code_review'),
         keep_triage_loaded: document.getElementById('cs_keep_triage_loaded'),
     };
@@ -64,6 +65,16 @@
             csFields.compacting_profile.value = idx; 
             const display_vals = ['Low','Medium','Aggressive'];
             document.getElementById('val_compacting_profile').innerText = display_vals[idx]; 
+        }
+
+        if (csFields.performance_profile) {
+            const pp_vals = ['low', 'balanced', 'high'];
+            let idx = pp_vals.indexOf(String(s.performance_profile || 'balanced').toLowerCase());
+            if (idx === -1) idx = 1;
+            csFields.performance_profile.value = idx;
+            const display_vals = ['Low', 'Balanced', 'High'];
+            const valEl = document.getElementById('val_performance_profile');
+            if (valEl) valEl.innerText = display_vals[idx];
         }
 
         if (csFields.code_review) {
@@ -158,6 +169,9 @@
         const cp_map = ['low','medium','aggressive'];
         s.compacting_profile = cp_map[parseInt(csFields.compacting_profile?.value) || 1] || 'medium';
 
+        const pp_map = ['low', 'balanced', 'high'];
+        s.performance_profile = pp_map[parseInt(csFields.performance_profile?.value) || 1] || 'balanced';
+
         localStorage.setItem('iris_chat_settings', JSON.stringify(s));
         if (window.setChatSettings) window.setChatSettings(s);
 
@@ -169,7 +183,8 @@
                 code_review: s.code_review,
                 keep_triage_loaded: s.keep_triage_loaded,
                 n_ctx_allocation: s.n_ctx_allocation,
-                compacting_profile: s.compacting_profile
+                compacting_profile: s.compacting_profile,
+                performance_profile: s.performance_profile
             })
         }).catch(() => {});
 
