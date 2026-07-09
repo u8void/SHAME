@@ -1,5 +1,3 @@
-
-
 import os
 import platform
 import sys
@@ -39,7 +37,7 @@ from src.logger import get_logger
 from src.iris_engine import (
     detect_user_language, translate_text, 
     _model_pool, load_model, ModelRole, 
-    get_hardware_profile
+    get_hardware_profile, get_device
 )
 
 logger = get_logger("controller")
@@ -67,9 +65,58 @@ _oi = None
 _oi_initialized = False
 _oi_step_counter = 0
 
+def _get_oi_system_message() -> str:
+    return (
+        "You are Iris AI. You are an AI PC assistant. "
+        "Write and execute Python, Shell/Bash, or PowerShell code to fulfill the user's request.\n"
+        "CRITICAL RULES:\n"
+        "1. You are ALLOWED to use 'sudo' (Linux) or administrative privileges (Windows) if the task requires it. If you need a password, assume the user will provide it when prompted by the terminal.\n"
+        "2. ALWAYS launch persistent desktop/GUI applications or files (e.g., browsers, editors) using non-blocking, fully-detached background processes so they DO NOT block the execution flow. Do NOT run quick, short-lived helper commands (like setting volume/brightness) in the background with nohup.\n"
+        "   Before launching GUI apps, ALWAYS verify if the executable is available. If it does not exist, fall back to opening its web interface.\n"
+        "   - In Python: Use subprocess.Popen with start_new_session=True.\n"
+        "   - In Bash (Linux): Use 'nohup cmd &> /dev/null &'. Common app binaries: google-chrome, firefox, code (VS Code), gnome-calculator, nautilus (file manager), gnome-terminal, spotify.\n"
+        "   - In Windows: Use 'Start-Process' in PowerShell or 'start' in cmd. Common processes: chrome, firefox, code, calc, explorer, spotify.\n"
+        "   - In MacOS: Use 'open -a \"AppName\"'. Common apps: \"Google Chrome\", \"Firefox\", \"Visual Studio Code\", \"Calculator\", \"Finder\", \"Spotify\".\n"
+        "3. NEVER wait for GUI applications to exit. Once you start the process, the task is complete. Return immediately.\n"
+        "4. To close/kill an application, write code to terminate its processes:\n"
+        "   - On Linux: Use 'pkill -f process_name' or 'killall process_name'.\n"
+        "   - On Windows: Use 'taskkill /IM process_name.exe /F' or PowerShell 'Stop-Process -Name process_name -Force'.\n"
+        "   - On MacOS: Use AppleScript: osascript -e 'tell application \"AppName\" to quit' or 'killall AppName'.\n"
+        "5. For FILE AND FOLDER OPERATIONS (creating, moving, copying, deleting, renaming, etc.), prefer native Python libraries (os, shutil, pathlib, glob, zipfile) for reliability, path expansion (always expand user using os.path.expanduser or pathlib.Path.expanduser), and cross-platform compatibility.\n"
+        "   - Creating: Use pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True) followed by pathlib.Path(path).write_text(content) or touch().\n"
+        "   - Moving/Renaming: Use shutil.move(src, dst).\n"
+        "   - Copying: Use shutil.copy2(src, dst) for files or shutil.copytree(src, dst, dirs_exist_ok=True) for folders.\n"
+        "   - Deleting: Use os.remove(path) for files or shutil.rmtree(path) for folders.\n"
+        "6. For POWER AND SESSION OPERATIONS (shutting down, restarting, logging out, sleeping), write and run the correct native OS commands:\n"
+        "   - On Linux:\n"
+        "     * Shutdown: 'shutdown -h now' or 'poweroff' (use sudo/admin if needed).\n"
+        "     * Restart: 'reboot' or 'shutdown -r now' (use sudo/admin if needed).\n"
+        "     * Logout: 'gnome-session-quit --logout --no-prompt' (for GNOME/Ubuntu) or terminate the session manager process.\n"
+        "     * Sleep: 'systemctl suspend'.\n"
+        "   - On Windows:\n"
+        "     * Shutdown: 'shutdown /s /t 0'.\n"
+        "     * Restart: 'shutdown /r /t 0'.\n"
+        "     * Logout: 'shutdown /l' or 'logoff'.\n"
+        "     * Sleep: Run powershell command 'Add-Type -Assembly PresentationCore; [System.Windows.Forms.Application]::SetSuspendState([System.Windows.Forms.PowerState]::Suspend, $false, $false)' or 'rundll32.exe powrprof.dll,SetSuspendState Sleep'.\n"
+        "   - On MacOS:\n"
+        "     * Shutdown: AppleScript 'osascript -e \"tell app \\\"System Events\\\" to shut down\"'.\n"
+        "     * Restart: AppleScript 'osascript -e \"tell app \\\"System Events\\\" to restart\"'.\n"
+        "     * Logout: AppleScript 'osascript -e \"tell app \\\"System Events\\\" to log out\"'.\n"
+        "     * Sleep: AppleScript 'osascript -e \"tell app \\\"System Events\\\" to sleep\"' or run 'pmset sleepnow'.\n"
+        "7. NEVER use the webbrowser module or python requests to perform a web search or look up information. If you are asked to perform a system action like installing a package or changing a setting, write the script to do exactly that. Do not search the web for how to do it.\n"
+        "8. NEVER install external packages or tools (e.g. apt, pip, brew, choco) to perform system actions like changing brightness or volume. ALWAYS use the native integrated operating system files or tools, even if they require administrative / sudo access.\n"
+        "   - On Linux, to change screen brightness, you MUST use brightnessctl. To set screen brightness to P percent, execute: `brightnessctl set P%`. To increase or decrease brightness, use `brightnessctl set +P%` or `brightnessctl set P%-` respectively. NEVER use xrandr or gdbus/mutter.\n"
+        "   - On Windows, use native PowerShell WMI commands or native registry keys.\n"
+        "   - On MacOS, use native AppleScript (osascript) or native command line utilities.\n"
+        "9. RESPOND CONCISELY: Do not explain the code you ran or the tool you used, and do not suggest next steps. Your final response to the user must be a single, short sentence stating only what was done (e.g., 'Volume set to 60%'). You MUST NOT output any markdown code blocks, commands, or suggestions in your final response, as they will be executed automatically. Respond in plain text only."
+    )
+
+
 def _init_oi():
     global _oi, OI_AVAILABLE, _oi_initialized
     if _oi_initialized:
+        if _oi is not None:
+            _oi.system_message = _get_oi_system_message()
         return
     _oi_initialized = True
     
@@ -77,7 +124,6 @@ def _init_oi():
     
     try:
         from interpreter import interpreter as open_interpreter
-        global _oi
         _oi = open_interpreter
         
         _oi.auto_run = True   
@@ -95,12 +141,12 @@ def _init_oi():
 
             global _oi_step_counter
             _oi_step_counter += 1
-            if _oi_step_counter > 5:
+            if _oi_step_counter > 1:
                 yield {
                     "choices": [
                         {
                             "delta": {
-                                "content": "I have executed 5 steps but cannot complete the task. Stopping to prevent an infinite loop."
+                                "content": "Stopped after executing 1 step."
                             },
                             "finish_reason": "stop"
                         }
@@ -108,52 +154,41 @@ def _init_oi():
                 }
                 return
             
-            if not _model_pool:
-                try:
-                    load_model(ModelRole.CONTROL)
-                except FileNotFoundError:
-                    yield {
-                        "choices": [
-                            {
-                                "delta": {"content": "Controller disabled: Control model not found."},
-                                "finish_reason": "stop"
-                            }
-                        ]
-                    }
-                    return
+            try:
+                load_model(ModelRole.CODE)
+            except FileNotFoundError:
+                yield {
+                    "choices": [
+                        {
+                            "delta": {"content": "Controller disabled: Code model not found."},
+                            "finish_reason": "stop"
+                        }
+                    ]
+                }
+                return
                 
-            active_role = next(reversed(_model_pool))
-            model_obj = _model_pool[active_role]
+            model_obj = _model_pool[ModelRole.CODE.value]
             
             clean_kwargs = {
                 "messages": kwargs.get("messages", []),
                 "stream": True,
                 "max_tokens": 1024,
-                "temperature": 0.2
+                "temperature": 0.1,
+                "stop": ["<|im_end|>", "<|im_start|>", "<|endoftext|>", "</s>", "## Conversation", "<step_end>"]
             }
-            
+
             for chunk in model_obj.create_chat_completion(**clean_kwargs):
                 yield chunk
+
 
         _oi.llm.completions = _iris_native_oi_llm
         _oi.llm.api_base = None
         _oi.llm.model = "iris-native"
         _oi.llm.context_window = 8192
         _oi.llm.max_tokens = 1024
-        _oi.computer.languages = [lang for lang in _oi.computer.languages if lang.__name__ == "Python"]
+        # Allow all default languages (Python, Shell, PowerShell, etc.)
 
-        _oi.system_message = (
-            "You are Iris AI. You are an AI PC assistant. "
-            "Write and execute ONLY Python code to fulfill the user's request. NEVER write raw Bash or Shell commands.\n"
-            "CRITICAL RULES:\n"
-            "1. NEVER use 'sudo' or administrative privileges.\n"
-            "2. ALWAYS launch desktop/GUI applications or files using non-blocking, fully-detached background processes so they DO NOT block the execution flow.\n"
-            "   Before launching, ALWAYS verify if the executable is available on the system path using `shutil.which`. If it does not exist (for example, 'whatsapp' or 'spotify' is not installed), fall back to opening its web interface in the default browser using Python's built-in `webbrowser` module (e.g., `webbrowser.open('https://web.whatsapp.com')`).\n"
-            "   When launching an executable, redirect stdout/stderr to subprocess.DEVNULL and set start_new_session=True. Example: import subprocess, shutil, webbrowser; cmd = 'gnome-control-center'; subprocess.Popen([cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True) if shutil.which(cmd) else webbrowser.open('https://example.com')\n"
-            "3. NEVER wait for GUI applications to exit, NEVER call .wait(), and NEVER write monitoring loops (e.g., polling with .poll() or using time.sleep) to check if the process is still running. Once you start the process with Popen, the task is complete. Return immediately.\n"
-            "4. To close/kill an application, write Python code to terminate its processes. Keep in mind that some launcher commands differ from the running process names: 'google-chrome' runs as 'chrome', 'libreoffice' runs as 'soffice' or 'soffice.bin', and 'gnome-terminal' runs as 'gnome-terminal-server'. Be careful to terminate the correct process names, and avoid matching substring patterns that might terminate this agent workspace (e.g., do not kill 'chrome-sandbox' or 'antigravity').\n"
-            "5. NEVER use the webbrowser module or python requests to perform a web search or look up information. If you are asked to perform a system action like installing a package or changing a setting, write the python script to do exactly that (e.g. using subprocess). Do not search the web for how to do it."
-        )
+        _oi.system_message = _get_oi_system_message()
 
         OI_AVAILABLE = True
         logger.info("[OI] Open Interpreter ready (offline mode) ✓")
@@ -161,10 +196,6 @@ def _init_oi():
     except Exception as _oi_err:
         OI_AVAILABLE = False
         logger.warning(f"[OI] Open Interpreter unavailable: {_oi_err}")
-
-
-
-
 
 
 class _FakeResult:
@@ -207,19 +238,6 @@ def _popen(cmd, shell: bool = False, **kw) -> None:
         return None
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 def _exec_shell_cmd(cmd: str) -> str:
     
     try:
@@ -231,7 +249,7 @@ def _exec_shell_cmd(cmd: str) -> str:
         return f"Command failed: {e}"
 
 
-def _run_oi_task(task: str) -> str:
+def _run_oi_task(task: str) -> Generator[Dict[str, str], None, str]:
     global _oi_step_counter
     _oi_step_counter = 0
     _init_oi()
@@ -240,33 +258,76 @@ def _run_oi_task(task: str) -> str:
     try:
         _oi.messages = []
         parts = []
+        assistant_buffer = ""
+        computer_buffer = ""
+        active_code_block = False
+
+        def flush_assistant():
+            nonlocal assistant_buffer
+            val = assistant_buffer.strip()
+            if val:
+                parts.append(val)
+            assistant_buffer = ""
+
         for chunk in _oi.chat(task, display=True, stream=True, blocking=True):
             if not isinstance(chunk, dict):
                 continue
             chunk_type = chunk.get("type", "")
             role = chunk.get("role", "")
             content = chunk.get("content", "")
-            if chunk_type == "message" and role == "assistant":
-                if isinstance(content, str) and content.strip():
-                    parts.append(content.strip())
-            elif (
-                chunk_type == "console" and chunk.get("format") == "output" and content
-            ):
-                parts.append(str(content).strip())
-            elif role == "computer" and content:
-                if isinstance(content, list):
-                    for item in content:
-                        out = (
-                            item.get("output", item.get("content", ""))
-                            if isinstance(item, dict)
-                            else ""
-                        )
-                        if out:
-                            parts.append(str(out).strip())
-                elif isinstance(content, str) and content.strip():
-                    parts.append(content.strip())
-        result = "\n".join(p for p in parts if p).strip()
+
+            if chunk_type == "code" and role == "assistant":
+                if not active_code_block:
+                    active_code_block = True
+                    fmt = chunk.get("format", "python")
+                    yield {"type": "thinking", "content": f"\n```{fmt}\n"}
+                if isinstance(content, str):
+                    yield {"type": "thinking", "content": content}
+            else:
+                if active_code_block:
+                    active_code_block = False
+                    yield {"type": "thinking", "content": "\n```\n"}
+
+                if chunk_type == "message" and role == "assistant":
+                    if isinstance(content, str):
+                        assistant_buffer += content
+                        yield {"type": "thinking", "content": content}
+                elif chunk_type == "console" and chunk.get("format") == "output":
+                    if isinstance(content, str):
+                        computer_buffer += content
+                        yield {"type": "thinking", "content": content}
+                elif role == "computer":
+                    if isinstance(content, list):
+                        for item in content:
+                            out = (
+                                item.get("output", item.get("content", ""))
+                                if isinstance(item, dict)
+                                else ""
+                            )
+                            if out:
+                                computer_buffer += str(out)
+                                yield {"type": "thinking", "content": str(out)}
+                    elif isinstance(content, str):
+                        computer_buffer += content
+                        yield {"type": "thinking", "content": content}
+
+        if active_code_block:
+            yield {"type": "thinking", "content": "\n```\n"}
+
+        flush_assistant()
+
+        result = "\n\n".join(p for p in parts if p).strip()
+        if not result:
+            result = computer_buffer.strip()
         logger.info(f"[OI] chat completed: {task[:80]!r}")
+
+        try:
+            from src.iris_engine import unload_model
+            unload_model(ModelRole.CODE.value)
+            logger.info("[OI] Unloaded CODE model to free memory.")
+        except Exception as ue:
+            logger.warning(f"[OI] Could not unload CODE model: {ue}")
+
         return result or "Task completed (no output)."
     except Exception as e:
         logger.error(f"[OI] chat error: {e}")
@@ -524,7 +585,6 @@ try:
     from src.iris import ask_stream
     from src.iris_rag import BookRetriever
     from src.iris_vision import analyze_image
-    get_device = get_hardware_profile
 
     IRIS_AVAILABLE = True
 except ImportError:
@@ -778,125 +838,6 @@ def _handle_check_storage(action_dict: dict) -> str:
         return f"Failed to check disk usage: {e}"
 
 
-def _dispatch_action(action: str, d: dict) -> str:
-    
-    g = d.get  
-
-    def clean_url(url_val):
-        if not url_val:
-            return ""
-        
-        m = re.match(r'^\[.*?\]\((.*?)\)$', str(url_val).strip())
-        if m:
-            return m.group(1).strip()
-        return str(url_val).strip()
-
-    
-    if action == "open_website":
-        return handle_website_from_url(clean_url(g("url", "")))
-    if action == "web_search":
-        return web_search(g("query", ""))
-    if action == "youtube_video":
-        return handle_youtube_video_from_query(g("query") or g("name", ""))
-    if action == "youtube_channel":
-        return handle_youtube_channel_from_name(g("name") or g("query", ""))
-    if action == "spotify_song":
-        return handle_spotify_song(g("query") or g("name", ""))
-    if action in ("browser_task", "browser_login", "browser_autopilot"):
-        try:
-            from src.browser_agent import (
-                browser_autopilot,
-                browser_login,
-                browser_task,
-            )
-        except Exception as e:
-            return f"Browser automation unavailable: {e}"
-        url_clean = clean_url(g("url", ""))
-        if action == "browser_login":
-            return browser_login(url_clean, g("username", ""), g("password", ""))
-        if action == "browser_task":
-            return browser_task(url_clean, g("task", ""))
-        return browser_autopilot(
-            url_clean, g("task", ""), resume_path=g("resume_path")
-        )
-
-    
-    if action == "gui_action":
-        try:
-            from src.gui_agent import perform_gui_action
-            return perform_gui_action(g("task", ""))
-        except Exception as e:
-            return f"GUI automation unavailable: {e}"
-
-    if action == "parse_resume":
-        try:
-            from src.browser_agent import parse_resume
-
-            return str(parse_resume(g("path", "")))
-        except Exception as e:
-            return f"Resume parsing unavailable: {e}"
-
-    
-
-    if action == "analyze_image":
-        try:
-            from src.iris import analyze_image
-
-            return analyze_image(
-                g("image_path", ""), g("prompt", "Describe this image in detail.")
-            )
-        except Exception as e:
-            return f"Vision unavailable: {e}"
-    if action == "search_image_web":
-        return handle_search_image_web(g("image_path", ""))
-
-    if action == "send_email":
-        return handle_email_from_parts(
-            g("to", ""), g("subject", ""), g("body", ""), load_config()
-        )
-
-    return None
-
-def _pct(val) -> int:
-    val_str = str(val).lower().replace("%", "").strip()
-    if val_str == "max":
-        return 100
-    if val_str == "min":
-        return 0
-    try:
-        return max(0, min(100, int(float(val_str))))
-    except (ValueError, TypeError):
-        return 50
-
-
-
-
-_RISKY_ACTIONS = {
-    "delete_file",
-    "shutdown_computer",
-    "restart_computer",
-    "sleep_computer",
-    "empty_trash",
-    "kill_process",
-    "send_email",
-}
-
-_RISKY_CMD_RE = re.compile(
-    r"""(?xi)
-    \brm\s+-[rf]      |   # rm -rf / rm -f
-    \bsudo\b          |
-    \bmkfs\b          |
-    \bdd\s+if=        |
-    \b(shutdown|reboot|halt|poweroff)\b |
-    \bgit\s+push\b    |
-    \bgit\s+reset\s+--hard |
-    >\s*/dev/sd       |
-    :\s*>\s           |   # truncate
-    \bchmod\s+-R\b
-    """
-)
-
-
 def is_risky_action(action_dict: dict) -> bool:
     
     action = action_dict.get("action", "")
@@ -930,6 +871,14 @@ def _confirm_risky(action_dict: dict) -> bool:
     return ans == "y"
 
 
+def _run_generator_to_completion(gen) -> Any:
+    while True:
+        try:
+            next(gen)
+        except StopIteration as e:
+            return e.value
+
+
 def execute_action_by_dict(action_dict: dict) -> str:
     
     action = action_dict.get("action", "chat")
@@ -945,7 +894,7 @@ def execute_action_by_dict(action_dict: dict) -> str:
     task_str = "\n".join(task_parts)
     
     _prime_oi_with_control()
-    return _run_oi_task(task_str)
+    return _run_generator_to_completion(_run_oi_task(task_str))
 
 
 _AGENT_LOOP_ADDENDUM = """
@@ -973,10 +922,6 @@ You operate as a multi-step agent. A single request may need several actions.
 
 
 
-
-
-def _is_complex_action(action: str) -> bool:
-    return True
 
 
 def _prime_oi_with_control():
@@ -1017,120 +962,16 @@ def agentic_control_loop(
     settings: dict = None,
     model_callable=None,
 ):
-    
-    history = history or []
+    yield {"type": "status", "content": "Executing command via Open Interpreter..."}
+    result = yield from _run_oi_task(user_query)
+    reply_text = f"Executed via Open Interpreter.\n\nResult:\n{result}"
+    yield {"type": "action_result", "content": f"Executed via Open Interpreter.\nResult:\n{result}"}
+    yield {"type": "token", "content": reply_text}
+    yield {"type": "raw_response", "content": reply_text}
     settings = settings or {}
-    auto_confirm = bool(settings.get("auto_confirm", False))
-    gen = model_callable or (lambda msgs: _generate_control_action(msgs, user_query=user_query))
-
-    sys_prompt = _get_agent_system_prompt() + _AGENT_LOOP_ADDENDUM
-    messages = [{"role": "system", "content": sys_prompt}]
-    for m in history[-6:]:
-        if m.get("role") in ("user", "assistant") and m.get("content"):
-            messages.append({"role": m["role"], "content": m["content"]})
-    messages.append({"role": "user", "content": user_query})
-
-    transcript = []  
-    parse_failures = 0
-
-    for step in range(max_steps):
-        yield {"type": "status", "content": f"Planning step {step + 1}…"}
-        try:
-            raw = gen(messages)
-        except Exception as e:
-            logger.error(f"[Agent] generation failed: {e}")
-            yield {"type": "status", "content": "Model generation failed."}
-            break
-
-        action_dict = parse_ai_response(raw)
-        if not action_dict:
-            parse_failures += 1
-            if parse_failures >= 2:
-                fail = "I couldn't translate that into an action I can run."
-                yield {"type": "token", "content": fail}
-                yield {"type": "raw_response", "content": fail}
-                if not settings.get("keep_loaded"):
-                    _unload_control_model()
-                return
-            messages.append({"role": "assistant", "content": raw})
-            messages.append(
-                {
-                    "role": "user",
-                    "content": "OBSERVATION: Your reply was not valid JSON. Reply with a single JSON action object.",
-                }
-            )
-            continue
-        parse_failures = 0
-
-        action = action_dict.get("action", "chat")
-        messages.append({"role": "assistant", "content": raw})
-
-        
-        if _is_complex_action(action):
-            yield {"type": "status", "content": f"Complex action '{action}' → 3B+OI"}
-        else:
-            yield {"type": "status", "content": f"Simple action '{action}' → native handler"}
-
-        
-        if action in ("finish", "none"):
-            summary = action_dict.get("summary", "")
-            final = summary or _join_transcript(transcript) or "Done."
-            yield {"type": "token", "content": final}
-            yield {"type": "raw_response", "content": final}
-            if not settings.get("keep_loaded"):
-                _unload_control_model()
-            return
-        if action == "chat":
-            reply = action_dict.get("response", "") or _join_transcript(transcript)
-            yield {"type": "token", "content": reply}
-            yield {"type": "raw_response", "content": reply}
-            if not settings.get("keep_loaded"):
-                _unload_control_model()
-            return
-
-        
-        if is_risky_action(action_dict) and not auto_confirm:
-            if not _confirm_risky(action_dict):
-                obs = f"Action '{action}' was cancelled by the user."
-                transcript.append(obs)
-                yield {"type": "status", "content": obs}
-                messages.append({"role": "user", "content": f"OBSERVATION: {obs}"})
-                continue
-
-        
-        yield {"type": "status", "content": f"Executing: {action}"}
-        result = execute_action_by_dict(action_dict)
-        result = (result or "Done.").strip()
-        transcript.append(f"{action}: {result}")
-        yield {
-            "type": "action_result",
-            "content": f"Action '{action}' Executed.\nResult:\n{result}",
-        }
-        
-        observation_content = f"OBSERVATION: {result[:2000]}"
-        if action == "open_app" and result.startswith("✅"):
-            _original_task_lower = user_query.lower()
-            _gui_followup_keywords = {
-                "whatsapp", "telegram", "message", "send", "text", "chat",
-                "click", "type", "search for", "open the chat", "im iris"
-            }
-            if any(kw in _original_task_lower for kw in _gui_followup_keywords):
-                app_opened = action_dict.get("name", "the app")
-                observation_content = (
-                    f"OBSERVATION: {result}\n"
-                    f"{app_opened} is now open on screen. "
-                    f"The original task is NOT complete yet — you must continue. "
-                    f"Use gui_action with a detailed step-by-step task description to finish: {user_query}"
-                )
-        messages.append({"role": "user", "content": observation_content})
-
-    
-    final = _join_transcript(transcript) or "Reached the step limit."
-    yield {"type": "status", "content": "Step limit reached."}
-    yield {"type": "token", "content": final}
-    yield {"type": "raw_response", "content": final}
     if not settings.get("keep_loaded"):
         _unload_control_model()
+
 
 
 def _join_transcript(transcript: list) -> str:
@@ -1148,653 +989,54 @@ def _unload_control_model():
         pass
 
 
-def _open_url(url: str):
-    if not url.startswith("http"):
-        url = "https://" + url
-    log_action("browser", f"Opening {url}")
-    webbrowser.open(url)
-
-
-def handle_search_image_web(image_path: str) -> str:
-    import os
-    import urllib.parse
-
-    if not os.path.exists(image_path):
-        return f"Image not found at {image_path}"
-
-    log_action("search", "Uploading image for reverse search...")
-    img_url = None
-
-    cmd1 = [
-        "curl",
-        "-s",
-        "-F",
-        "reqtype=fileupload",
-        "-F",
-        "time=1h",
-        "-F",
-        f"fileToUpload=@{image_path}",
-        "https://litterbox.catbox.moe/api.php",
-    ]
-    try:
-        res = _shell(cmd1, capture_output=True, text=True, timeout=8)
-        out = res.stdout.strip()
-        if out.startswith("http"):
-            img_url = out
-    except Exception:
-        pass
-
-    if not img_url:
-        import json
-
-        cmd2 = [
-            "curl",
-            "-s",
-            "-F",
-            f"file=@{image_path}",
-            "https://tmpfiles.org/api/v1/upload",
-        ]
-        try:
-            res = _shell(cmd2, capture_output=True, text=True, timeout=15)
-            data = json.loads(res.stdout)
-            if data.get("status") == "success":
-                url = data["data"]["url"]
-                img_url = url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
-        except Exception as e:
-            pass
-
-    if not img_url:
-        return "Upload failed: All temporary image hosts timed out."
-
-    bing_url = f"https://www.bing.com/images/search?view=detailv2&iss=sbi&FORM=SBIHMP&q=imgurl:{urllib.parse.quote(img_url)}"
-
-    import re
-    import ssl
-    import urllib.request
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    }
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    try:
-        req = urllib.request.Request(bing_url, headers=headers)
-        with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
-            html = resp.read().decode("utf-8", errors="ignore")
-
-        title = ""
-        title_match = re.search(r"<title>(.*?)</title>", html, re.IGNORECASE)
-        if title_match:
-            title = title_match.group(1).replace("- Bing Images", "").strip()
-
-        clean_text = re.sub(
-            r"<style[^>]*>.*?</style>", "", html, flags=re.IGNORECASE | re.DOTALL
-        )
-        clean_text = re.sub(
-            r"<script[^>]*>.*?</script>",
-            "",
-            clean_text,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-
-        clean_text = re.sub(r"<[^>]+>", " ", clean_text)
-
-        clean_text = re.sub(r"\s+", " ", clean_text).strip()
-
-        return f"Silently performed reverse image search via Bing.\n\nPage Title: {title}\n\nVisible Page Text Snippet:\n{clean_text[:1000]}"
-    except Exception as e:
-        logger.warning(f"[Bing Scrape Error] {e}")
-        pass
-
-    return "Silently searched Bing Visual Search, but could not reliably extract the visual match."
-
-
-def handle_website(match: re.Match):
-    url = match.group(1).strip()
-    _open_url(url)
-    return f"Opening {url} in your browser."
-
-
-_YOUTUBE_HOST_RE = re.compile(r"(?:^|\.)(?:youtube\.com|youtu\.be)$", re.IGNORECASE)
-_YOUTUBE_VALID_WATCH_RE = re.compile(
-    r"^https?://(?:www\.)?(?:youtube\.com/watch\?(?:[\w=&%+.-]*&)?v=[a-zA-Z0-9_-]{11}(?:&\S*)?"
-    r"|youtu\.be/[a-zA-Z0-9_-]{11}(?:\?\S*)?)$",
-    re.IGNORECASE,
-)
-_YOUTUBE_VALID_SEARCH_RE = re.compile(
-    r"^https?://(?:www\.)?youtube\.com/results\?search_query=\S+$", re.IGNORECASE
-)
-_YOUTUBE_VALID_CHANNEL_RE = re.compile(
-    r"^https?://(?:www\.)?youtube\.com/(?:channel/UC[a-zA-Z0-9_-]{22}|@\S+)$",
-    re.IGNORECASE,
-)
-
-
-def handle_website_from_url(url: str):
-    
-    url = (url or "").strip()
-    try:
-        parsed = urllib.parse.urlparse(url)
-    except Exception:
-        parsed = None
-
-    is_youtube_host = bool(parsed and _YOUTUBE_HOST_RE.search(parsed.netloc or ""))
-    if is_youtube_host:
-        if (
-            _YOUTUBE_VALID_WATCH_RE.match(url)
-            or _YOUTUBE_VALID_SEARCH_RE.match(url)
-            or _YOUTUBE_VALID_CHANNEL_RE.match(url)
-        ):
-            pass  
-        else:
-            
-            
-            
-            
-            guess_bits = [parsed.path, parsed.query, parsed.fragment]
-            guess = " ".join(b for b in guess_bits if b)
-            guess = re.sub(r"^[/?#]+", "", guess)
-            guess = re.sub(r"^watch\b[\s=:/-]*", "", guess, flags=re.IGNORECASE)
-            guess = re.sub(r"[=&/_+]+", " ", guess).strip()
-            if guess:
-                return handle_youtube_video_from_query(guess)
-            
-            
-            url = "https://www.youtube.com"
-
-    _open_url(url)
-    return f"Opening {url}."
-
-
-
-
-
-def _youtube_search_url(query: str) -> str:
-    q = urllib.parse.quote_plus(query)
-    return f"https://www.youtube.com/results?search_query={q}"
-
-
-def _youtube_video_available(video_id: str) -> bool:
-    
-    url = (
-        "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v="
-        + video_id
-        + "&format=json"
-    )
-    ctx = ssl.create_default_context()
-    try:
-        ctx.load_default_certs()
-    except Exception:
-        pass
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=6, context=ctx) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
-            return bool(data.get("title"))
-    except urllib.error.HTTPError:
-        return False  
-    except Exception:
-        return True  
-
-
-def _youtube_find_first_video(query: str) -> str | None:
-    search_url = (
-        "https://www.youtube.com/results?search_query=" + urllib.parse.quote_plus(query)
-    )
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-    ctx = ssl.create_default_context()
-    try:
-        ctx.load_default_certs()
-    except Exception:
-        pass
-    try:
-        req = urllib.request.Request(search_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
-    except (urllib.error.URLError, ssl.SSLError) as e:
-        logger.warning(f"  [YouTube] SSL error, retrying without verification: {e}")
-        ctx = ssl._create_unverified_context()
-        try:
-            req2 = urllib.request.Request(search_url, headers=headers)
-            with urllib.request.urlopen(req2, timeout=8, context=ctx) as resp2:
-                html = resp2.read().decode("utf-8", errors="replace")
-        except Exception as e2:
-            logger.warning(f"  [YouTube search error] {e2}")
-            return None
-
-    
-    
-    
-    
-    ids: list[str] = []
-    seen = set()
-    for vid in re.findall(
-        r'"videoRenderer"\s*:\s*\{\s*"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"', html
-    ):
-        if vid not in seen:
-            seen.add(vid)
-            ids.append(vid)
-
-    
-    if not ids:
-        for vid in re.findall(r'"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"', html):
-            if vid not in seen:
-                seen.add(vid)
-                ids.append(vid)
-
-    if not ids:
-        return None
-
-    
-    for vid in ids[:5]:
-        if _youtube_video_available(vid):
-            return f"https://www.youtube.com/watch?v={vid}"
-
-    
-    return f"https://www.youtube.com/watch?v={ids[0]}"
-
-
-def _youtube_find_channel(query: str) -> str | None:
-    search_url = (
-        "https://www.youtube.com/results?search_query="
-        + urllib.parse.quote_plus(query + " channel")
-        + "&sp=EgIQAg%3D%3D"
-    )
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-    ctx = ssl.create_default_context()
-    try:
-        ctx.load_default_certs()
-    except Exception:
-        pass
-    try:
-        req = urllib.request.Request(search_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
-    except (urllib.error.URLError, ssl.SSLError) as e:
-        logger.warning(f"  [YouTube] SSL error, retrying without verification: {e}")
-        ctx = ssl._create_unverified_context()
-        try:
-            req2 = urllib.request.Request(search_url, headers=headers)
-            with urllib.request.urlopen(req2, timeout=8, context=ctx) as resp2:
-                html = resp2.read().decode("utf-8", errors="replace")
-        except Exception as e2:
-            logger.warning(f"  [YouTube channel search error] {e2}")
-            return None
-    channel_ids = re.findall(r'"channelId"\s*:\s*"(UC[a-zA-Z0-9_-]{22})"', html)
-    if channel_ids:
-        return f"https://www.youtube.com/channel/{channel_ids[0]}"
-    handles = re.findall(r'"canonicalBaseUrl"\s*:\s*"(/@[^"]+)"', html)
-    if handles:
-        return f"https://www.youtube.com{handles[0]}"
-    return None
-
-
-def handle_youtube_video(match: re.Match):
-    return handle_youtube_video_from_query(match.group(1).strip())
-
-
-def handle_youtube_video_from_query(query: str):
-    log_action("youtube", f"Searching for video: '{query}'")
-    url = _youtube_find_first_video(query)
-    if url:
-        _open_url(url)
-        return f"Opening YouTube video: {url}"
-    else:
-        search_url = _youtube_search_url(query)
-        _open_url(search_url)
-        return f"Searching YouTube for '{query}'."
-
-
-def handle_youtube_channel(match: re.Match):
-    return handle_youtube_channel_from_name(match.group(1).strip())
-
-
-def handle_youtube_channel_from_name(name: str):
-    log_action("youtube", f"Searching for channel: '{name}'")
-    url = _youtube_find_channel(name)
-    if url:
-        _open_url(url)
-        return f"Opening YouTube channel: {name}"
-    else:
-        search_url = _youtube_search_url(name + " channel")
-        _open_url(search_url)
-        return f"Searching YouTube for channel '{name}'."
-
-
-def handle_spotify(match: re.Match):
-    return handle_spotify_song(match.group(1).strip())
-
-
-def handle_spotify_song(query: str):
-    log_action("spotify", f"Searching for: '{query}'")
-    import urllib.parse
-
-    q = urllib.parse.quote(query)
-    url = f"https://open.spotify.com/search/{q}"
-    _open_url(url)
-    return f"Playing '{query}' on Spotify."
-
-
-def _resolve_contact(raw: str, contacts: dict) -> str:
-    if raw and "@" in raw:
-        return raw.strip()
-    return contacts.get(raw.strip().lower(), raw or "")
-
-
-def _interactive_email_build(config: dict) -> dict | None:
-    if not IS_INTERACTIVE:
-        return None
-
-    contacts = config.get("email", {}).get("contacts", {})
-    if RICH_AVAILABLE:
-        console.print(
-            "\n[bold cyan]── Compose Email ──────────────────────────────[/bold cyan]"
-        )
-        raw_to = Prompt.ask("  [bold yellow]To (name or email)[/bold yellow]").strip()
-    else:
-        logger.info("\n  ── Compose Email ──────────────────────────────")
-        raw_to = input("  To (name or email): ").strip()
-
-    if not raw_to:
-        return None
-    to_addr = _resolve_contact(raw_to, contacts)
-    if not to_addr or "@" not in to_addr:
-        if RICH_AVAILABLE:
-            console.print(
-                f"  [red][!] '{raw_to}' not found in contacts and doesn't look like an email.[/red]"
-            )
-            to_addr = Prompt.ask(
-                "  [bold yellow]Enter full email address[/bold yellow]"
-            ).strip()
-        else:
-            logger.info(
-                f"  [!] '{raw_to}' not found in contacts and doesn't look like an email."
-            )
-            to_addr = input("  Enter full email address: ").strip()
-        if not to_addr:
-            return None
-
-    if RICH_AVAILABLE:
-        subject = Prompt.ask(
-            "  [bold yellow]Subject[/bold yellow]", default="(no subject)"
-        ).strip()
-        console.print(
-            "  [bold yellow]Body[/bold yellow] (type [bold green]END[/bold green] on a new line to finish):"
-        )
-    else:
-        subject = input("  Subject: ").strip() or "(no subject)"
-        logger.info("  Body (type END on a new line to finish):")
-    lines = []
-    while True:
-        if RICH_AVAILABLE:
-            line = input("    ")
-        else:
-            line = input()
-        if line.strip().upper() == "END":
-            break
-        lines.append(line)
-    body = "\n".join(lines).strip()
-    return {"to": to_addr, "subject": subject, "body": body}
-
-
-def _send_email(to: str, subject: str, body: str, config: dict) -> str:
-    email_cfg = config.get("email", {})
-    sender = email_cfg.get("sender_address", "")
-    password = email_cfg.get("sender_password", "")
-    smtp_server = email_cfg.get("smtp_server", "smtp.gmail.com")
-    smtp_port = int(email_cfg.get("smtp_port", 587))
-    if not sender or sender == "your_email@gmail.com":
-        return "You aren't logged in, Please edit control.conf"
-    msg = MIMEMultipart()
-    msg["From"] = sender
-    msg["To"] = to
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain"))
-    try:
-        with smtplib.SMTP(smtp_server, smtp_port, timeout=15) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(sender, password)
-            server.sendmail(sender, to, msg.as_string())
-        return f"Email sent to {to}."
-    except smtplib.SMTPAuthenticationError:
-        return "Authentication failed. For Gmail, use an App Password (myaccount.google.com → Security → App Passwords)."
-    except Exception as e:
-        return f"Failed to send email: {e}"
-
-
-def handle_email(match: re.Match, config: dict) -> str:
-    to_raw = (match.group("to") or "").strip()
-    subject = (match.group("subject") or "").strip()
-    body = (match.group("body") or "").strip()
-    return handle_email_from_parts(to_raw, subject, body, config)
-
-
-def handle_email_from_parts(to_raw: str, subject: str, body: str, config: dict) -> str:
-    contacts = config.get("email", {}).get("contacts", {})
-    to_addr = _resolve_contact(to_raw, contacts) if to_raw else ""
-    if not to_addr or "@" not in to_addr:
-        data = _interactive_email_build(config)
-        if data is None:
-            return "Email cancelled."
-        to_addr, subject, body = data["to"], data["subject"], data["body"]
-    else:
-        if not subject:
-            if IS_INTERACTIVE:
-                if RICH_AVAILABLE:
-                    subject = Prompt.ask(
-                        f"  [bold yellow]Subject for email to {to_addr}[/bold yellow]",
-                        default="(no subject)",
-                    ).strip()
-                else:
-                    subject = (
-                        input(f"  Subject for email to {to_addr}: ").strip()
-                        or "(no subject)"
-                    )
-            else:
-                subject = "(no subject)"
-        if not body:
-            if IS_INTERACTIVE:
-                if RICH_AVAILABLE:
-                    console.print(
-                        "  [bold yellow]Body[/bold yellow] (type [bold green]END[/bold green] on a new line to finish):"
-                    )
-                else:
-                    logger.info("  Body (type END on a new line to finish):")
-                lines = []
-                while True:
-                    if RICH_AVAILABLE:
-                        line = input("    ")
-                    else:
-                        line = input()
-                    if line.strip().upper() == "END":
-                        break
-                    lines.append(line)
-                body = "\n".join(lines).strip()
-            else:
-                body = "(no body)"
-
-    if IS_INTERACTIVE:
-        if RICH_AVAILABLE:
-            console.print(
-                f"\n[bold cyan]── Preview ─────────────────────────────────[/bold cyan]"
-            )
-            console.print(f"  [bold yellow]To:[/bold yellow]      {to_addr}")
-            console.print(f"  [bold yellow]Subject:[/bold yellow] {subject}")
-            console.print(f"  [bold yellow]Body:[/bold yellow]\n{body}\n")
-            confirm = (
-                Prompt.ask(
-                    "  [bold green]Send?[/bold green]", choices=["y", "n"], default="n"
-                )
-                .strip()
-                .lower()
-            )
-        else:
-            logger.info(f"\n  ── Preview ─────────────────────────────────")
-            logger.info(f"  To:      {to_addr}")
-            logger.info(f"  Subject: {subject}")
-            logger.info(f"  Body:\n{body}\n")
-            confirm = input("  Send? [y/N]: ").strip().lower()
-        if confirm != "y":
-            return "Email cancelled."
-    return _send_email(to_addr, subject, body, config)
-
-
-
-def get_system_info(what: str = "all"):
-    import platform as pf
-
-    info = []
-
-    def add(label, value):
-        info.append(f"{label}: {value}")
-
-    if what in ("cpu", "all"):
-        add("CPU", pf.processor())
-    if what in ("memory", "all"):
-        try:
-            import psutil
-
-            mem = psutil.virtual_memory()
-            add("RAM", f"{mem.total / (1024**3):.1f} GB total, {mem.percent}% used")
-        except ImportError:
-            if pf.system() == "Windows":
-                try:
-                    import json
-                    import subprocess
-
-                    CREATE_NO_WINDOW = 0x08000000
-                    res = _shell(
-                        [
-                            "powershell",
-                            "-NoProfile",
-                            "-Command",
-                            "Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize, FreePhysicalMemory | ConvertTo-Json",
-                        ],
-                        capture_output=True,
-                        text=True,
-                        creationflags=CREATE_NO_WINDOW,
-                    )
-                    data = json.loads(res.stdout)
-                    total_kb = float(data["TotalVisibleMemorySize"])
-                    free_kb = float(data["FreePhysicalMemory"])
-                    used_kb = total_kb - free_kb
-                    percent = (used_kb / total_kb) * 100
-                    add(
-                        "RAM",
-                        f"{total_kb / (1024**2):.1f} GB total, {percent:.1f}% used",
-                    )
-                except:
-                    add("RAM", "Install psutil for memory info")
-            else:
-                add("RAM", "Install psutil for memory info")
-    if what in ("disk", "all"):
-        try:
-            import shutil
-
-            path = "C:\\" if pf.system() == "Windows" else "/"
-            total, used, free = shutil.disk_usage(path)
-            add("Disk", f"{free / (1024**3):.1f} GB free / {total / (1024**3):.1f} GB")
-        except:
-            add("Disk", "Unknown")
-    if what in ("ip", "all"):
-        try:
-            import socket
-
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            add("Local IP", ip)
-        except:
-            add("Local IP", "Unknown")
-    if what in ("hostname", "all"):
-        add("Hostname", pf.node())
-    return "\n".join(info) if info else "No information available."
-
-
-def clipboard_copy(text: str):
-    system = platform.system()
-    try:
-        if system == "Darwin":
-            _shell("pbcopy", input=text)
-        elif system == "Windows":
-            _shell("powershell -command Set-Clipboard", input=text)
-        else:
-            import shutil
-
-            if shutil.which("wl-copy"):
-                _shell("wl-copy", input=text)
-            elif shutil.which("xclip"):
-                _shell(["xclip", "-selection", "clipboard"], input=text)
-            else:
-                try:
-                    import tkinter as tk
-
-                    r = tk.Tk()
-                    r.withdraw()
-                    r.clipboard_clear()
-                    r.clipboard_append(text)
-                    r.update()
-                    r.destroy()
-                except ImportError:
-                    return "Clipboard copy failed: No native clipboard utility (wl-copy, xclip) or python3-tk found."
-        return f"Copied to clipboard: {text[:50]}{'...' if len(text) > 50 else ''}"
-    except Exception as e:
-        return f"Clipboard copy failed: {e}"
-
-
-def clipboard_read():
-    system = platform.system()
-    try:
-        if system == "Darwin":
-            content = _shell("pbpaste", capture_output=True, text=True).stdout
-        elif system == "Windows":
-            content = _shell(
-                "powershell -command Get-Clipboard", capture_output=True, text=True
-            ).stdout
-        else:
-            import shutil
-
-            if shutil.which("wl-paste"):
-                content = _shell("wl-paste", capture_output=True, text=True).stdout
-            elif shutil.which("xclip"):
-                content = _shell(
-                    ["xclip", "-selection", "clipboard", "-o"],
-                    capture_output=True,
-                    text=True,
-                ).stdout
-            else:
-                try:
-                    import tkinter as tk
-
-                    r = tk.Tk()
-                    r.withdraw()
-                    content = r.clipboard_get()
-                    r.destroy()
-                except ImportError:
-                    return "Clipboard read failed: No native clipboard utility (wl-paste, xclip) or python3-tk found."
-        return f"Clipboard: {content[:200]}" if content else "Clipboard is empty."
-    except Exception as e:
-        return f"Clipboard read failed: {e}"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1872,18 +1114,13 @@ def iris_chat_reply(
 
 
 HELP_TEXT = """
-Commands you can use (regex + AI):
-  open <website>                  → opens a website
-  open <app name>                 → launches an application
-  play <query> on youtube         → opens a YouTube video
-  play <query> on spotify         → opens a song on Spotify
-  open <name> channel on youtube  → opens a YouTube channel
-  send email to <name/email>      → compose and send an email
+Commands you can use:
 
-NEW AI‑powered actions (just say what you want):
+AI‑powered actions (just say what you want):
+  • web & media       → "open a website", "play a song on spotify", "youtube: lofi hip hop"
   • files & folders   → "open the budget.xlsx", "search for .pdf in Downloads"
   • system commands   → "ping google.com", "what's my hostname?"
-  • volume & brightness → "volume up", "set brightness to 70%"
+  • volume & brightness → "volume up", "set brightness to %"
   • clipboard          → "copy this to clipboard", "read clipboard"
   • system info        → "how much RAM?", "what's my IP?"
   • Knowledge Base     → "What happened in chapter 3 of my book?"

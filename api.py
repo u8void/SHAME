@@ -1,5 +1,11 @@
 import os
 os.environ["GGML_CUDA_NO_VMM"] = "1"
+os.environ["OMP_WAIT_POLICY"] = "passive"
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["OPENBLAS_NUM_THREADS"] = "4"
+os.environ["MKL_NUM_THREADS"] = "4"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
+os.environ["NUMEXPR_NUM_THREADS"] = "4"
 import json
 import time
 import uuid

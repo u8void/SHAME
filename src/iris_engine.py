@@ -770,7 +770,13 @@ def _evict_from_pool_locked(pool_size_limit: int) -> None:
         _unload_locked(role_to_evict)
 
 
+_prefetched_files = set()
+
+
 def prefetch_model_file(filename: str) -> None:
+    global _prefetched_files
+    if filename in _prefetched_files:
+        return
     try:
         path = _model_path(filename)
         if os.path.exists(path):
@@ -779,6 +785,7 @@ def prefetch_model_file(filename: str) -> None:
                 fd = os.open(path, os.O_RDONLY)
                 os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_WILLNEED)
                 os.close(fd)
+                _prefetched_files.add(filename)
     except Exception as e:
         logger.debug(f"[Iris] Prefetch failed for {filename}: {e}")
 

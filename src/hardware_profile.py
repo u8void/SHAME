@@ -546,7 +546,7 @@ def apply_to_config(cfg: dict, hw: Optional[HardwareProfile] = None) -> dict:
     flash_attn = hw.flash_attn
 
     if profile == "low":
-        n_threads = min(hw.logical_cores, hw.physical_cores + 2)
+        n_threads = min(4, hw.physical_cores)
         n_threads_batch = n_threads
         kv_quant = "q8_0"  # Faster memory bandwidth
         flash_attn = True

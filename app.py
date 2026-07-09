@@ -21,6 +21,7 @@ if "HF_TOKEN" not in os.environ and "HF_HUB_VERBOSITY" not in os.environ:
     os.environ["HF_HUB_VERBOSITY"] = "error"
 
 os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["OMP_WAIT_POLICY"] = "passive"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
 os.environ["MKL_NUM_THREADS"] = "4"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
@@ -124,7 +125,7 @@ def get_retriever():
     with _retriever_lock:
         if _retriever_ready:
             return retriever
-        logger.info("[INFO] Lazy-loading RAG Knowledge Base...")
+        logger.info("[INFO] Loading RAG Knowledge Base...")
         try:
             from src.iris_rag import BookRetriever
             retriever = BookRetriever(raw_data_dir="raw_data")
@@ -794,8 +795,23 @@ def model_status():
     })
 
 def warmup_models():
-    # Warmup disabled as requested to prevent loading/locking models in RAM on startup.
-    pass
+    try:
+        from src.iris_engine import load_generation_config, DEFAULT_MODEL_FILES, prefetch_model_file
+        cfg = load_generation_config()
+        models_dict = cfg.get("models", {})
+        
+        # Collect all configured GGUF filenames (avoid duplicates)
+        filenames = set()
+        for role_name in ["triage", "router", "control", "math", "code", "reasoning", "general", "vision"]:
+            filename = models_dict.get(role_name) or DEFAULT_MODEL_FILES.get(role_name)
+            if filename:
+                filenames.add(filename)
+                
+        # Prefetch each model file into OS page cache
+        for filename in sorted(filenames):
+            prefetch_model_file(filename)
+    except Exception as e:
+        logger.warning(f"[Warmup] Prefetch error during startup: {e}")
 
 @app.route("/api/unload_models", methods=["POST"])
 def unload_models_endpoint():
@@ -827,8 +843,9 @@ if __name__ == "__main__":
         mode_label = "Local GGUF Multi-Model Routing System"
     logger.info(f"[INFO] Starting Iris AI — {mode_label}")
 
-    import threading
-    threading.Thread(target=warmup_models, daemon=True).start()
+    warmup_models()
+    if not PREVIEW_MODE:
+        get_retriever()
 
     port = int(os.environ.get("PORT", "5050"))
     
@@ -1002,6 +1019,8 @@ def start_server():
 
             logger.info("[Chaquopy] Starting Flask on 127.0.0.1:5000")
             print("[Iris] Flask thread starting on 127.0.0.1:5000", flush=True)
+            if not PREVIEW_MODE:
+                get_retriever()
             app.run(debug=False, host="127.0.0.1", port=5000, use_reloader=False)
 
         except Exception as e:
