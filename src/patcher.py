@@ -113,6 +113,13 @@ def _split_blocks(patch_text: str) -> Tuple[List[Tuple[List[str], List[str]]], i
             malformed += 1
             continue  # re-check the current line (may itself be a fresh '<<<' open)
 
+        # Some marker styles split the separator across two lines, e.g. "</SEARCH>"
+        # immediately followed by "<REPLACE>" — both independently match _SEP_RE, so
+        # consume any run of them here instead of letting the second one leak into
+        # replace_lines as if it were literal replacement text.
+        while i < n and _SEP_RE.match(lines[i]):
+            i += 1
+
         replace_lines: List[str] = []
         while i < n and not _CLOSE_RE.match(lines[i]) and not _OPEN_RE.match(lines[i]):
             replace_lines.append(lines[i])

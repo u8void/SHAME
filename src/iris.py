@@ -34,6 +34,14 @@ def ask_stream(
         history = []
     if settings is None:
         settings = {}
+        
+    # --- [MODIFICATION: Detect Full-Stack and Skeleton Tasks] ---
+    is_fullstack = any(kw in user_query.lower() for kw in ["backend", "server", "api", "full stack", "full-stack", "node", "express"])
+    is_skeleton = any(kw in user_query.lower() for kw in ["skeleton", "هيكل", "قالب", "فراغات"])
+    
+    settings["is_fullstack"] = is_fullstack
+    settings["is_skeleton"] = is_skeleton
+    # ------------------------------------------------------------
     
     # Asynchronously warm the OS page cache for the most common specialist models
     try:
@@ -180,4 +188,3 @@ def ask_stream(
 
     if gen is not None:
         yield from gen
-

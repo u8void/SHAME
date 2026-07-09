@@ -1,5 +1,3 @@
-
-
 import os
 import re
 import ast
@@ -245,3 +243,66 @@ def check_syntax(code_output: str, language: Optional[str] = None) -> Optional[s
             if err:
                 return err
     return None
+
+def sanitize_code_output(text: str) -> str:
+    """Post-processing guardrails for generated code outputs."""
+    # 1. Decimal Fix: 09rem -> 0.9rem, 05px -> 0.5px
+    text = re.sub(r'\b0([1-9])(rem|em|px|vh|vw|%)\b', r'0.\1\2', text)
+    
+    # 2. Basic HTML Tag Validation
+    # Just checking for severely broken syntax where < outnumbers >
+    blocks = extract_code_blocks(text)
+    for lang, code in blocks:
+        if lang in ["html", "xml"]:
+            open_tags = code.count("<")
+            close_tags = code.count(">")
+            if open_tags > close_tags + 2:
+                # Append a warning if it looks unclosed
+                text += "\n\n<!-- WARNING: HTML might have unclosed tags! -->"
+    
+    return text
+
+def check_missing_css_classes(text: str) -> list:
+    """Finds HTML classes that are missing in the CSS definitions."""
+    blocks = extract_code_blocks(text)
+    html_code = ""
+    css_code = ""
+    
+    for lang, code in blocks:
+        if lang in ["html", "xml", "php", "vue", "jsx", "tsx"]:
+            html_code += code + "\n"
+        elif lang in ["css", "scss", "less"]:
+            css_code += code + "\n"
+            
+    style_matches = re.findall(r'<style[^>]*>(.*?)</style>', html_code, re.DOTALL | re.IGNORECASE)
+    for s in style_matches:
+        css_code += s + "\n"
+        
+    if not html_code:
+        return []
+        
+    html_classes = set()
+    class_attrs = re.findall(r'class(?:Name)?\s*=\s*["\']([^"\']+)["\']', html_code, re.IGNORECASE)
+    for attr in class_attrs:
+        for cls in attr.split():
+            cls = cls.strip()
+            if cls:
+                html_classes.add(cls)
+            
+    if not html_classes:
+        return []
+        
+    css_classes = set()
+    defined_cls = re.findall(r'\.([a-zA-Z0-9_-]+)', css_code)
+    for c in defined_cls:
+        css_classes.add(c.strip())
+        
+    missing = []
+    ignore = {"active", "hover", "focus", "hidden", "show", "container"}
+    
+    for c in html_classes:
+        if c not in css_classes and c not in ignore and not c.startswith(('js-', 'is-', 'has-', 'sm:', 'md:', 'lg:', 'hover:', 'focus:')):
+            if any(keyword in c for keyword in ['grid', 'card', 'item', 'list', 'nav', 'hero', 'btn', 'wrapper', 'section', 'layout', 'row', 'col']):
+                missing.append(c)
+                
+    return missing
