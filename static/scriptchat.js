@@ -637,6 +637,14 @@ document.addEventListener("DOMContentLoaded", () => {
         // 1. If a <file_card> appears and the nearest preceding ``` has no closing ```, add one
         work = work.replace(/<file_card\s/gi, (match, offset) => {
             const before = work.substring(0, offset);
+            // BUGFIX: the closest preceding ``` to the tag is the CLOSING marker of a complete
+            // pair in the normal, correct case (block already properly closed before <file_card>).
+            // The old code couldn't tell that apart from a genuinely unclosed opening fence, so it
+            // always inserted a redundant second closing fence — which step 2 below then collapsed
+            // together with the real one, stripping both. An even count of ``` before the tag means
+            // everything so far is already matched pairs, so there's nothing to close here.
+            const fenceCountBefore = (before.match(/```/g) || []).length;
+            if (fenceCountBefore % 2 === 0) return match;
             const lastOpen = before.lastIndexOf('```');
             if (lastOpen === -1) return match;
             const afterOpen = work.substring(lastOpen + 3);
@@ -662,10 +670,32 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         }
 
-        // Auto-wrap raw HTML in backticks if the model forgot them (Browser Markdown Chokehold prevention)
-        if (!work.includes("```html") && !work.includes("```\n<!DOCTYPE") && !work.includes("```\n<html") && !work.includes("```\n<div") && !work.includes("```\n<nav")) {
-            // Find raw HTML blocks that appear on a new line and wrap them to the end of the text
-            work = work.replace(/(?:^|\n)(?:html\s*\n|CODE\s*\n|CODE\s*\nhtml\s*\n)?((?:<!--|<!DOCTYPE|<html|<body|<head|<title|<meta|<link|<nav|<header|<footer|<main|<section|<aside|<article|<div|<span|<p|<a|<button|<form|<input|<textarea|<select|<label|<ul|<ol|<li|<h[1-6]|<img|<canvas|<svg|<style|<script|<table|<tr|<td|<th|<thead|<tbody|<iframe|<video|<audio)[\s\S]*)$/i, '\n```html\n$1\n```\n');
+        // Auto-wrap raw HTML in backticks if the model forgot them (Browser Markdown Chokehold prevention).
+        //
+        // BUGFIX: this used to gate on `work.includes("```html")` etc. against the WHOLE message. That
+        // meant a single well-formed ```html ... ``` block earlier in the message (the normal, correct
+        // case — the one that produces a proper file card) silently disabled this safety net for
+        // everything AFTER it. So when the model also rambled/duplicated the file as raw, unfenced text
+        // later in the same response (small local models do this, especially right after a <file_card>
+        // tag), that trailing raw HTML fell straight through to marked.parse()+DOMPurify ungated and got
+        // rendered as live HTML elements instead of code — the "file card followed by what looks like the
+        // actual rendered webpage" bug.
+        //
+        // Fix: only ever look at the text AFTER the last fully-closed ``` fence, and only when every
+        // fence seen so far is a matched pair (an odd count means we're still mid-stream inside an open
+        // fence, in which case there's no "after" yet and this must stay out of the way, same as before).
+        {
+            const fenceCount = (work.match(/```/g) || []).length;
+            if (fenceCount % 2 === 0) {
+                const tailStart = fenceCount === 0 ? 0 : work.lastIndexOf('```') + 3;
+                const head = work.slice(0, tailStart);
+                let tail = work.slice(tailStart);
+                if (!tail.includes("```html") && !tail.includes("```\n<!DOCTYPE") && !tail.includes("```\n<html") && !tail.includes("```\n<div") && !tail.includes("```\n<nav")) {
+                    // Find raw HTML blocks that appear on a new line (within the unfenced tail only) and wrap them
+                    tail = tail.replace(/(?:^|\n)(?:html\s*\n|CODE\s*\n|CODE\s*\nhtml\s*\n)?((?:<!--|<!DOCTYPE|<html|<body|<head|<title|<meta|<link|<nav|<header|<footer|<main|<section|<aside|<article|<div|<span|<p|<a|<button|<form|<input|<textarea|<select|<label|<ul|<ol|<li|<h[1-6]|<img|<canvas|<svg|<style|<script|<table|<tr|<td|<th|<thead|<tbody|<iframe|<video|<audio)[\s\S]*)$/i, '\n```html\n$1\n```\n');
+                }
+                work = head + tail;
+            }
         }
 
         work = work.replace(/```([^\n`]*)\n?([\s\S]*?)(?:```|$)/gi, (match, lang, codeContent) => {
@@ -819,6 +849,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // 5. Re-inject blocks recursively
         const blockHtmlMap = {};
+        // Tracks file content that already has a visible card in this message, so a model that
+        // re-emits/duplicates the same file later in its response (see the auto-wrap bugfix above)
+        // doesn't produce a second, redundant card for it.
+        const seenFileContents = new Set();
         blocks.forEach((block, index) => {
             let id, html;
             if (block.type === 'thought') {
@@ -1000,8 +1034,17 @@ document.addEventListener("DOMContentLoaded", () => {
                         `;
                     }
                 } else if (block.hidden) {
+                    const normContent = (block.content || '').trim();
+                    if (block.claimed && normContent) {
+                        // This block's own card is rendered separately via its matching 'filecard' entry
+                        // below (see the <file_card> tag handling above); remember its content so that if
+                        // the model re-emits/duplicates the same file later in the same response, that
+                        // duplicate doesn't get an extra card of its own.
+                        seenFileContents.add(normContent);
+                    }
                     // Auto-generate a file card for hidden blocks that weren't claimed by an explicit <file_card> tag
-                    if (block.autoCard && block.content && block.content.trim().length > 0 && !block.claimed) {
+                    if (block.autoCard && normContent.length > 0 && !block.claimed && !seenFileContents.has(normContent)) {
+                        seenFileContents.add(normContent);
                         const autoLang = block.lang || 'code';
                         const ext = normaliseExt(autoLang);
                         const autoFilename = window.extractFilenameFromCode ? window.extractFilenameFromCode(block.content, ext) : `snippet.${ext}`;

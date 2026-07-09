@@ -101,9 +101,19 @@ def _fix_unclosed_code_blocks(text: str) -> str:
         tag = m.group(0)
         pos = m.start()
         before = text[:pos]
-        last_open = before.rfind('```')
-        if last_open == -1:
+        # BUGFIX: `before.rfind('```')` finds whichever ``` is closest to the tag — but in the
+        # normal, correct case (code block already properly closed before <file_card>) that
+        # closest ``` IS the closing marker of a complete pair, not an unclosed opening one. The
+        # old code couldn't tell the difference, so it always inserted a second, redundant closing
+        # fence right before <file_card> — which step 2 below then collapsed together with the
+        # real closing fence (since they're separated only by whitespace), stripping BOTH and
+        # leaving the block unclosed. Downstream, step 4 would then see no complete fenced pair
+        # before the tag and delete <file_card> entirely as "orphaned", even though it wasn't.
+        # An even count of ``` before the tag means every fence so far is already a matched pair —
+        # there's nothing to close, so skip straight past.
+        if before.count('```') % 2 == 0:
             return tag
+        last_open = before.rfind('```')
         after_open = text[last_open + 3:]
         next_close = after_open.find('```')
         next_fc = after_open.find('<file_card')
@@ -142,24 +152,34 @@ def _fix_unclosed_code_blocks(text: str) -> str:
         block = re.sub(r'\s*<file_card\s+[^>]*?>.*?</file_card>', '', block, flags=re.DOTALL | re.IGNORECASE)
         block = re.sub(r'\s*<file_card\s+[^>]*/>', '', block, flags=re.IGNORECASE)
 
+        # Extract opening, body, closing FIRST so we don't chop off the closing backticks
+        inner_match = re.match(r'(```[^\n]*\n)([\s\S]*?)(```\s*$)', block)
+        if not inner_match:
+            # Append extracted description outside the code block even if match fails
+            if desc_after_fc:
+                block = block + '\n\n' + desc_after_fc
+            return block
+            
+        opening, body, closing = inner_match.groups()
+
         # --- HTML: strip after last </html>
         if lang == 'html':
-            idx = block.rfind('</html>')
+            idx = body.rfind('</html>')
             if idx != -1:
-                block = block[:idx + 7]
+                body = body[:idx + 7]
 
         # --- CSS: strip after last closing brace at column 0
         elif lang in ('css', 'scss', 'less'):
-            lines = block.split('\n')
+            lines = body.split('\n')
             last_code = len(lines) - 1
             while last_code >= 0 and not lines[last_code].rstrip().endswith('}'):
                 last_code -= 1
             if last_code >= 0:
-                block = '\n'.join(lines[:last_code + 1])
+                body = '\n'.join(lines[:last_code + 1])
 
         # --- Shell: strip after last return/exit/exec
         elif lang in ('bash', 'sh', 'shell', 'zsh'):
-            lines = block.split('\n')
+            lines = body.split('\n')
             last_code = len(lines) - 1
             while last_code >= 0:
                 stripped = lines[last_code].strip().lower()
@@ -167,11 +187,11 @@ def _fix_unclosed_code_blocks(text: str) -> str:
                     break
                 last_code -= 1
             if last_code >= 0:
-                block = '\n'.join(lines[:last_code + 1])
+                body = '\n'.join(lines[:last_code + 1])
 
         # --- Python: strip after last def/class/if-__name__/return at indent 0
         elif lang in ('python', 'py'):
-            lines = block.split('\n')
+            lines = body.split('\n')
             last_code = len(lines) - 1
             while last_code >= 0:
                 s = lines[last_code].rstrip()
@@ -181,11 +201,11 @@ def _fix_unclosed_code_blocks(text: str) -> str:
                     break
                 last_code -= 1
             if last_code >= 0:
-                block = '\n'.join(lines[:last_code + 1])
+                body = '\n'.join(lines[:last_code + 1])
 
         # --- JS/TS/JSX/TSX/Vue: strip after last closing brace + optional semicolon
         elif lang in ('javascript', 'js', 'typescript', 'ts', 'jsx', 'tsx', 'vue'):
-            lines = block.split('\n')
+            lines = body.split('\n')
             last_code = len(lines) - 1
             while last_code >= 0:
                 s = lines[last_code].rstrip()
@@ -197,11 +217,11 @@ def _fix_unclosed_code_blocks(text: str) -> str:
                     break
                 last_code -= 1
             if last_code >= 0:
-                block = '\n'.join(lines[:last_code + 1])
+                body = '\n'.join(lines[:last_code + 1])
 
         # --- Generic fallback: strip trailing lines that look like English prose
         else:
-            lines = block.split('\n')
+            lines = body.split('\n')
             last_code = len(lines) - 1
             while last_code >= 0:
                 s = lines[last_code].strip()
@@ -216,22 +236,42 @@ def _fix_unclosed_code_blocks(text: str) -> str:
                     continue
                 break
             if last_code >= 0:
-                block = '\n'.join(lines[:last_code + 1])
+                body = '\n'.join(lines[:last_code + 1])
 
         # Universal: strip trailing prose from code body and move outside the fence
-        inner_match = re.match(r'(```[^\n]*\n)([\s\S]*?)(```\s*$)', block)
-        if inner_match:
-            opening, body, _closing = inner_match.groups()
-            clean_body, stripped_prose = _strip_trailing_prose_lines(body.rstrip())
-            block = opening + clean_body + '\n```'
-            if not desc_after_fc and stripped_prose:
-                desc_after_fc = stripped_prose
+        clean_body, stripped_prose = _strip_trailing_prose_lines(body.rstrip())
+        block = opening + clean_body + '\n' + closing.strip()
+        if not desc_after_fc and stripped_prose:
+            desc_after_fc = stripped_prose
 
         # Append extracted description outside the code block
         if desc_after_fc:
             block = block + '\n\n' + desc_after_fc
         return block
     text = re.sub(r'```[\s\S]*?```', _strip_trailing_text, text)
+
+    # 6. If text trails on well past a <file_card> tag beyond a short one-line description, drop it.
+    #    The prompt only allows a brief note after the tag ("write EXACTLY ONE short sentence... then
+    #    stop"), but a small model sometimes keeps generating anyway and re-emits the whole file a
+    #    second time as raw, unfenced text. Left in place, that duplicate used to reach the client
+    #    verbatim and get rendered as live HTML/markdown instead of code (the "file card followed by
+    #    what looks like the rendered webpage" bug) — this stops it at the source, before it's ever
+    #    sent as the final response.
+    fc_tag_re = re.compile(r'<file_card\s[^>]*?(?:/>|>\s*</file_card>)', re.IGNORECASE)
+    fc_matches = list(fc_tag_re.finditer(text))
+    if fc_matches:
+        last_fc = fc_matches[-1]
+        after = text[last_fc.end():]
+        stripped_after = after.strip()
+        if stripped_after:
+            first_para = re.split(r'\n\s*\n', stripped_after, maxsplit=1)[0]
+            rest = stripped_after[len(first_para):].strip()
+            looks_like_more_code = bool(re.search(
+                r'^\s*(?:<[a-zA-Z!]|```|#include\b|import |def |class |function |const |let |var )',
+                rest, re.MULTILINE
+            ))
+            if rest and (looks_like_more_code or len(rest) > 400):
+                text = text[:last_fc.end()] + '\n\n' + first_para.strip()
 
     return text
 
@@ -244,6 +284,9 @@ def get_code_prompt(identity: str) -> str:
 def get_reviewer_prompt(identity: str) -> str:
     prompt = _load_prompt("reviewer_prompt.txt")
     return f"{identity}\n{prompt}"
+
+def get_patch_prompt(identity: str) -> str:
+    return f"{identity}\nYou are an expert AI pair programmer. Fulfill the user's coding request.\nCRITICAL RULE: NEVER rewrite the entire file from scratch! You MUST output one or more SEARCH/REPLACE blocks, each containing only the specific lines that need to change. Format each edit EXACTLY like this:\n<<<<\n[a short, exact excerpt of the existing code — copied character-for-character, whitespace and all]\n====\n[the new lines that replace it]\n>>>>\nKeep each SEARCH excerpt as SHORT as possible: ideally just the 1-3 lines that actually change, plus one extra line of surrounding context only if needed. Do not output anything outside of these blocks besides brief explanations."
 
 
 def _run_continuation(
@@ -744,7 +787,7 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
     # system prompt, so a full rewrite is never an available output for this turn no
     # matter how the request is phrased.
     _force_patch = isinstance(settings, dict) and bool(settings.get('_force_patch_mode'))
-    _patch_sys_prompt = get_reviewer_prompt("Iris") if _force_patch else None
+    _patch_sys_prompt = get_patch_prompt("Iris") if _force_patch else None
     yield {"type": "status", "content": "Editing code..." if _force_patch else "Writing code..."}
     full = ""
     _patch_summary = None
