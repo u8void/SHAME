@@ -1562,13 +1562,45 @@ def _stream_tokens(
     # the moment the token budget runs out.
     from .patcher import apply_patch
 
+    # Detects the START of a patch attempt in either marker convention this project's
+    # prompts allow. Matching only "<<<" (the old behavior) left the "<SEARCH>" style
+    # completely undetected at the streaming layer — patcher.py could parse it once
+    # handed a full patch_buffer, but the trigger that ever SETS in_patch=True never
+    # fired for it, so those blocks streamed straight through as raw visible text.
+    _PATCH_OPEN_TRIGGER_RE = re.compile(r"<{3,}|<search>", re.IGNORECASE)
+    # Same idea for detecting the CLOSE of a block: ">>>" alone missed "</REPLACE>".
+    _PATCH_CLOSE_TRIGGER_RE = re.compile(r">{3,}|</replace>", re.IGNORECASE)
+    # Candidate strings used ONLY to detect an ambiguous, not-yet-complete prefix sitting
+    # at the very end of buffer (e.g. buffer ends in "<SEA" — not a match yet, but also
+    # not safe to flush as plain text, since the next token could complete "<SEARCH>").
+    # Without this, buffer gets flushed by the think-mode display logic below the moment
+    # a single iteration's check doesn't find a complete marker, and an 8-character tag
+    # like "<SEARCH>" will almost never land whole inside one streamed token — it would
+    # get chopped up and shown to the user as raw text nearly every time.
+    _PATCH_OPEN_CANDIDATES = ["<<<", "<search>"]
+
+    def _partial_open_suffix_len(buf: str) -> int:
+        buf_lower = buf.lower()
+        best = 0
+        for cand in _PATCH_OPEN_CANDIDATES:
+            for i in range(1, len(cand)):
+                if buf_lower.endswith(cand[:i]) and i > best:
+                    best = i
+        return best
+
     base_code = ""
     base_lang = "python"
-    for _msg in reversed(full_messages):
-        _blocks = extract_code_blocks(_msg.get("content", ""))
-        if _blocks:
-            base_lang, base_code = _blocks[-1]
-            break
+    if role == ModelRole.CODE:
+        # Only CODE turns should ever be eligible for patch-detection. This function is
+        # shared by REASONING/GENERAL/MATH too, and a leftover code block from an earlier
+        # coding turn (or one the user themselves pasted in) sitting in history must not
+        # make some later, unrelated answer eligible for "<<<" being misread as a patch.
+        for _msg in reversed(full_messages):
+            if _msg.get("role") == "assistant":
+                _blocks = extract_code_blocks(_msg.get("content", ""))
+                if _blocks:
+                    base_lang, base_code = _blocks[-1]
+                    break
 
     in_patch = False
     patch_buffer = ""
@@ -1684,7 +1716,7 @@ def _stream_tokens(
         if extra_stop_words:
             stop_list.extend(extra_stop_words)
 
-        actual_max_tokens = max_tokens
+        actual_max_tokens = None if max_tokens >= 4000 else max_tokens
         stream = llm.create_chat_completion(
             messages=full_messages,
             stream=True,
@@ -1871,8 +1903,11 @@ def _stream_tokens(
 
             buffer += token
 
-            if not in_patch and "<<<" in buffer and base_code:
-                idx = buffer.index("<<<")
+            _open_match = (
+                _PATCH_OPEN_TRIGGER_RE.search(buffer) if not in_patch and base_code else None
+            )
+            if _open_match:
+                idx = _open_match.start()
                 if idx > 0:
                     yield {"type": "token", "content": buffer[:idx]}
                     loop_content += buffer[:idx]
@@ -1880,18 +1915,31 @@ def _stream_tokens(
                 patch_buffer = buffer[idx:]
                 buffer = ""
                 continue
+
+            if not in_patch and base_code:
+                _hold_len = _partial_open_suffix_len(buffer)
+                if _hold_len:
+                    # Don't let the display logic below flush this yet — the tail of
+                    # buffer might be the first few characters of "<<<" or "<SEARCH>"
+                    # split across a token boundary. Emit everything before it now and
+                    # wait for more tokens before deciding.
+                    if len(buffer) > _hold_len:
+                        yield {"type": "token", "content": buffer[:-_hold_len]}
+                        loop_content += buffer[:-_hold_len]
+                        buffer = buffer[-_hold_len:]
+                    continue
                 
             if in_patch:
                 patch_buffer += token
                 buffer = ""
-                if ">>>" in patch_buffer:
-                    # Find the last >>> so we capture all of them if they wrote >>>>>
-                    idx = patch_buffer.rindex(">>>") + 3
-                    
-                    # Also consume any trailing > that might exist immediately after
-                    while idx < len(patch_buffer) and patch_buffer[idx] == '>':
-                        idx += 1
-                        
+                _close_matches = list(_PATCH_CLOSE_TRIGGER_RE.finditer(patch_buffer))
+                if _close_matches:
+                    # Last match, not first: SEARCH/REPLACE content earlier in the block
+                    # could itself coincidentally contain ">>>"-like text (template code,
+                    # comparison chains, etc.) — bias toward the closing marker actually
+                    # meant to end the block.
+                    idx = _close_matches[-1].end()
+
                     final_patch = patch_buffer[:idx]
                     # Anything the model streamed right after the closing marker (e.g. the
                     # start of another block, or a short note between edits) — don't drop
@@ -1908,11 +1956,11 @@ def _stream_tokens(
                     for r in outcome.results:
                         if not r.applied:
                             yield {
-                                "type": "harness_warning",
+                                "type": "text",
                                 "content": f"An edit didn't apply ({r.reason}): \"{r.search_preview}\"",
                             }
 
-                    patched_output = f"\n```diff\n{final_patch}\n```\n\n```{base_lang}\n{outcome.code}\n```\n"
+                    patched_output = f"\n```{base_lang}\n{outcome.code}\n```\n"
                     
                     # Yield in chunks to prevent frontend markdown parser from glitching
                     chunk_size = 50
@@ -2163,10 +2211,10 @@ def _stream_tokens(
             for r in outcome.results:
                 if not r.applied:
                     yield {
-                        "type": "harness_warning",
+                        "type": "text",
                         "content": f"An edit didn't apply ({r.reason}): \"{r.search_preview}\"",
                     }
-            patched_output = f"\n```diff\n{patch_buffer}\n```\n\n```{base_lang}\n{outcome.code}\n```\n"
+            patched_output = f"\n```{base_lang}\n{outcome.code}\n```\n"
             yield {"type": "token", "content": patched_output}
             loop_content += patched_output
             in_patch = False
@@ -2272,6 +2320,18 @@ def _stream_tokens(
             continue
         else:
             break
+
+    # Callers that forced patch-only mode (system_prompt_override into reviewer_prompt)
+    # need real confirmation that a patch actually happened, not just an assumption that
+    # the model complied — a small model can still ignore the system prompt and write a
+    # fresh file with no "<<<"/"<SEARCH>" marker at all, which this loop would have no
+    # reason to treat as an error on its own.
+    yield {
+        "type": "patch_summary",
+        "attempted": role == ModelRole.CODE and bool(base_code),
+        "applied": patches_applied_this_turn,
+        "failed": patches_failed_this_turn,
+    }
 
 
 _gen_config_cache: dict | None = None
