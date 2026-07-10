@@ -100,6 +100,58 @@
       {
         "path": "smirki/UI_REASONING_v1.01",
         "max_samples": 8000
+      },
+      {
+        "path": "sahil2801/CodeAlpaca-20k",
+        "max_samples": 8000
+      },
+      {
+        "path": "iamtarun/python_code_instructions_18k_alpaca",
+        "max_samples": 8000
+      },
+      {
+        "path": "TokenBender/code_instructions_122k_alpaca_style",
+        "max_samples": 10000
+      },
+      {
+        "path": "flytech/python-codes-25k",
+        "max_samples": 8000
+      },
+      {
+        "path": "ajibawa-2023/Code-74k-ShareGPT",
+        "max_samples": 8000
+      },
+      {
+        "path": "glaiveai/glaive-code-assistant-v3",
+        "max_samples": 10000
+      },
+      {
+        "path": "theblackcat102/evol-codealpaca-v1",
+        "max_samples": 8000
+      },
+      {
+        "path": "nampdn-ai/tiny-codes",
+        "max_samples": 10000
+      },
+      {
+        "path": "HuggingFaceH4/CodeAlpaca_20K",
+        "max_samples": 8000
+      },
+      {
+        "path": "Vezora/Tested-22k-Python-Alpaca",
+        "max_samples": 8000
+      },
+      {
+        "path": "greengerong/leetcode",
+        "max_samples": 8000
+      },
+      {
+        "path": "axay/javascript-dataset",
+        "max_samples": 8000
+      },
+      {
+        "path": "Nan-Do/instructional_code-search-net-javacript",
+        "max_samples": 8000
       }
     ],
     "local_dirs": [

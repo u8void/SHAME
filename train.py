@@ -34,6 +34,25 @@ from src.iris_datasets import (
     load_magicoder_dataset,
     load_open_code_reasoning,
     load_self_oss_instruct,
+    # --- New JS / Tailwind / Node.js / Frameworks datasets ---
+    load_code_alpaca_20k,
+    load_python_code_instructions_18k,
+    load_code_instructions_122k,
+    load_python_codes_25k,
+    load_code_74k_sharegpt,
+    load_glaive_code_assistant_v3,
+    load_evol_codealpaca_v1,
+    load_tiny_codes,
+    load_hf4_code_alpaca_20k,
+    load_stack_exchange_preferences,
+    load_tested_22k_python_alpaca,
+    load_javascript_typescript_instructions,
+    load_leetcode_dataset,
+    load_stackoverflow_javascript,
+    load_nodejs_code_instructions,
+    load_evol_instruct_code_80k,
+    load_webdev_coding_dataset,
+    load_ui_reasoning,
 )
 
 SYSTEM_PROMPT = "You are Iris, an intelligent and helpful AI assistant trained to assist the user with their tasks."
@@ -260,7 +279,7 @@ def load_generic_hf_dataset(path: str, limit: int = None) -> List[Tuple[str, str
                                 break
         else:
             query_cols = ["question", "input", "query", "text", "prompt", "instruction", "problem"]
-            response_cols = ["answer", "output", "response", "target", "completion", "solution"]
+            response_cols = ["answer", "output", "response", "target", "completion", "solution", "code", "snippet", "generated_code"]
             q_col = next((c for c in query_cols if c in features), None)
             r_col = next((c for c in response_cols if c in features), None)
             if q_col and r_col:

@@ -311,6 +311,103 @@ def load_self_oss_instruct(subset_size=None):
     except Exception: return []
 
 
+# ---------------------------------------------------------------------------
+# Generic helper: load any instruction-following / alpaca-style / chat dataset
+# Handles: {instruction, output}, {prompt, response}, {messages:[...]}, {input, output}
+# ---------------------------------------------------------------------------
+def _load_generic(hf_path, subset_size=None, split="train", name=None):
+    if not DATASETS_AVAILABLE: return []
+    try:
+        kwargs = dict(split=split, streaming=True)
+        if name: kwargs["name"] = name
+        ds = load_dataset(hf_path, **kwargs)
+        if subset_size:
+            try: ds = ds.shuffle(buffer_size=10000, seed=42)
+            except Exception: pass
+        pairs = []
+        for row in ds:
+            if subset_size and len(pairs) >= subset_size: break
+            # --- messages list (ChatML) ---
+            msgs = row.get("messages") or row.get("conversations") or []
+            if msgs and isinstance(msgs, list) and len(msgs) >= 2:
+                user_turn = next((m.get("content","") or m.get("value","") for m in msgs if m.get("role","") in ("user","human")), "")
+                asst_turn = next((m.get("content","") or m.get("value","") for m in msgs if m.get("role","") in ("assistant","gpt","bot")), "")
+                if user_turn and asst_turn:
+                    pairs.append((user_turn.strip(), asst_turn.strip()))
+                    continue
+            # --- alpaca / instruction style ---
+            u = (row.get("instruction") or row.get("prompt") or row.get("input") or row.get("question") or "").strip()
+            b = (row.get("output") or row.get("response") or row.get("answer") or row.get("completion") or "").strip()
+            ctx = (row.get("context") or row.get("input") or "").strip()
+            if ctx and u and ctx != u:
+                u = f"{u}\n\n{ctx}"
+            if u and b:
+                pairs.append((u, b))
+        return pairs
+    except Exception as e:
+        print(f"[WARNING] Failed to load {hf_path}: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Named loaders (thin wrappers around _load_generic) — registered in train.py
+# ---------------------------------------------------------------------------
+
+def load_code_alpaca_20k(subset_size=None):
+    return _load_generic("sahil2801/CodeAlpaca-20k", subset_size)
+
+def load_python_code_instructions_18k(subset_size=None):
+    return _load_generic("iamtarun/python_code_instructions_18k_alpaca", subset_size)
+
+def load_code_instructions_122k(subset_size=None):
+    return _load_generic("TokenBender/code_instructions_122k_alpaca_style", subset_size)
+
+def load_python_codes_25k(subset_size=None):
+    return _load_generic("flytech/python-codes-25k", subset_size)
+
+def load_code_74k_sharegpt(subset_size=None):
+    return _load_generic("ajibawa-2023/Code-74k-ShareGPT", subset_size)
+
+def load_glaive_code_assistant_v3(subset_size=None):
+    return _load_generic("glaiveai/glaive-code-assistant-v3", subset_size)
+
+def load_evol_codealpaca_v1(subset_size=None):
+    return _load_generic("theblackcat102/evol-codealpaca-v1", subset_size)
+
+def load_tiny_codes(subset_size=None):
+    return _load_generic("nampdn-ai/tiny-codes", subset_size)
+
+def load_hf4_code_alpaca_20k(subset_size=None):
+    return _load_generic("HuggingFaceH4/CodeAlpaca_20K", subset_size)
+
+def load_stack_exchange_preferences(subset_size=None):
+    return _load_generic("mlabonne/stack-exchange-preferences", subset_size)
+
+def load_tested_22k_python_alpaca(subset_size=None):
+    return _load_generic("Vezora/Tested-22k-Python-Alpaca", subset_size)
+
+def load_javascript_typescript_instructions(subset_size=None):
+    return _load_generic("semipro/javascript-typescript-code-instructions", subset_size)
+
+def load_leetcode_dataset(subset_size=None):
+    return _load_generic("greengerong/leetcode", subset_size)
+
+def load_stackoverflow_javascript(subset_size=None):
+    return _load_generic("koutch/stackoverflow_javascript", subset_size)
+
+def load_nodejs_code_instructions(subset_size=None):
+    return _load_generic("Zhendi/node.js-code-instructions", subset_size)
+
+def load_evol_instruct_code_80k(subset_size=None):
+    return _load_generic("nickrosh/Evol-Instruct-Code-80k", subset_size)
+
+def load_webdev_coding_dataset(subset_size=None):
+    return _load_generic("Hoglet-33/webdev-coding-dataset", subset_size)
+
+def load_ui_reasoning(subset_size=None):
+    return _load_generic("smirki/UI_REASONING_v1.01", subset_size)
+
+
 
 
 
