@@ -1675,6 +1675,8 @@ def _stream_tokens(
     thinking_tag = ""
     hidden_buffer = ""
 
+    _consecutive_empty_fences = 0  # Track repeated ```python\n with no real content
+
     for loop_idx in range(5):
         _reserved_tokens = (
             4096
@@ -1794,6 +1796,15 @@ def _stream_tokens(
                             f"[Continuation] Stripped leading code fence from loop {loop_idx}: {continuation_buffer[: match.end()]!r}"
                         )
                         continuation_buffer = continuation_buffer[match.end() :]
+                        _consecutive_empty_fences += 1
+                        if _consecutive_empty_fences >= 3:
+                            logger.warning(
+                                f"[Continuation] Model stripped empty fence {_consecutive_empty_fences} times in a row — stopping loop."
+                            )
+                            finish_reason = "stop"
+                            break
+                    else:
+                        _consecutive_empty_fences = 0
                     stripped_leading_fence = True
                     token = continuation_buffer
                     continuation_buffer = ""
@@ -1916,8 +1927,14 @@ def _stream_tokens(
             if _open_match:
                 idx = _open_match.start()
                 if idx > 0:
-                    yield {"type": "token", "content": buffer[:idx]}
-                    loop_content += buffer[:idx]
+                    pre_patch_text = buffer[:idx]
+                    # Strip orphaned code fences that would create empty code blocks
+                    pre_patch_text = re.sub(r'```+\s*```+', '', pre_patch_text)
+                    pre_patch_text = re.sub(r'^\s*```\w*\s*$', '', pre_patch_text, flags=re.MULTILINE)
+                    pre_patch_text = pre_patch_text.strip()
+                    if pre_patch_text:
+                        yield {"type": "token", "content": pre_patch_text}
+                        loop_content += pre_patch_text
                 in_patch = True
                 patch_buffer = buffer[idx:]
                 buffer = ""
@@ -1978,6 +1995,16 @@ def _stream_tokens(
                     in_patch = False
                     patch_buffer = ""
 
+                    # If ALL blocks failed, stop — the model's SEARCH text didn't
+                    # match, so letting it continue just produces junk (re-typed code
+                    # with no code block, empty blocks, etc.)
+                    if outcome.blocks_failed > 0 and outcome.blocks_applied == 0:
+                        logger.warning(
+                            f"[Patch] All {outcome.blocks_failed} block(s) failed to apply — stopping generation."
+                        )
+                        finish_reason = "stop"
+                        break
+
                     # A model editing several separate spots (e.g. multiple colors across
                     # a page) will legitimately emit several blocks in one turn — unlike
                     # before, we no longer force-stop after the first one. A generous cap
@@ -1990,6 +2017,9 @@ def _stream_tokens(
                         break
 
                     buffer = leftover
+                    # Strip orphaned code fences from leftover text after patch
+                    if buffer:
+                        buffer = re.sub(r'^\s*```\w*\s*$', '', buffer, flags=re.MULTILINE).strip()
                 continue
             if think_mode == "hide":
                 while True:

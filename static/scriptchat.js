@@ -425,6 +425,13 @@ document.addEventListener("DOMContentLoaded", () => {
         // Strip <coding> tags as they interfere with markdown parsing and shouldn't be rendered
         formatted = formatted.replace(/<\/?coding>/gi, '');
 
+        // Safety net: close unclosed code fences to prevent empty/broken code blocks
+        // (e.g. model hit max_tokens mid-code-block, leaving ``` without a closing ```)
+        const fenceCount = (formatted.match(/```/g) || []).length;
+        if (fenceCount % 2 !== 0) {
+            formatted += '\n```';
+        }
+
         // Auto-wrap raw \boxed{...} blocks that are not inside math delimiters
         formatted = formatted.replace(/(\$\$?[\s\S]*?\$?\$\$)|(\\boxed\{[^{}]*\})/g, (match, mathBlock, bareBoxed) => {
             if (mathBlock) return match;
@@ -720,6 +727,11 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             let cleanContent = (extraCode + (extraCode && !codeContent.startsWith('\n') ? '\n' : '') + codeContent).replace(/@@@THOUGHT_\d+@@@/g, '').trim();
+
+            // Skip empty code blocks (e.g. model outputs ```python\n``` with nothing inside)
+            if (!cleanContent) {
+                return extractedThoughts || '';
+            }
 
             // Infer language from filename comment when the fence has no lang tag (e.g. ```\n# app.py)
             if (detectedLang === 'code') {

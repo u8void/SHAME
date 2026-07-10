@@ -139,28 +139,27 @@ def _fix_unclosed_code_blocks(text: str) -> str:
     #    Also extract descriptions after <file_card> tags inside code blocks and move them outside.
     def _strip_trailing_text(match):
         block = match.group(0)
-        # Find the opening ``` line to detect language
-        lang_match = re.match(r'```(\w*)', block)
-        lang = (lang_match.group(1) if lang_match else '').lower()
-
-        # Extract description after <file_card> inside code block, move outside
-        fc_match = re.search(r'<file_card\s+[^>]*?>.*?</file_card>\s*\n?([\s\S]*?)$', block, re.IGNORECASE)
-        desc_after_fc = ''
-        if fc_match and fc_match.group(1).strip():
-            desc_after_fc = fc_match.group(1).strip()
-        # Remove <file_card> tags from inside the code block
-        block = re.sub(r'\s*<file_card\s+[^>]*?>.*?</file_card>', '', block, flags=re.DOTALL | re.IGNORECASE)
-        block = re.sub(r'\s*<file_card\s+[^>]*/>', '', block, flags=re.IGNORECASE)
 
         # Extract opening, body, closing FIRST so we don't chop off the closing backticks
         inner_match = re.match(r'(```[^\n]*\n)([\s\S]*?)(```\s*$)', block)
         if not inner_match:
-            # Append extracted description outside the code block even if match fails
-            if desc_after_fc:
-                block = block + '\n\n' + desc_after_fc
             return block
             
         opening, body, closing = inner_match.groups()
+
+        # Find the opening ``` line to detect language
+        lang_match = re.match(r'```(\w*)', opening)
+        lang = (lang_match.group(1) if lang_match else '').lower()
+
+        # Extract description after <file_card> inside code block, move outside
+        # We perform this on `body` so it does not capture the closing backticks!
+        fc_match = re.search(r'<file_card\s+[^>]*?>.*?</file_card>\s*\n?([\s\S]*?)$', body, re.IGNORECASE)
+        desc_after_fc = ''
+        if fc_match and fc_match.group(1).strip():
+            desc_after_fc = fc_match.group(1).strip()
+            
+        body = re.sub(r'\s*<file_card\s+[^>]*?>.*?</file_card>', '', body, flags=re.DOTALL | re.IGNORECASE)
+        body = re.sub(r'\s*<file_card\s+[^>]*/>', '', body, flags=re.IGNORECASE)
 
         # --- HTML: strip after last </html>
         if lang == 'html':
@@ -286,7 +285,24 @@ def get_reviewer_prompt(identity: str) -> str:
     return f"{identity}\n{prompt}"
 
 def get_patch_prompt(identity: str) -> str:
-    return f"{identity}\nYou are an expert AI pair programmer. Fulfill the user's coding request.\nCRITICAL RULE: NEVER rewrite the entire file from scratch! You MUST output one or more SEARCH/REPLACE blocks, each containing only the specific lines that need to change. Format each edit EXACTLY like this:\n<<<<\n[a short, exact excerpt of the existing code — copied character-for-character, whitespace and all]\n====\n[the new lines that replace it]\n>>>>\nKeep each SEARCH excerpt as SHORT as possible: ideally just the 1-3 lines that actually change, plus one extra line of surrounding context only if needed. Do not output anything outside of these blocks besides brief explanations."
+    return (f"{identity}\nYou are an expert AI pair programmer. Fulfill the user's coding request.\n"
+            "CRITICAL RULE: NEVER rewrite the entire file from scratch! You MUST output one or more SEARCH/REPLACE blocks, each containing only the specific lines that need to change. "
+            "Format each edit EXACTLY like this:\n"
+            "<<<<\n"
+            "[a short, exact excerpt of the existing code — copied character-for-character, whitespace and all]\n"
+            "====\n"
+            "[the new lines that replace it]\n"
+            ">>>>\n\n"
+            "Example:\n"
+            "<<<<\n"
+            "def calculate(a, b):\n"
+            "    return a + b\n"
+            "====\n"
+            "def calculate(a, b):\n"
+            "    # Return the sum\n"
+            "    return a + b\n"
+            ">>>>\n\n"
+            "Keep each SEARCH excerpt as SHORT as possible: ideally just the 1-3 lines that actually change, plus one extra line of surrounding context only if needed. Do not output anything outside of these blocks besides brief explanations.")
 
 
 def _run_continuation(
@@ -497,11 +513,6 @@ def _run_complex_coding(
     reasoning_msgs = [{"role": "system", "content": reasoning_prompt}] + optimized
 
     raw_reasoning = ""
-    # NOTE: Stage 1 is an internal architecture-planning pass only — its raw output
-    # (including any <think> deliberation) must never be streamed to the user as if
-    # it were the answer. think_mode="status" suppresses the content and only pings
-    # a lightweight "Thinking..." status; we forward status events for UI feedback
-    # but never forward token/thinking content here.
     for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="status", settings=settings, extra_stop_words=["```"]):
         if ev["type"] == "status":
             yield ev
@@ -510,16 +521,10 @@ def _run_complex_coding(
     if not _keep_loaded:
         unload_model()
 
-    # If Stage 1 spent its whole budget deliberating and never produced a real
-    # blueprint, don't hand Stage 2 an empty/near-empty "authoritative" blueprint —
-    # just skip it and let Stage 2 work straight from the user query + context.
     if len(raw_reasoning.strip()) < 20:
         raw_reasoning = ""
     elif _looks_like_refusal(raw_reasoning):
-        # Stage 1 refused instead of planning. If this poisoned "blueprint" is
-        # handed to Stage 2 as authoritative context, the coding model tends to
-        # mirror the refusal instead of writing code. Discard it and let Stage 2
-        # work directly from the user query, same as when Stage 1 produced nothing.
+
         logger.warning(f"[Complex Coding] Stage 1 returned a refusal instead of a blueprint — discarding. Raw: {raw_reasoning[:200]!r}")
         raw_reasoning = ""
 
@@ -779,13 +784,8 @@ def generate_internal_code(
 
 def _run_simple_coding(user_query: str, history: list, optimized: list, settings: dict) -> Generator[Dict[str, str], None, None]:
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
-    # Use higher temperature for web design to produce varied creative outputs
     _code_temp = 0.6 if settings.get('_web_design_mode') else 0.2
-    # Set by run_stream whenever a prior generated file exists anywhere in this
-    # conversation. When true, every generation attempt below — including the refusal
-    # retry and the syntax auto-correction pass — is forced onto the SEARCH/REPLACE-only
-    # system prompt, so a full rewrite is never an available output for this turn no
-    # matter how the request is phrased.
+
     _force_patch = isinstance(settings, dict) and bool(settings.get('_force_patch_mode'))
     _patch_sys_prompt = get_patch_prompt("Iris") if _force_patch else None
     yield {"type": "status", "content": "Editing code..." if _force_patch else "Writing code..."}
@@ -803,42 +803,63 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
     if not _keep_loaded:
         unload_model()
 
-    # Forcing the system prompt is a strong nudge, but a small model can still ignore it
-    # outright and write a fresh file with no "<<<"/"<SEARCH>" marker at all. patch_summary
-    # tells us the ground truth (whether _stream_tokens actually saw and applied a patch
-    # this turn) instead of just hoping the model complied. If it didn't, retry once with
-    # an unambiguous nudge before falling back to accepting whatever it produced.
+    # ── Deterministic fallback: model wrote a full file instead of a patch ──
+    # A 3B model will frequently ignore the SEARCH/REPLACE format and simply
+    # rewrite the entire file. Retrying is unreliable and wastes time/tokens.
+    # Instead, we extract the code from the model's output and use it directly —
+    # the rewritten file IS the updated version, just delivered in the wrong format.
+    _patches_failed = _patch_summary and _patch_summary.get("failed", 0) > 0
     if _force_patch and _patch_summary and _patch_summary["attempted"] and _patch_summary["applied"] == 0:
-        logger.warning("[Simple Coding] Force-patch mode was on but no patch was applied — retrying once.")
-        yield {"type": "clear"}
-        yield {"type": "status", "content": "Retrying as a patch..."}
-        _nudge_msgs = optimized + [
-            {"role": "assistant", "content": full},
-            {"role": "user", "content": (
-                "You did not make this change as a SEARCH/REPLACE patch. Try again: "
-                "output ONLY a SEARCH/REPLACE block (or several, if there are multiple "
-                "separate changes) for the specific lines that need to change. Do not "
-                "rewrite the whole file, and do not explain — just the block(s)."
-            )}
-        ]
-        _nudge_full = ""
-        _nudge_summary = None
-        for ev in _stream_tokens(ModelRole.CODE, _nudge_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=_patch_sys_prompt):
-            if ev["type"] == "patch_summary":
-                _nudge_summary = ev
-                continue
-            if user_lang == "English" or ev["type"] != "token":
-                yield ev
-            if ev["type"] == "token":
-                _nudge_full += ev["content"]
-        if not _keep_loaded:
-            unload_model()
-        if _nudge_summary and _nudge_summary["applied"] > 0:
-            full = _nudge_full
-
-    # If the model refused instead of writing code, retry once with an explicit
-    # nudge before giving up. Without this, a canned refusal was previously
-    # passed straight through to the user as the entire response, with no code.
+        new_blocks = extract_code_blocks(full)
+        if new_blocks and not _patches_failed:
+            # Model wrote a full rewrite instead of a patch (no SEARCH/REPLACE markers)
+            new_lang, new_code = new_blocks[-1]
+            # Get original code from history to verify the rewrite is actually different
+            _orig_code = ""
+            for _m in reversed(history or []):
+                if _m.get("role") == "assistant":
+                    _orig_blocks = extract_code_blocks(_m.get("content", ""))
+                    if _orig_blocks:
+                        _, _orig_code = _orig_blocks[-1]
+                        break
+            if new_code.strip() != _orig_code.strip():
+                logger.info("[Simple Coding] Model wrote full rewrite instead of patch — using it directly as the updated file.")
+                yield {"type": "clear"}
+                patched_output = f"\n```{new_lang}\n{new_code}\n```\n"
+                yield {"type": "token", "content": patched_output}
+                full = patched_output
+            else:
+                logger.warning("[Simple Coding] Model rewrote the file identically — no changes detected.")
+        elif _patches_failed:
+            # Patches were attempted but SEARCH text didn't match the file.
+            # Retry with a clearer instruction — do NOT include the full file,
+            # as that makes the 3B model rewrite everything and hit max_tokens.
+            logger.info("[Simple Coding] Patches failed — retrying with focused instruction.")
+            yield {"type": "clear"}
+            yield {"type": "status", "content": "Patches didn't match — retrying..."}
+            _retry_instruction = (
+                "Your previous SEARCH/REPLACE patches did not match the actual file content. "
+                "The SEARCH text must match the file EXACTLY, character for character, including whitespace and indentation. "
+                "Look at the code I showed you earlier in this conversation and output ONE SEARCH/REPLACE block "
+                "with the EXACT lines to find and what to replace them with. "
+                "Do NOT rewrite the whole file. Do NOT add new functions outside the block."
+            )
+            retry_msgs = optimized + [
+                {"role": "user", "content": _retry_instruction}
+            ]
+            retry_full = ""
+            for ev in _stream_tokens(ModelRole.CODE, retry_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=_patch_sys_prompt):
+                if ev["type"] == "patch_summary":
+                    _patch_summary = ev
+                    continue
+                if user_lang == "English" or ev["type"] != "token":
+                    yield ev
+                if ev["type"] == "token":
+                    retry_full += ev["content"]
+            if not _keep_loaded:
+                unload_model()
+            if retry_full.strip():
+                full = retry_full
     if _looks_like_refusal(full) and "```" not in full:
         logger.warning(f"[Simple Coding] Model returned a refusal instead of code. Retrying once. Raw: {full[:200]!r}")
         yield {"type": "clear"}
@@ -975,10 +996,6 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
     yield {"type": "raw_response", "content": full}
 
 
-# ─── Design Variety System ───────────────────────────────────────────────
-# Each web design request gets a randomly selected theme to prevent
-# the model from always defaulting to the same zinc/indigo palette.
-
 _WEB_DESIGN_RE = re.compile(
     r'(?i)\b(website|web\s*site|web\s*page|webpage|landing\s*page|html|'
     r'web\s*app|portfolio|homepage|web\s*design|web\s*interface)\b'
@@ -1031,24 +1048,37 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
         )
         
     final_query += _language_directive(user_query, role=ModelRole.CODE)
-
-    # Whether the model reads "make the colors better" as an edit request or a request
-    # for a fresh version is not reliable enough to depend on — especially on a small
-    # model. If there's a prior generated file anywhere in this conversation, patch mode
-    # is no longer a suggestion: _run_simple_coding forces the SEARCH/REPLACE-only
-    # system prompt for this whole turn regardless of how the request is phrased. A full
-    # rewrite is only ever available again once the conversation has no prior file (i.e.
-    # a new chat) — there's no phrasing that opts back out of patch mode mid-conversation.
     has_prior_code = any(
         m.get("role") == "assistant" and extract_code_blocks(m.get("content", ""))
         for m in (history or [])
     )
     if has_prior_code:
         settings['_force_patch_mode'] = True
-        final_query += (
-            "\n\n(There is an existing file from earlier in this conversation, shown above. "
-            "You MUST make this change as a SEARCH/REPLACE patch, not a full rewrite.)"
-        )
+        # Extract the actual code so we can embed it right next to the user's request.
+        # A 3B model struggles to recall code buried pages back in history — putting it
+        # inline is the single most effective way to get a correct SEARCH/REPLACE patch.
+        _prior_code = ""
+        _prior_lang = "python"
+        for _m in reversed(history or []):
+            if _m.get("role") == "assistant":
+                _pblocks = extract_code_blocks(_m.get("content", ""))
+                if _pblocks:
+                    _prior_lang, _prior_code = _pblocks[-1]
+                    break
+        if _prior_code:
+            # Truncate extremely large files to avoid blowing context
+            _display_code = _prior_code if len(_prior_code) <= 8000 else _prior_code[:8000] + "\n# ... (truncated) ..."
+            final_query += (
+                f"\n\nHere is the CURRENT file you must edit (do NOT rewrite it, only change the lines that need to change):\n"
+                f"```{_prior_lang}\n{_display_code}\n```\n\n"
+                "Output ONLY SEARCH/REPLACE patch blocks using the <<<<, ====, >>>> markers. "
+                "Do NOT rewrite the entire file."
+            )
+        else:
+            final_query += (
+                "\n\n(There is an existing file from earlier in this conversation, shown above. "
+                "You MUST make this change as a SEARCH/REPLACE patch, not a full rewrite.)"
+            )
 
     # 2. History & Compaction
     optimized = [{"role": "user", "content": final_query}]

@@ -186,6 +186,33 @@ def apply_patch(original_code: str, patch_text: str) -> PatchOutcome:
                 matched = True
                 break
 
+        # Third fallback: best-window fuzzy match using SequenceMatcher.
+        # Small models often include slightly wrong context lines (extra/missing
+        # blank lines, typos in comments, off-by-one indentation). Slide a window
+        # across the file and pick the region with the highest similarity ratio.
+        if not matched and len(s_lines) >= 2:
+            from difflib import SequenceMatcher
+            search_norm_joined = "\n".join(norm_search)
+            best_ratio = 0.0
+            best_i = -1
+            # Try windows of slightly varying sizes to handle extra/missing lines
+            for win_delta in range(3):  # exact, +1, +2 lines
+                win_size = len(s_lines) + win_delta
+                if win_size > len(code_lines):
+                    continue
+                for i in range(len(code_lines) - win_size + 1):
+                    candidate = "\n".join(_normalize(code_lines[i + j]) for j in range(win_size))
+                    ratio = SequenceMatcher(None, search_norm_joined, candidate).ratio()
+                    if ratio > best_ratio:
+                        best_ratio = ratio
+                        best_i = i
+                        best_win = win_size
+            if best_ratio >= 0.75 and best_i >= 0:
+                code_lines = code_lines[:best_i] + r_lines + code_lines[best_i + best_win:]
+                code = "\n".join(code_lines)
+                matched = True
+                logger.info(f"[Patcher] Best-window fuzzy match at line {best_i} (ratio={best_ratio:.2f})")
+
         if matched:
             outcome.blocks_applied += 1
             outcome.results.append(PatchBlockResult(preview, True, "fuzzy"))
