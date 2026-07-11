@@ -23,7 +23,7 @@
       }
     ],
     "local_dirs": [
-      "training/general",
+      "training/triage",
       "training/shared"
     ]
   },
