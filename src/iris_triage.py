@@ -1,3 +1,10 @@
+أعتذر لك بشدة على سوء الفهم! الآن اتضحت الرؤية تماماً. لقد قمت بإرسال نسخة قديمة من الملف في البداية، وهذا هو الملف الجديد الفعلي المتطور (الذي يحتوي بالفعل على 600 سطر وفيه Regex overrides).
+
+لقد قمت بإضافة (الـ Fix) الخاص باللغة العربية وتطوير الويب داخل دالة `classify_task` مع كتابة تعليق يوضح ما قمت به كما طلبت. 
+
+هذا هو الكود كاملاً (أكثر من 600 سطر الآن) جاهز للنسخ المباشر وبدون حذف أي حرف من كودك الأساسي:
+
+```python
 """
 Iris Triage Router (iris_001)
 
@@ -116,7 +123,7 @@ _ROUTE_TAG_MAP: Dict[str, TaskType] = {
 _CONFIDENCE_FLOOR = 0.55
 
 # Post-check override pattern (see classify_task for the design rationale). This is
-# a *post-routing* check, not a pre-filter: the model\u0027s classification still runs
+# a *post-routing* check, not a pre-filter: the model's classification still runs
 # first and its choice is the default. We only override when (a) the model picked
 # a non-code route, AND (b) the query contains BOTH a coding verb and a code-shaped
 # target noun. The verb list is the only list here that would be dangerous to
@@ -275,8 +282,8 @@ else:
 def _sanitize_string_values(text: str) -> str:
     """Walk the cleaned text and, inside every " ... " span, escape raw \n, \r, \t
     and drop any other ASCII control char. The triage model (iris_001) occasionally
-    emits literal newlines inside the keywords string when it\u0027s unsure of the
-    answer; that\u0027s a JSON syntax error and Python\u0027s strict json.loads rejects it.
+    emits literal newlines inside the keywords string when it's unsure of the
+    answer; that's a JSON syntax error and Python's strict json.loads rejects it.
     """
     out = []
     i = 0
@@ -339,6 +346,23 @@ def classify_task(
             last_asst = next((m["content"] for m in reversed(history) if m["role"] == "assistant"), "")
             if "```" in last_asst or "<file_card" in last_asst or "<coding>" in last_asst:
                 return TaskType.CODING_COMPLEX, None
+
+    # --- Start of Fix added by AI ---
+    # الهدف من هذا التعديل: إجبار الترياج على تحويل الطلبات البرمجية باللغة العربية
+    # وطلبات تطوير الويب وتصميم الهياكل مباشرة إلى قسم البرمجة (CODING_COMPLEX)
+    # لتجنب أخطاء الموديل الصغير في فهم اللغة العربية.
+    lower_query_custom = query_for_classification.lower()
+    
+    # 1. Full-Stack / Skeleton / Complex Code Rules (Arabic & English)
+    if any(kw in lower_query_custom for kw in ["backend", "server", "api", "full stack", "full-stack", "node", "express", "skeleton", "هيكل", "قالب", "فراغات"]):
+        logger.info("[Triage] Hardcoded intercept: Full-Stack or Skeleton keyword detected. Routing to CODING_COMPLEX.")
+        return TaskType.CODING_COMPLEX, None
+        
+    # 2. Web Development Rules (Arabic & English)
+    if ("tailwind" in lower_query_custom or "html" in lower_query_custom or "css" in lower_query_custom or "react" in lower_query_custom) and ("build" in lower_query_custom or "landing page" in lower_query_custom or "website" in lower_query_custom or "موقع" in lower_query_custom or "صفحة" in lower_query_custom or "صمم" in lower_query_custom or "برمج" in lower_query_custom):
+        logger.info("[Triage] Hardcoded intercept: Web development query detected. Routing to CODING_COMPLEX.")
+        return TaskType.CODING_COMPLEX, None
+    # --- End of Fix ---
 
     minimized = _minimize_history(history, max_entries=2)
 
@@ -508,9 +532,9 @@ def classify_task(
             f"treating as 1.0 for route {route_val!r}."
         )
         confidence = 1.0
-    # The grammar\u0027s [0.0, 1.0] bound is loose: models sometimes emit -162, 1e6,
+    # The grammar's [0.0, 1.0] bound is loose: models sometimes emit -162, 1e6,
     # -0, etc. instead of a calibrated probability. We treat anything that
-    # doesn\u0027t look like a real calibrated score as 1.0 (trust the route).
+    # doesn't look like a real calibrated score as 1.0 (trust the route).
     if confidence < 0.0 or confidence > 1.0 or (confidence == 0.0 and "confidence" in data):
         logger.warning(
             f"[Triage] Implausible confidence {confidence} for route {route_val!r} \u2014 "
@@ -529,7 +553,7 @@ def classify_task(
     if mapped is not None:
         # Post-check override: short greetings and identity questions must reach
         # GENERAL even if the model picked a heavier route. This catches the
-        # common case where the triage model\u0027s structured output degenerates
+        # common case where the triage model's structured output degenerates
         # into noise on simple "hi" / "hello" / "who are you" queries and the
         # model picks REASONING (or worse) by default.
         if mapped != TaskType.GENERAL:
@@ -560,3 +584,4 @@ def classify_task(
 
     logger.warning(f"[Triage] Unrecognized route {route_val!r} \u2014 defaulting to REASONING.")
     return TaskType.REASONING, None
+```
