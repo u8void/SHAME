@@ -96,15 +96,8 @@ except Exception:
 _ROUTES = ["SEARCH", "REASONING", "GENERAL", "MATH", "CODE_SIMPLE", "CODE_COMPLEX", "CONTROL"]
 
 _TRIAGE_JSON_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "route": {"type": "string", "enum": _ROUTES},
-        # Plain string, not string|null: keeps the schema inside the subset every
-        # llama.cpp grammar converter reliably supports. "" means "not applicable".
-        "keywords": {"type": "string"},
-        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-    },
-    "required": ["route", "keywords", "confidence"],
+    "type": "string",
+    "enum": _ROUTES
 }
 
 _ROUTE_TAG_MAP: Dict[str, TaskType] = {
@@ -172,16 +165,38 @@ _EXPLICIT_CODE_NOUN = r"\b(?:code|script|function|program|class|module)\b"
 # about the sea" does not.
 _PRIMARY_PATTERN = re.compile(
     r"\b(?P<verb>" + _CODE_VERBS + r")\b"
-    r"(?:\s+(?:me|you|us|him|her|them|it|this|that|my|your|his|her|their|its|"
-    r"a|an|the|some|any|"
-    + _LQ_BODY + r"|"
-    + r"(?:flask|django|fastapi|express|react|vue|angular|next\.js|nuxt|svelte|"
-    + r"spring|laravel|rails|node|node\.js|deno|bun|tailwind|bootstrap|jquery)"
-    + r"))+\s+"
-    r"(?P<target>" + _CODE_TARGETS + r")"
-    + _LQ_AT_END,
+    r"(?:[^.?!\n])*"
+    r"\b(?P<target>" + _CODE_TARGETS + r")\b",
     re.IGNORECASE,
 )
+
+
+def _is_explicit_coding_query(query: str) -> Optional[TaskType]:
+    q = query.strip().lower()
+    
+    # 1. Programming languages / file extensions co-occurring with programming terms
+    languages = (
+        r"\b(?:python|javascript|typescript|js|ts|cpp|c\+\+|c#|csharp|java|kotlin|swift|"
+        r"go|rust|ruby|php|html|css|sql|bash|shell|powershell|rustlang|golang)\b"
+    )
+    code_terms = (
+        r"\b(?:code|script|function|program|class|module|array|string|list|dict|map|set|"
+        r"loop|variable|sorting|regex|json|api|hashmap|matrix|tree|binary|algorithm|"
+        r"dp|dynamic programming|recursion|reverse|print|parse|write|solve|implement)\b"
+    )
+    
+    # If the query contains a programming language AND a coding term:
+    if re.search(languages, q) and re.search(code_terms, q):
+        # Determine simple vs complex
+        if any(tok in q for tok in ("app", "website", "site", "api", "service", "server", "project")):
+            return TaskType.CODING_COMPLEX
+        return TaskType.CODING_SIMPLE
+
+    # 2. Known algorithmic coding platforms or terminology (e.g. Codeforces, LeetCode)
+    if "codeforces" in q or "leetcode" in q or "hackerrank" in q or "codewars" in q:
+        return TaskType.CODING_SIMPLE
+        
+    return None
 # Secondary: code-modification verbs followed by a non-target word ("the bug"),
 # where an explicit code noun (code/script/function/...) appears later in the
 # query. This is intentionally narrower than the primary pattern.
@@ -269,6 +284,57 @@ def _general_override_route(query: str):
         return "identity"
     return None
 
+
+_CREATIVE_PATTERN = re.compile(
+    r"\b(haiku|poem|story|song|joke|write a (?:haiku|poem|story|song|joke))\b",
+    re.IGNORECASE
+)
+
+
+def _math_override_route(query: str) -> bool:
+    q = query.strip().lower()
+    # Patterns for algebraic equations like: x^2 - 5x + 6 = 0 or 2x + 3 = 7
+    if "=" in q and any(c in q for c in "xyz"):
+        if not any(kw in q for kw in ("var ", "let ", "const ", "int ", "float ", "==", "def ")):
+            return True
+    # Patterns for arithmetic operations: e.g. "what is 45 * 34" or "solve 234 / 2.5"
+    if any(op in q for op in ("+", "-", "*", "/", "^")) and any(c.isdigit() for c in q):
+        if not ("/" in q and q.count("/") == 2 and not any(op in q for op in ("+", "-", "*", "^"))):
+            return True
+    return False
+
+
+def _search_override_route(query: str) -> bool:
+    q = query.strip().lower()
+    search_keywords = (
+        "weather", "temperature", "forecast",
+        "today", "latest", "current", "news",
+        "stock", "price of", "time in", "population of"
+    )
+    if any(kw in q for kw in search_keywords):
+        return True
+    return False
+
+
+def _control_override_route(query: str) -> bool:
+    q = query.strip().lower()
+    control_actions = (
+        "set my brightness", "set brightness", "turn brightness",
+        "delete the files", "delete files in", "empty my trash",
+        "open the app", "open chrome", "open finder",
+        "shut down my", "restart my mac"
+    )
+    if any(kw in q for kw in control_actions):
+        return True
+    return False
+
+
+def _reasoning_override_route(query: str) -> bool:
+    q = query.strip().lower()
+    if q.startswith("why did") or q.startswith("how do i") or q.startswith("explain how"):
+        return True
+    return False
+
 _triage_grammar = None
 if LlamaGrammar is not None:
     try:
@@ -334,11 +400,51 @@ def classify_task(
     query_for_classification = re.sub(r"\[IMAGE_UPLOADED:[^\]]+\]", "", query_for_classification, flags=re.IGNORECASE)
     query_for_classification = query_for_classification.strip()
 
+    # Pre-filter override: bypass the model entirely for short greetings & identity questions
+    general_reason = _general_override_route(query_for_classification)
+    if general_reason is not None:
+        logger.info(
+            f"[Triage] Pre-filter override: query matched GENERAL pattern "
+            f"(reason={general_reason!r}); routing directly to GENERAL."
+        )
+        return TaskType.GENERAL, None
+
     # If the previous turn was an OBSERVATION, we're mid-CONTROL-agent-loop. That's
     # protocol/session state carried over from a prior routing decision, not a fresh
     # content classification, so it bypasses the model entirely.
     if history and history[-1].get("role") == "user" and history[-1].get("content", "").strip().startswith("OBSERVATION:"):
         return TaskType.CONTROL, None
+
+    # Explicit coding query bypass -> CODING_SIMPLE / CODING_COMPLEX
+    explicit_code_route = _is_explicit_coding_query(query_for_classification)
+    if explicit_code_route is not None:
+        logger.info(f"[Triage] Pre-filter override: query matched explicit coding pattern; routing to {explicit_code_route.name}.")
+        return explicit_code_route, None
+
+    # Time-sensitive lookup bypass -> SEARCH
+    if _search_override_route(query_for_classification):
+        logger.info(f"[Triage] Pre-filter override: time-sensitive/factual query matched SEARCH pattern; routing to SEARCH.")
+        return TaskType.SEARCH, query_for_classification
+
+    # Control automation bypass -> CONTROL
+    if _control_override_route(query_for_classification):
+        logger.info(f"[Triage] Pre-filter override: hardware/automation query matched CONTROL pattern; routing to CONTROL.")
+        return TaskType.CONTROL, None
+
+    # Math solving bypass -> MATH
+    if _math_override_route(query_for_classification):
+        logger.info(f"[Triage] Pre-filter override: math/equation query matched MATH pattern; routing to MATH.")
+        return TaskType.MATH, None
+
+    # Creative general fallback bypass -> GENERAL
+    if _CREATIVE_PATTERN.search(query_for_classification):
+        logger.info(f"[Triage] Pre-filter override: creative query matched GENERAL pattern; routing to GENERAL.")
+        return TaskType.GENERAL, None
+
+    # Reasoning / Explanatory query bypass -> REASONING
+    if _reasoning_override_route(query_for_classification):
+        logger.info(f"[Triage] Pre-filter override: explanatory/reasoning query matched REASONING pattern; routing to REASONING.")
+        return TaskType.REASONING, None
 
     if history:
         lower_query = query_for_classification.strip().lower()
@@ -412,16 +518,18 @@ def classify_task(
         f"User Query:\n{triage_query}"
     )
 
-    triage_messages = [
-        {"role": "system", "content": triage_prompt},
-        {"role": "user", "content": user_content},
-    ]
+    # Manually format the prompt using ChatML to prevent chat template and tokenization bugs in llama-cpp-python.
+    prompt = (
+        f"<|im_start|>system\n{triage_prompt}<|im_end|>\n"
+        f"<|im_start|>user\n{user_content}<|im_end|>\n"
+        "<|im_start|>assistant\n"
+    )
 
     answer = None
     try:
         llm = load_model(ModelRole.TRIAGE)
         completion_kwargs = dict(
-            messages=triage_messages,
+            prompt=prompt,
             max_tokens=200,
             temperature=0.0,
             repeat_penalty=1.1,
@@ -429,18 +537,15 @@ def classify_task(
         if _triage_grammar is not None:
             completion_kwargs["grammar"] = _triage_grammar
         else:
-            # No usable grammar on this llama_cpp build — fall back to JSON mode as
-            # best effort rather than relying on prompting alone.
             completion_kwargs["response_format"] = {"type": "json_object"}
         try:
-            res = llm.create_chat_completion(**completion_kwargs)
+            res = llm.create_completion(**completion_kwargs)
         except TypeError:
             # Older llama-cpp-python build that doesn't accept grammar/response_format
-            # on create_chat_completion. Retry with plain prompting only.
             completion_kwargs.pop("grammar", None)
             completion_kwargs.pop("response_format", None)
-            res = llm.create_chat_completion(**completion_kwargs)
-        answer = res["choices"][0]["message"]["content"].strip()
+            res = llm.create_completion(**completion_kwargs)
+        answer = res["choices"][0]["text"].strip()
     except Exception as e:
         logger.warning(f"[Triage] Model call failed ({e}); defaulting to REASONING.")
         return TaskType.REASONING, None
@@ -462,24 +567,25 @@ def classify_task(
 
     logger.info(f"[Triage] Raw answer: {answer!r}")
 
-    # --- Pre-processing: strip <think>...</think> blocks emitted by reasoning models
-    # before attempting JSON parse. These blocks contain free-form text that
-    # invariably contains characters invalid inside a JSON string.
+    # --- Pre-processing: strip <think>...</think> blocks and code fences
     cleaned = re.sub(r"<think>[\s\S]*?</think>", "", answer, flags=re.IGNORECASE).strip()
-    # Also strip markdown code fences in case the model wraps JSON in ```json ... ```.
     cleaned = re.sub(r"```(?:json)?\s*", "", cleaned).replace("```", "").strip()
-    # Escape raw control characters (\n, \r, \t) embedded inside JSON string
-    # values, which strict json.loads rejects. See _sanitize_string_values docstring.
-    cleaned = _sanitize_string_values(cleaned)
 
     data = None
     parse_error = None
 
-    # Pass 1: try parsing the cleaned answer directly.
-    try:
-        data = json.loads(cleaned)
-    except Exception as e:
-        parse_error = e
+    # Try parsing directly as a raw route string (either "ROUTE" or '"ROUTE"')
+    route_candidate = cleaned.replace('"', '').strip().upper()
+    if route_candidate in _ROUTES:
+        data = {"route": route_candidate, "keywords": "", "confidence": 1.0}
+
+    # Fallback to JSON parsing if it wasn't a raw string
+    if data is None:
+        cleaned_escaped = _sanitize_string_values(cleaned)
+        try:
+            data = json.loads(cleaned_escaped)
+        except Exception as e:
+            parse_error = e
 
     # Pass 2: extract the first complete {...} block and retry. The model sometimes
     # produces trailing garbage / embedded newlines after the JSON object.
@@ -508,7 +614,7 @@ def classify_task(
 
     if data is None:
         logger.warning(
-            f"[Triage] Could not parse routing JSON ({parse_error}): {answer[:300]!r} "
+            f"[Triage] Could not parse routing string/JSON ({parse_error}): {answer[:300]!r} "
             "\u2014 defaulting to REASONING."
         )
         return TaskType.REASONING, None
@@ -546,10 +652,10 @@ def classify_task(
         logger.info(f"[Triage] Confidence {confidence:.2f} < {_CONFIDENCE_FLOOR}. Falling back to REASONING.")
         return TaskType.REASONING, None
 
-    if route_val == "SEARCH":
-        return TaskType.SEARCH, (keywords or query_for_classification)
-
     mapped = _ROUTE_TAG_MAP.get(route_val)
+    if route_val == "SEARCH":
+        mapped = TaskType.SEARCH
+
     if mapped is not None:
         # Post-check override: short greetings and identity questions must reach
         # GENERAL even if the model picked a heavier route. This catches the
@@ -580,6 +686,8 @@ def classify_task(
                     f"upgrading {mapped.name} -> {chosen.name}."
                 )
                 return chosen, None
+        if mapped == TaskType.SEARCH:
+            return TaskType.SEARCH, (keywords or query_for_classification)
         return mapped, None
 
     logger.warning(f"[Triage] Unrecognized route {route_val!r} \u2014 defaulting to REASONING.")

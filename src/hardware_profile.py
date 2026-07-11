@@ -74,7 +74,7 @@ class HardwareProfile:
 
     
     
-    ctx_triage:    int = 4096
+    ctx_triage:    int = 8192
     ctx_control:   int = 8192
     ctx_math:      int = 4096
     ctx_code:      int = 8192
@@ -268,7 +268,7 @@ def _ctx_for_ram(
         base = 32768
 
     return {
-        "ctx_triage":    min(base, 8192),
+        "ctx_triage":    max(base, 8192),
         "ctx_control":   min(base, 8192),
         "ctx_math":      min(base, 8192),
         "ctx_code":      base,

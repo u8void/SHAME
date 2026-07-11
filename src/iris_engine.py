@@ -1202,6 +1202,13 @@ def _quality_guard(text: str) -> str:
         text,
     ).strip()
 
+    # Strip chat template tags and simulated next turns (template bleed)
+    text = re.sub(
+        r"(?i)(?:<\|im_end\b(?:>)?|<\|im_start\b(?:>)?|<\|eot_id\b(?:>)?|[\n\r]\s*(?:user|assistant)\b)[\s\S]*",
+        "",
+        text,
+    ).strip()
+
     # --- Repetition loop detection: truncate if a sentence repeats 5+ times ---
     sentences = re.split(r"(?<=[.!?])\s+", text)
     if len(sentences) > 10:

@@ -707,7 +707,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (!tail.includes("```")) {
                     // CSS patterns: selectors, @ rules, or property blocks
                     tail = tail.replace(
-                        /(?:^|\n)(?:css\s*\n)?((?:(?:[.#@]\w|[a-z\[\]&*+>~])[\s\S]*\{\s*[\s\S]*\}|@\w+\s[^{;]++;?)[\s\S]*)$/im,
+                        /(?:^|\n)(?:css\s*\n)?((?:(?:[.#@]\w|[a-z\[\]&*+>~])[\s\S]*\{\s*[\s\S]*\}|@\w+\s[^{;]+;?)[\s\S]*)$/im,
                         '\n```css\n$1\n```\n'
                     );
                     // Shell/bash patterns
