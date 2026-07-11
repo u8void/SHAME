@@ -679,7 +679,7 @@ def run_torch_path(args, device_type: str, role: str):
         except Exception:
             lora_r = 8
     else:
-        model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.bfloat16).to(device)
+        model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16).to(device)
         lora_r = 8
 
     config = LoraConfig(r=lora_r, lora_alpha=lora_r*2, target_modules="all-linear", task_type=TaskType.CAUSAL_LM)
@@ -767,7 +767,7 @@ def merge_and_save(base_model_id: str, adapter_dir: str, out_dir: str):
     tokenizer = AutoTokenizer.from_pretrained(base_model_id)
     model = AutoModelForCausalLM.from_pretrained(
         base_model_id,
-        torch_dtype=torch.float16,
+        dtype=torch.float16,
         device_map="cpu"
     )
     print(f"[GGUF] Loading PEFT adapter from {adapter_dir}...")
@@ -1062,7 +1062,7 @@ def main():
                             model = AutoModelForCausalLM.from_pretrained(
                                 "./models",
                                 gguf_file=target_gguf_name,
-                                torch_dtype=torch.float16,
+                                dtype=torch.float16,
                                 device_map="cpu"
                             )
                             tokenizer = AutoTokenizer.from_pretrained(
@@ -1085,7 +1085,7 @@ def main():
                                 model = AutoModelForCausalLM.from_pretrained(
                                     "./models",
                                     gguf_file=target_gguf_name,
-                                    torch_dtype=torch.float16,
+                                    dtype=torch.float16,
                                     device_map="cpu"
                                 )
                                 tokenizer = AutoTokenizer.from_pretrained(
