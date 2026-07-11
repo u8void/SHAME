@@ -1183,6 +1183,11 @@ def main():
             else:
                 print(f"[INFO] GGUF model {final_gguf} already exists and matches base model. Skipping GGUF conversion.")
 
+        # Clean up the converted base model to force a fresh conversion from the updated GGUF next time
+        if training_success and base_model and os.path.exists(base_model) and ("hf_base_models" in base_model or "mlx_base_models" in base_model):
+            print(f"[INFO] Cleaning up intermediate converted model at {base_model}...")
+            shutil.rmtree(base_model, ignore_errors=True)
+
 
 def download_all_models(roles_to_train: List[str] = None):
     
