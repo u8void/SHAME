@@ -969,126 +969,161 @@ def main():
         
         base_model = model_override if model_override else ROLE_MODEL_MAP[role]
         
-        # Identify the GGUF model file name for this role
-        target_gguf_name = None
-        if SIZE_CONFIG and "gguf" in SIZE_CONFIG:
-            target_gguf_name = SIZE_CONFIG["gguf"].get(role)
-        
-        if not target_gguf_name:
-            if role in ("triage", "router", "general"):
-                target_gguf_name = "iris_001.gguf"
-            elif role == "control":
-                target_gguf_name = "iris_004.gguf"
-            elif role == "math":
-                target_gguf_name = "iris_003.gguf"
-            elif role == "code":
-                target_gguf_name = "iris_004.gguf"
-            elif role == "reasoning":
-                target_gguf_name = "iris_005.gguf"
-            elif role == "vision":
-                target_gguf_name = "InternVL3_5-4B-Q4_K.gguf"
+        if target == "mps" and base_model == ROLE_MODEL_MAP[role]:
+            target_gguf_name = None
+            if SIZE_CONFIG and "gguf" in SIZE_CONFIG:
+                target_gguf_name = SIZE_CONFIG["gguf"].get(role)
+            
+            if not target_gguf_name:
+                if role in ("triage", "router", "general"):
+                    target_gguf_name = "iris_001.gguf"
+                elif role == "control":
+                    target_gguf_name = "iris_004.gguf"
+                elif role == "math":
+                    target_gguf_name = "iris_003.gguf"
+                elif role == "code":
+                    target_gguf_name = "iris_004.gguf"
+                elif role == "reasoning":
+                    target_gguf_name = "iris_005.gguf"
+                elif role == "vision":
+                    target_gguf_name = "InternVL3_5-4B-Q4_K.gguf"
 
-        if not target_gguf_name:
-            print(f"[ERROR] Could not determine GGUF name for role '{role}'")
-            sys.exit(1)
-
-        local_gguf = f"./models/{target_gguf_name}"
-        if not os.path.exists(local_gguf) or os.path.getsize(local_gguf) < 1024:
-            print(f"[INFO] GGUF model {target_gguf_name} not found. Downloading it first...")
-            download_all_models([role])
-            if not os.path.exists(local_gguf) or os.path.getsize(local_gguf) < 1024:
-                print(f"[ERROR] Required GGUF model {target_gguf_name} could not be downloaded.")
-                sys.exit(1)
-
-        if base_model == ROLE_MODEL_MAP[role]:
-            if target == "mps":
-                mlx_base_path = f"./mlx_base_models/{role}"
-                if not os.path.exists(mlx_base_path) or not os.path.exists(os.path.join(mlx_base_path, "config.json")):
-                    print(f"[INFO] Converting local GGUF model {target_gguf_name} to MLX format...")
-                    os.makedirs("./mlx_base_models", exist_ok=True)
-                    conv_cmd = [
-                        "gguf2mlx",
-                        "--input", local_gguf,
-                        "--output", mlx_base_path
-                    ]
-                    try:
-                        subprocess.run(conv_cmd, check=True)
-                        print(f"[INFO] GGUF model converted successfully to MLX at {mlx_base_path}")
-                    except Exception as e:
-                        print(f"[ERROR] Failed to convert GGUF to MLX: {e}.")
-                        if os.path.exists(local_gguf):
-                            print(f"[INFO] Deleting corrupt GGUF file {local_gguf}...")
-                            os.remove(local_gguf)
-                        print(f"[INFO] Re-downloading GGUF model {target_gguf_name}...")
-                        download_all_models([role])
-                        try:
-                            print(f"[Convert] Retrying GGUF to MLX conversion...")
-                            subprocess.run(conv_cmd, check=True)
-                            print(f"[INFO] GGUF model converted successfully to MLX on retry.")
-                        except Exception as e2:
-                            print(f"[ERROR] Retry conversion failed: {e2}")
-                            sys.exit(1)
+            if target_gguf_name:
+                local_gguf = f"./models/{target_gguf_name}"
+                if not os.path.exists(local_gguf) or os.path.getsize(local_gguf) < 1024:
+                    print(f"[INFO] GGUF model {target_gguf_name} not found. Downloading it first to save bandwidth...")
+                    download_all_models([role])
                 
-                if os.path.exists(mlx_base_path):
-                    base_model = mlx_base_path
-                else:
-                    print(f"[ERROR] MLX base model path {mlx_base_path} not found after conversion.")
-                    sys.exit(1)
-
-            elif target in ("cuda", "cpu"):
-                hf_base_path = f"./hf_base_models/{role}"
-                if not os.path.exists(hf_base_path) or not os.path.exists(os.path.join(hf_base_path, "config.json")):
-                    print(f"[INFO] Converting local GGUF model {target_gguf_name} to Hugging Face Safetensors format...")
-                    os.makedirs(hf_base_path, exist_ok=True)
-                    try:
-                        from transformers import AutoModelForCausalLM, AutoTokenizer
-                        print(f"[Convert] Loading GGUF weights from {local_gguf} on CPU...")
-                        model = AutoModelForCausalLM.from_pretrained(
-                            base_model,
-                            gguf_file=local_gguf,
-                            torch_dtype=torch.float16,
-                            device_map="cpu"
-                        )
-                        tokenizer = AutoTokenizer.from_pretrained(
-                            base_model,
-                            gguf_file=local_gguf
-                        )
-                        print(f"[Convert] Saving model weights to {hf_base_path}...")
-                        model.save_pretrained(hf_base_path)
-                        tokenizer.save_pretrained(hf_base_path)
-                        print(f"[INFO] GGUF model converted successfully to HuggingFace at {hf_base_path}")
-                    except Exception as e:
-                        print(f"[ERROR] Failed to convert GGUF to HuggingFace: {e}.")
-                        if os.path.exists(local_gguf):
-                            print(f"[INFO] Deleting corrupt GGUF file {local_gguf}...")
-                            os.remove(local_gguf)
-                        print(f"[INFO] Re-downloading GGUF model {target_gguf_name}...")
-                        download_all_models([role])
+                if os.path.exists(local_gguf) and os.path.getsize(local_gguf) >= 1024:
+                    mlx_base_path = f"./mlx_base_models/{role}"
+                    if not os.path.exists(mlx_base_path) or not os.path.exists(os.path.join(mlx_base_path, "config.json")):
+                        print(f"[INFO] Converting local GGUF model {target_gguf_name} to MLX format...")
+                        os.makedirs("./mlx_base_models", exist_ok=True)
+                        conv_cmd = [
+                            "gguf2mlx",
+                            "--input", local_gguf,
+                            "--output", mlx_base_path
+                        ]
                         try:
-                            print(f"[Convert] Retrying GGUF to HuggingFace Safetensors conversion...")
+                            subprocess.run(conv_cmd, check=True)
+                            print(f"[INFO] GGUF model converted successfully to MLX at {mlx_base_path}")
+                        except Exception as e:
+                            print(f"[ERROR] Failed to convert GGUF to MLX: {e}.")
+                            if os.path.exists(local_gguf):
+                                print(f"[INFO] Deleting corrupt GGUF file {local_gguf}...")
+                                os.remove(local_gguf)
+                            print(f"[INFO] Re-downloading GGUF model {target_gguf_name} from active tier config...")
+                            download_all_models([role])
+                            try:
+                                print(f"[Convert] Retrying GGUF to MLX conversion...")
+                                subprocess.run(conv_cmd, check=True)
+                                print(f"[INFO] GGUF model converted successfully to MLX on retry.")
+                            except Exception as e2:
+                                print(f"[ERROR] Retry conversion failed: {e2}. Falling back to standard model mapped in tiers.")
+                                mlx_base_path = None
+                    
+                    if mlx_base_path and os.path.exists(mlx_base_path):
+                        base_model = mlx_base_path
+        
+        elif target == "cuda" and base_model == ROLE_MODEL_MAP[role]:
+            # Convert GGUF to Hugging Face format locally if GGUF is available
+            target_gguf_name = None
+            if SIZE_CONFIG and "gguf" in SIZE_CONFIG:
+                target_gguf_name = SIZE_CONFIG["gguf"].get(role)
+            
+            if not target_gguf_name:
+                if role in ("triage", "router", "general"):
+                    target_gguf_name = "iris_001.gguf"
+                elif role == "control":
+                    target_gguf_name = "iris_004.gguf"
+                elif role == "math":
+                    target_gguf_name = "iris_003.gguf"
+                elif role == "code":
+                    target_gguf_name = "iris_004.gguf"
+                elif role == "reasoning":
+                    target_gguf_name = "iris_005.gguf"
+                elif role == "vision":
+                    target_gguf_name = "InternVL3_5-4B-Q4_K.gguf"
+
+            if target_gguf_name:
+                local_gguf = f"./models/{target_gguf_name}"
+                if not os.path.exists(local_gguf) or os.path.getsize(local_gguf) < 1024:
+                    print(f"[INFO] GGUF model {target_gguf_name} not found. Downloading it first to save bandwidth...")
+                    download_all_models([role])
+                
+                if os.path.exists(local_gguf) and os.path.getsize(local_gguf) >= 1024:
+                    hf_base_path = f"./hf_base_models/{role}"
+                    if not os.path.exists(hf_base_path) or not os.path.exists(os.path.join(hf_base_path, "config.json")):
+                        print(f"[INFO] Converting local GGUF model {target_gguf_name} to Hugging Face Safetensors format...")
+                        os.makedirs(hf_base_path, exist_ok=True)
+                        try:
                             from transformers import AutoModelForCausalLM, AutoTokenizer
+                            print(f"[Convert] Loading GGUF weights from {local_gguf} on CPU...")
                             model = AutoModelForCausalLM.from_pretrained(
-                                base_model,
-                                gguf_file=local_gguf,
+                                "./models",
+                                gguf_file=target_gguf_name,
                                 torch_dtype=torch.float16,
                                 device_map="cpu"
                             )
                             tokenizer = AutoTokenizer.from_pretrained(
-                                base_model,
-                                gguf_file=local_gguf
+                                "./models",
+                                gguf_file=target_gguf_name
                             )
+                            print(f"[Convert] Saving model weights to {hf_base_path}...")
                             model.save_pretrained(hf_base_path)
                             tokenizer.save_pretrained(hf_base_path)
-                            print(f"[INFO] GGUF model converted successfully on retry.")
-                        except Exception as e2:
-                            print(f"[ERROR] Retry conversion failed: {e2}")
-                            sys.exit(1)
-
-                if os.path.exists(hf_base_path):
-                    base_model = hf_base_path
-                else:
-                    print(f"[ERROR] HuggingFace base model path {hf_base_path} not found after conversion.")
-                    sys.exit(1)
+                            print(f"[INFO] GGUF model converted successfully to HuggingFace at {hf_base_path}")
+                        except Exception as e:
+                            print(f"[ERROR] Failed to convert GGUF to HuggingFace: {e}.")
+                            if os.path.exists(local_gguf):
+                                print(f"[INFO] Deleting corrupt GGUF file {local_gguf}...")
+                                os.remove(local_gguf)
+                            print(f"[INFO] Re-downloading GGUF model {target_gguf_name} from active tier config...")
+                            download_all_models([role])
+                            try:
+                                print(f"[Convert] Retrying GGUF to HuggingFace Safetensors conversion...")
+                                model = AutoModelForCausalLM.from_pretrained(
+                                    "./models",
+                                    gguf_file=target_gguf_name,
+                                    torch_dtype=torch.float16,
+                                    device_map="cpu"
+                                )
+                                tokenizer = AutoTokenizer.from_pretrained(
+                                    "./models",
+                                    gguf_file=target_gguf_name
+                                )
+                                model.save_pretrained(hf_base_path)
+                                tokenizer.save_pretrained(hf_base_path)
+                                print(f"[INFO] GGUF model converted successfully on retry.")
+                            except Exception as e2:
+                                print(f"[ERROR] Retry conversion failed: {e2}. Falling back to standard model mapped in tiers.")
+                                hf_base_path = None
+                    
+                    if hf_base_path and os.path.exists(hf_base_path):
+                        base_model = hf_base_path
+            
+            # Fallback to unsloth 4-bit repo if GGUF is not used or conversion failed
+            if base_model == ROLE_MODEL_MAP[role]:
+                org_and_repo = base_model.split("/")
+                if len(org_and_repo) == 2:
+                    unsloth_repo = f"unsloth/{org_and_repo[1]}-bnb-4bit"
+                    try:
+                        from huggingface_hub import HfApi
+                        api = HfApi()
+                        api.model_info(unsloth_repo)
+                        print(f"[INFO] Found pre-quantized HuggingFace model '{unsloth_repo}' for training to save download bandwidth.")
+                        base_model = unsloth_repo
+                    except Exception:
+                        cuda_4bit_map = {
+                            "meta-llama/Llama-3.2-3B-Instruct": "unsloth/Llama-3.2-3B-Instruct-bnb-4bit",
+                            "NousResearch/Hermes-3-Llama-3.1-8B": "unsloth/Hermes-3-Llama-3.1-8B-bnb-4bit",
+                            "Qwen/Qwen2.5-Math-7B-Instruct": "unsloth/Qwen2.5-Math-7B-Instruct-bnb-4bit",
+                            "Qwen/Qwen2.5-Coder-14B-Instruct": "unsloth/Qwen2.5-Coder-14B-Instruct-bnb-4bit",
+                            "deepseek-ai/deepseek-llm-14b-chat": "unsloth/deepseek-llm-14b-chat-bnb-4bit",
+                            "Qwen/Qwen3.5-9B-Instruct": "unsloth/Qwen3.5-9B-Instruct-bnb-4bit"
+                        }
+                        if base_model in cuda_4bit_map:
+                            base_model = cuda_4bit_map[base_model]
         
         args.model = base_model
         args.output_dir = f"./iris_adapters/{role}"
