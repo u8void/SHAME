@@ -697,10 +697,33 @@ document.addEventListener("DOMContentLoaded", () => {
                 const tailStart = fenceCount === 0 ? 0 : work.lastIndexOf('```') + 3;
                 const head = work.slice(0, tailStart);
                 let tail = work.slice(tailStart);
+                
+                // HTML auto-wrap
                 if (!tail.includes("```html") && !tail.includes("```\n<!DOCTYPE") && !tail.includes("```\n<html") && !tail.includes("```\n<div") && !tail.includes("```\n<nav")) {
-                    // Find raw HTML blocks that appear on a new line (within the unfenced tail only) and wrap them
                     tail = tail.replace(/(?:^|\n)(?:html\s*\n|CODE\s*\n|CODE\s*\nhtml\s*\n)?((?:<!--|<!DOCTYPE|<html|<body|<head|<title|<meta|<link|<nav|<header|<footer|<main|<section|<aside|<article|<div|<span|<p|<a|<button|<form|<input|<textarea|<select|<label|<ul|<ol|<li|<h[1-6]|<img|<canvas|<svg|<style|<script|<table|<tr|<td|<th|<thead|<tbody|<iframe|<video|<audio)[\s\S]*)$/i, '\n```html\n$1\n```\n');
                 }
+                
+                // Python/JS/CSS/Shell auto-wrap (catches trailing rambled code in any language)
+                if (!tail.includes("```")) {
+                    // CSS patterns: selectors, @ rules, or property blocks
+                    tail = tail.replace(
+                        /(?:^|\n)(?:css\s*\n)?((?:(?:[.#@]\w|[a-z\[\]&*+>~])[\s\S]*\{\s*[\s\S]*\}|@\w+\s[^{;]++;?)[\s\S]*)$/im,
+                        '\n```css\n$1\n```\n'
+                    );
+                    // Shell/bash patterns
+                    if (!tail.includes("```bash") && !tail.includes("```sh")) {
+                        tail = tail.replace(
+                            /(?:^|\n)(?:bash\s*\n|shell\s*\n|sh\s*\n)?((?:(?:#!\/|sudo |apt |pip |npm |yarn |docker |git |cd |ls |mkdir |rm |cp |mv |cat |echo |export |source |chmod |chown |curl |wget |grep |find |sed |awk |tar |unzip |python[23]? |node |rustc |cargo |go |javac |make |cmake ))[\s\S]*)$/im,
+                            '\n```bash\n$1\n```\n'
+                        );
+                    }
+                    // Generic Python/JS fallback
+                    tail = tail.replace(
+                        /(?:^|\n)(?:python\s*\n|js\s*\n|javascript\s*\n|CODE\s*\n)?((?:def |class |import |from [\w.]+ import |function |const |let |var |async |export |require\()\s*[\s\S]*)$/m,
+                        '\n```code\n$1\n```\n'
+                    );
+                }
+
                 work = head + tail;
             }
         }
@@ -857,6 +880,35 @@ document.addEventListener("DOMContentLoaded", () => {
             work = work.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
             work = work.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
             work = work.replace(/\n/g, '<br>');
+        }
+
+        // 4.5 Post-processing: catch any remaining raw code that looks code-like
+        //     but escaped all our auto-wrap passes. Small models sometimes output
+        //     plain code with a header like "Here's the file:" but no fences.
+        //     This catches: indented blocks, multi-line assignments, or code with
+        //     typical structural keywords.
+        {
+            const hasFences = /```/g.test(work);
+            if (!hasFences && work.length > 100) {
+                const rawLines = work.split('\n').filter(l => l.trim());
+                if (rawLines.length >= 3) {
+                    const codeIndicators = rawLines.filter(l => {
+                        const t = l.trim();
+                        return /^(def |class |import |from |const |let |var |function |if |for |while |return |print\()/.test(t)
+                            || /^[.#@]\w/.test(t)
+                            || /\{\s*$/.test(t)
+                            || /^\s{2,}\S/.test(l);
+                    });
+                    if (codeIndicators.length >= Math.min(3, rawLines.length * 0.4)) {
+                        let detectedLang = 'python';
+                        if (/\bfunction\b.*\(|\bconst\b|\blet\b|\bvar\b|\brequire\(|\bexport\b/.test(work)) detectedLang = 'javascript';
+                        else if (/[.#@]\w+\s*\{/.test(work) && /:\s*[^;]+;/.test(work)) detectedLang = 'css';
+                        else if (/^#!\/|\bsudo\b|\bapt\b|\bcurl\b/.test(work)) detectedLang = 'bash';
+                        else if (/<\w+[^>]*>/.test(work)) detectedLang = 'html';
+                        work = '\n```' + detectedLang + '\n' + work + '\n```\n';
+                    }
+                }
+            }
         }
 
         // 5. Re-inject blocks recursively
@@ -1054,8 +1106,21 @@ document.addEventListener("DOMContentLoaded", () => {
                         // duplicate doesn't get an extra card of its own.
                         seenFileContents.add(normContent);
                     }
+                    let isDuplicate = seenFileContents.has(normContent);
+                    if (!isDuplicate && normContent.length > 50) {
+                        const strippedNorm = normContent.replace(/\s+/g, '');
+                        for (const seen of seenFileContents) {
+                            const strippedSeen = seen.replace(/\s+/g, '');
+                            // If one is a substring of the other (with whitespace ignored), or they share the first 50 non-whitespace chars, it's a rambled duplicate
+                            if (strippedSeen.includes(strippedNorm) || strippedNorm.includes(strippedSeen) || (strippedSeen.length > 50 && strippedNorm.length > 50 && strippedSeen.substring(0, 50) === strippedNorm.substring(0, 50))) {
+                                isDuplicate = true;
+                                break;
+                            }
+                        }
+                    }
+
                     // Auto-generate a file card for hidden blocks that weren't claimed by an explicit <file_card> tag
-                    if (block.autoCard && normContent.length > 0 && !block.claimed && !seenFileContents.has(normContent)) {
+                    if (block.autoCard && normContent.length > 0 && !block.claimed && !isDuplicate) {
                         seenFileContents.add(normContent);
                         const autoLang = block.lang || 'code';
                         const ext = normaliseExt(autoLang);

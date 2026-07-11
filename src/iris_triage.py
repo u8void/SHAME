@@ -115,6 +115,153 @@ _ROUTE_TAG_MAP: Dict[str, TaskType] = {
 # so it is not a content-classification heuristic, just a safety valve.
 _CONFIDENCE_FLOOR = 0.55
 
+# Post-check override pattern (see classify_task for the design rationale). This is
+# a *post-routing* check, not a pre-filter: the model\u0027s classification still runs
+# first and its choice is the default. We only override when (a) the model picked
+# a non-code route, AND (b) the query contains BOTH a coding verb and a code-shaped
+# target noun. The verb list is the only list here that would be dangerous to
+# broaden \u2014 "create a pizza" must NOT match. The code-shaped target list is
+# intentionally restricted to words that strongly imply a code artifact.
+#
+#   "create a calculator in python"        verb=create, target=calculator (CODE_SIMPLE)
+#   "build me a web app in flask"          verb=build,  target=web app    (CODE_COMPLEX)
+#   "write a function to reverse a list"   verb=write,  target=function   (CODE_SIMPLE)
+#   "make a website for a pizza place"     verb=make,   target=website    (CODE_COMPLEX)
+#   "create a pizza"                       no target noun -> no match, stays REASONING
+_CODE_VERBS = (
+    r"create|build|write|implement|code|make|develop|design|generate|"
+    r"add|fix|patch|modify|update|refactor|rewrite|convert|port|translate"
+)
+_CODE_TARGETS = (
+    r"(?:calculator|function|method|class|module|script|program|app|application|"
+    r"website|site|web\s*app|web\s*page|landing\s*page|api|service|server|"
+    r"endpoint|backend|frontend|ui|gui|cli|tool|library|package|component|"
+    r"plugin|extension|game|binary|bot|scraper|crawler|pipeline|algorithm|"
+    r"snippets?|codebase)"
+)
+# We allow a LANG_QUALIFIER to appear either before the target ("a flask
+# app" \u2014 "flask" is a language, "app" is the target) or after it
+# ("calculator in python"). To handle both, the LANG_QUALIFIER is allowed
+# inside the function-word sequence and after the target.
+_LQ_BODY = (
+    r"\s+(?:in|using|with|for)\s+(?:python|javascript|typescript|js|ts|"
+    r"c\+\+|cpp|c#|csharp|java|kotlin|swift|go|rust|ruby|php|"
+    r"html|css|sql|bash|shell|matlab|r|lua|scala|haskell|elixir|dart|"
+    r"flask|django|fastapi|express|react|vue|angular|next\.js|nuxt|svelte|"
+    r"spring|laravel|rails|node|node\.js|deno|bun|"
+    r"tensorflow|pytorch|numpy|pandas|"
+    r"tailwind|bootstrap|jquery)"
+)
+_LQ_AT_END = "(" + _LQ_BODY + ")?"
+
+# Explicit "code/script" nouns anywhere in the query, which is enough on its own.
+_EXPLICIT_CODE_NOUN = r"\b(?:code|script|function|program|class|module)\b"
+
+# Primary: verb, then zero or more function words (which may include a
+# language qualifier like "flask" / "in python"), then a target noun
+# optionally followed by a language qualifier. The LANG_QUALIFIER by
+# itself is not enough \u2014 we need EITHER a target noun OR an explicit
+# language tag, so "create something in python" works but "write a haiku
+# about the sea" does not.
+_PRIMARY_PATTERN = re.compile(
+    r"\b(?P<verb>" + _CODE_VERBS + r")\b"
+    r"(?:\s+(?:me|you|us|him|her|them|it|this|that|my|your|his|her|their|its|"
+    r"a|an|the|some|any|"
+    + _LQ_BODY + r"|"
+    + r"(?:flask|django|fastapi|express|react|vue|angular|next\.js|nuxt|svelte|"
+    + r"spring|laravel|rails|node|node\.js|deno|bun|tailwind|bootstrap|jquery)"
+    + r"))+\s+"
+    r"(?P<target>" + _CODE_TARGETS + r")"
+    + _LQ_AT_END,
+    re.IGNORECASE,
+)
+# Secondary: code-modification verbs followed by a non-target word ("the bug"),
+# where an explicit code noun (code/script/function/...) appears later in the
+# query. This is intentionally narrower than the primary pattern.
+_MODIFY_VERBS = (
+    r"fix|patch|modify|update|refactor|rewrite|optimise|optimize|improve|clean\s+up|"
+    r"debug|review|audit|annotate|document|format|lint"
+)
+_SECONDARY_PATTERN = re.compile(
+    r"\b(?P<verb>" + _MODIFY_VERBS + r")\b"
+    r"(?:[^.?!\n])*"
+    r"\b(?P<target>" + _EXPLICIT_CODE_NOUN + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _code_override_route(query: str):
+    """Return (chosen_task, verb, target_str) if the query matches an unambiguous
+    coding pattern, else None. Called only as a post-check after the model has
+    routed \u2014 it never *initiates* a routing decision.
+    """
+    m = _PRIMARY_PATTERN.search(query)
+    if not m:
+        m = _SECONDARY_PATTERN.search(query)
+    if not m:
+        return None
+    verb = m.group("verb")
+    target_raw = m.group("target")
+    # The PRIMARY pattern has two alternatives: target noun, or language qualifier
+    # (in which case no "target" group is captured). For the language-qualifier
+    # path we fall back to the matched span as the target string so the
+    # COMPLEX-vs-SIMPLE decision below can still inspect it.
+    target = (target_raw or m.group(0)).lower()
+    if any(tok in target for tok in ("app", "website", "site", "api", "service", "server", "project")):
+        return TaskType.CODING_COMPLEX, verb, target
+    return TaskType.CODING_SIMPLE, verb, target
+
+
+# Post-check override for GENERAL: catches greetings and short identity questions
+# that the model often misroutes to REASONING when its structured output is
+# degenerating into noise. The "hi" -> REASONING bug was the trigger.
+#
+# The scope is intentionally narrow:
+#   - The query must be short (<= 8 words) so it can't be "hi, can you help
+#     me debug this code" (which is genuinely a coding request that happens
+#     to start with a greeting).
+#   - The query must START with a known greeting word ("hi", "hello", ...) or
+#     contain a direct identity question ("who are you", "what are you").
+_GREETING_WORDS = (
+    r"hi|hello|hey|howdy|greetings|yo|hola|sup|hiya|ahoy|good\s+(morning|afternoon|evening)"
+)
+_IDENTITY_QUESTIONS = (
+    r"who\s+(are|r\s+you|made|created|built)\s+you|"
+    r"what\s+(are|r\s+you)\s+(you|a|an)|"
+    r"your\s+name|"
+    r"are\s+you\s+(a|an)\s+(human|bot|ai|robot|llm|model|assistant)"
+)
+_GENERAL_OVERRIDE_PATTERN = re.compile(
+    r"^\s*(?:" + _GREETING_WORDS + r")\b[\s\S]*$",
+    re.IGNORECASE,
+)
+_IDENTITY_PATTERN = re.compile(
+    _IDENTITY_QUESTIONS,
+    re.IGNORECASE,
+)
+
+
+def _general_override_route(query: str):
+    """Return True if the query is a short greeting or identity question that
+    should route to GENERAL even if the model picked something else. Returns
+    a short reason string for logging, or None if no override applies.
+    """
+    q = query.strip()
+    if not q:
+        return None
+    # Word-count cap: keep this rule from swallowing real requests that happen
+    # to start with a greeting ("hi can you fix the bug in my code"). 6 words
+    # is the longest pure greeting that's still plausible ("hi how are you doing
+    # today") and short enough that real requests ("hi, can you help me debug
+    # this code") comfortably exceed it.
+    if len(q.split()) > 6:
+        return None
+    if _GENERAL_OVERRIDE_PATTERN.match(q):
+        return "greeting"
+    if _IDENTITY_PATTERN.search(q):
+        return "identity"
+    return None
+
 _triage_grammar = None
 if LlamaGrammar is not None:
     try:
@@ -123,6 +270,53 @@ if LlamaGrammar is not None:
         logger.warning(f"[Triage] Could not build grammar from schema ({e}); triage will run unconstrained.")
 else:
     logger.warning("[Triage] llama_cpp.LlamaGrammar unavailable; triage will run unconstrained.")
+
+
+def _sanitize_string_values(text: str) -> str:
+    """Walk the cleaned text and, inside every " ... " span, escape raw \n, \r, \t
+    and drop any other ASCII control char. The triage model (iris_001) occasionally
+    emits literal newlines inside the keywords string when it\u0027s unsure of the
+    answer; that\u0027s a JSON syntax error and Python\u0027s strict json.loads rejects it.
+    """
+    out = []
+    i = 0
+    n = len(text)
+    in_string = False
+    while i < n:
+        ch = text[i]
+        if not in_string:
+            out.append(ch)
+            if ch == '"' and (i == 0 or text[i - 1] != '\\'):
+                in_string = True
+            i += 1
+            continue
+        # Inside a string: respect existing backslash escapes first.
+        if ch == '\\':
+            if i + 1 < n:
+                out.append(ch)
+                out.append(text[i + 1])
+                i += 2
+            else:
+                out.append(ch)
+                i += 1
+            continue
+        if ch == '"':
+            out.append(ch)
+            in_string = False
+            i += 1
+            continue
+        if ch == '\n':
+            out.append('\\n'); i += 1; continue
+        if ch == '\r':
+            out.append('\\r'); i += 1; continue
+        if ch == '\t':
+            out.append('\\t'); i += 1; continue
+        if ord(ch) < 0x20:
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 def classify_task(
@@ -244,14 +438,85 @@ def classify_task(
 
     logger.info(f"[Triage] Raw answer: {answer!r}")
 
+    # --- Pre-processing: strip <think>...</think> blocks emitted by reasoning models
+    # before attempting JSON parse. These blocks contain free-form text that
+    # invariably contains characters invalid inside a JSON string.
+    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", answer, flags=re.IGNORECASE).strip()
+    # Also strip markdown code fences in case the model wraps JSON in ```json ... ```.
+    cleaned = re.sub(r"```(?:json)?\s*", "", cleaned).replace("```", "").strip()
+    # Escape raw control characters (\n, \r, \t) embedded inside JSON string
+    # values, which strict json.loads rejects. See _sanitize_string_values docstring.
+    cleaned = _sanitize_string_values(cleaned)
+
+    data = None
+    parse_error = None
+
+    # Pass 1: try parsing the cleaned answer directly.
     try:
-        data = json.loads(answer)
-        route_val = str(data.get("route", "")).strip().upper()
-        keywords = str(data.get("keywords", "") or "").strip()
-        confidence = float(data.get("confidence", 0.0))
+        data = json.loads(cleaned)
     except Exception as e:
-        logger.warning(f"[Triage] Could not parse routing JSON ({e}): {answer[:300]!r} \u2014 defaulting to REASONING.")
+        parse_error = e
+
+    # Pass 2: extract the first complete {...} block and retry. The model sometimes
+    # produces trailing garbage / embedded newlines after the JSON object.
+    if data is None:
+        m = re.search(r'\{[\s\S]*?"route"\s*:\s*"([^"]+)"[\s\S]*?\}', cleaned)
+        if m:
+            try:
+                data = json.loads(m.group(0))
+                logger.info("[Triage] JSON rescued via regex extraction (Pass 2).")
+            except Exception:
+                pass
+
+    # Pass 3: directly extract just the route value without needing a valid JSON
+    # object at all. The model nearly always gets the route right even when the
+    # rest of the output degenerates into garbage.
+    if data is None:
+        route_direct = re.search(r'"route"\s*:\s*"([^"\s]+)"', cleaned, re.IGNORECASE)
+        if route_direct:
+            candidate = route_direct.group(1).strip().upper()
+            if candidate in _ROUTES:
+                logger.warning(
+                    f"[Triage] Full JSON unparseable \u2014 route extracted directly: {candidate!r}. "
+                    "Using it with confidence=1.0 (model showed the route clearly)."
+                )
+                data = {"route": candidate, "keywords": "", "confidence": 1.0}
+
+    if data is None:
+        logger.warning(
+            f"[Triage] Could not parse routing JSON ({parse_error}): {answer[:300]!r} "
+            "\u2014 defaulting to REASONING."
+        )
         return TaskType.REASONING, None
+
+    route_val = str(data.get("route", "")).strip().upper()
+    raw_keywords = str(data.get("keywords", "") or "").strip()
+    # The grammar only constrains keywords length, not its contents. The model has
+    # been observed to dump prompt fragments, repeated digits, or the user query
+    # into this field when uncertain. Per the routing spec, keywords is only
+    # meaningful for SEARCH; for every other route, force it to empty so a
+    # garbage value here can never influence downstream behaviour.
+    keywords = raw_keywords if route_val == "SEARCH" else ""
+    try:
+        confidence = float(data.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        # Model emitted something like ":-162" or ":-0" instead of a real number.
+        # Trust the route it picked (the route token is structurally valid because
+        # of the grammar constraint) and treat the missing confidence as 1.0.
+        logger.warning(
+            f"[Triage] Unparseable confidence value {data.get('confidence')!r} \u2014 "
+            f"treating as 1.0 for route {route_val!r}."
+        )
+        confidence = 1.0
+    # The grammar\u0027s [0.0, 1.0] bound is loose: models sometimes emit -162, 1e6,
+    # -0, etc. instead of a calibrated probability. We treat anything that
+    # doesn\u0027t look like a real calibrated score as 1.0 (trust the route).
+    if confidence < 0.0 or confidence > 1.0 or (confidence == 0.0 and "confidence" in data):
+        logger.warning(
+            f"[Triage] Implausible confidence {confidence} for route {route_val!r} \u2014 "
+            "treating as 1.0 (trust the structurally-valid route token)."
+        )
+        confidence = 1.0
 
     if confidence < _CONFIDENCE_FLOOR:
         logger.info(f"[Triage] Confidence {confidence:.2f} < {_CONFIDENCE_FLOOR}. Falling back to REASONING.")
@@ -262,6 +527,35 @@ def classify_task(
 
     mapped = _ROUTE_TAG_MAP.get(route_val)
     if mapped is not None:
+        # Post-check override: short greetings and identity questions must reach
+        # GENERAL even if the model picked a heavier route. This catches the
+        # common case where the triage model\u0027s structured output degenerates
+        # into noise on simple "hi" / "hello" / "who are you" queries and the
+        # model picks REASONING (or worse) by default.
+        if mapped != TaskType.GENERAL:
+            general_reason = _general_override_route(query_for_classification)
+            if general_reason is not None:
+                logger.info(
+                    f"[Triage] Post-check override: query matched GENERAL pattern "
+                    f"(reason={general_reason!r}); "
+                    f"downgrading {mapped.name} -> GENERAL."
+                )
+                return TaskType.GENERAL, None
+        # Post-check override: unambiguous coding requests must reach a code route.
+        # The triage model is sometimes confident-but-wrong on clear coding requests
+        # (e.g. "create a calculator in python" -> REASONING). This is a narrow,
+        # high-precision list of patterns that only fires when the model picked a
+        # non-code route AND the query matches an unambiguous coding pattern.
+        if mapped != TaskType.CODING_SIMPLE and mapped != TaskType.CODING_COMPLEX:
+            override_result = _code_override_route(query_for_classification)
+            if override_result is not None:
+                chosen, verb, target = override_result
+                logger.info(
+                    f"[Triage] Post-check override: query matched coding pattern "
+                    f"(verb={verb!r}, target={target!r}); "
+                    f"upgrading {mapped.name} -> {chosen.name}."
+                )
+                return chosen, None
         return mapped, None
 
     logger.warning(f"[Triage] Unrecognized route {route_val!r} \u2014 defaulting to REASONING.")

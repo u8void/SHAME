@@ -288,20 +288,20 @@ def get_patch_prompt(identity: str) -> str:
     return (f"{identity}\nYou are an expert AI pair programmer. Fulfill the user's coding request.\n"
             "CRITICAL RULE: NEVER rewrite the entire file from scratch! You MUST output one or more SEARCH/REPLACE blocks, each containing only the specific lines that need to change. "
             "Format each edit EXACTLY like this:\n"
-            "<<<<\n"
+            "<<<<<<< SEARCH\n"
             "[a short, exact excerpt of the existing code — copied character-for-character, whitespace and all]\n"
-            "====\n"
+            "=======\n"
             "[the new lines that replace it]\n"
-            ">>>>\n\n"
+            ">>>>>>> REPLACE\n\n"
             "Example:\n"
-            "<<<<\n"
+            "<<<<<<< SEARCH\n"
             "def calculate(a, b):\n"
             "    return a + b\n"
-            "====\n"
+            "=======\n"
             "def calculate(a, b):\n"
             "    # Return the sum\n"
             "    return a + b\n"
-            ">>>>\n\n"
+            ">>>>>>> REPLACE\n\n"
             "Keep each SEARCH excerpt as SHORT as possible: ideally just the 1-3 lines that actually change, plus one extra line of surrounding context only if needed. Do not output anything outside of these blocks besides brief explanations.")
 
 
@@ -809,57 +809,236 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
     # Instead, we extract the code from the model's output and use it directly —
     # the rewritten file IS the updated version, just delivered in the wrong format.
     _patches_failed = _patch_summary and _patch_summary.get("failed", 0) > 0
-    if _force_patch and _patch_summary and _patch_summary["attempted"] and _patch_summary["applied"] == 0:
+    _full_rewrite = _force_patch and _patch_summary and _patch_summary.get("attempted", 0) == 0
+    
+    if _full_rewrite:
         new_blocks = extract_code_blocks(full)
-        if new_blocks and not _patches_failed:
+        if new_blocks:
             # Model wrote a full rewrite instead of a patch (no SEARCH/REPLACE markers)
             new_lang, new_code = new_blocks[-1]
-            # Get original code from history to verify the rewrite is actually different
-            _orig_code = ""
-            for _m in reversed(history or []):
-                if _m.get("role") == "assistant":
-                    _orig_blocks = extract_code_blocks(_m.get("content", ""))
-                    if _orig_blocks:
-                        _, _orig_code = _orig_blocks[-1]
-                        break
+            # Get original code from history             _orig_code = ""
+            _orig_lang = "python"
+            candidates = []
+            for _m in (optimized or []):
+                _orig_blocks = extract_code_blocks(_m.get("content", ""))
+                for lang, code in _orig_blocks:
+                    candidates.append((lang, code))
+            if candidates:
+                _orig_lang, _orig_code = max(candidates, key=lambda c: len(c[1]))
             if new_code.strip() != _orig_code.strip():
-                logger.info("[Simple Coding] Model wrote full rewrite instead of patch — using it directly as the updated file.")
-                yield {"type": "clear"}
-                patched_output = f"\n```{new_lang}\n{new_code}\n```\n"
-                yield {"type": "token", "content": patched_output}
-                full = patched_output
+                _new_len = len(new_code.strip().split('\n'))
+                _orig_len = len(_orig_code.strip().split('\n'))
+                
+                # Normalize both to catch trivial whitespace-only diffs
+                _new_norm = " ".join(new_code.split())
+                _orig_norm = " ".join(_orig_code.split())
+                _is_semantically_same = (_new_norm == _orig_norm) and len(_new_norm) > 20
+                
+                # Reject tiny hallucinated REPL snippets when the model was supposed to write a full file
+                _is_valid_rewrite = True
+                if _orig_len > 10 and _new_len < _orig_len * 0.5:
+                    _is_valid_rewrite = False
+                elif _orig_len <= 10 and _new_len < 2:
+                    _is_valid_rewrite = False
+                elif _is_semantically_same:
+                    _is_valid_rewrite = False
+                    logger.warning("[Simple Coding] Model's full rewrite is semantically identical to original — no real change.")
+                
+                if _is_valid_rewrite:
+                    logger.info("[Simple Coding] Model wrote full rewrite instead of patch — using it directly as the updated file.")
+                    yield {"type": "clear"}
+                    patched_output = f"\n```{new_lang}\n{new_code}\n```\n"
+                    yield {"type": "token", "content": patched_output}
+                    full = patched_output
+                else:
+                    logger.warning(f"[Simple Coding] Model wrote full rewrite instead of patch, but it was suspiciously small ({_new_len} lines vs {_orig_len} original). Rejecting hallucination.")
+                    _patches_failed = True
+                    _full_rewrite = False
             else:
                 logger.warning("[Simple Coding] Model rewrote the file identically — no changes detected.")
-        elif _patches_failed:
-            # Patches were attempted but SEARCH text didn't match the file.
-            # Retry with a clearer instruction — do NOT include the full file,
-            # as that makes the 3B model rewrite everything and hit max_tokens.
-            logger.info("[Simple Coding] Patches failed — retrying with focused instruction.")
-            yield {"type": "clear"}
-            yield {"type": "status", "content": "Patches didn't match — retrying..."}
-            _retry_instruction = (
-                "Your previous SEARCH/REPLACE patches did not match the actual file content. "
-                "The SEARCH text must match the file EXACTLY, character for character, including whitespace and indentation. "
-                "Look at the code I showed you earlier in this conversation and output ONE SEARCH/REPLACE block "
-                "with the EXACT lines to find and what to replace them with. "
-                "Do NOT rewrite the whole file. Do NOT add new functions outside the block."
-            )
-            retry_msgs = optimized + [
-                {"role": "user", "content": _retry_instruction}
-            ]
-            retry_full = ""
-            for ev in _stream_tokens(ModelRole.CODE, retry_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=_patch_sys_prompt):
-                if ev["type"] == "patch_summary":
-                    _patch_summary = ev
-                    continue
-                if user_lang == "English" or ev["type"] != "token":
-                    yield ev
+    if _patches_failed:
+        # Patches were attempted but SEARCH text didn't match the file.
+        # The model hallucinated lines that don't exist in the actual file.
+        # Retry with the model's failed output visible + the real file content
+        # so it can correct its SEARCH text to match exactly.
+        logger.info("[Simple Coding] Patches failed — retrying with focused instruction.")
+        yield {"type": "clear"}
+        yield {"type": "status", "content": "Patches didn't match — retrying..."}
+ 
+        # Pull the real current file out of history so we can show it to the model.
+        _real_file_code = ""
+        _real_file_lang = "python"
+        candidates = []
+        for _hm in (optimized or []):
+            _hblocks = extract_code_blocks(_hm.get("content", ""))
+            for lang, code in _hblocks:
+                candidates.append((lang, code))
+        if candidates:
+            _real_file_lang, _real_file_code = max(candidates, key=lambda c: len(c[1]))
+
+        _retry_instruction = (
+            "Your SEARCH/REPLACE patch failed because the SEARCH text did not match the actual file. "
+            "Below is the EXACT current content of the file — copy lines from it verbatim into your SEARCH block:\n\n"
+            + (f"```{_real_file_lang}\n{_real_file_code}\n```\n\n" if _real_file_code else "")
+            + "Output ONE corrected SEARCH/REPLACE block now. "
+            "The SEARCH text must be copied character-for-character from the file above, "
+            "including all whitespace and indentation. "
+            "Do NOT rewrite the whole file. Do NOT add functions outside the block."
+        )
+        # Include the model's failed attempt as an assistant turn so it knows
+        # what it tried and why it didn't work, then follow with the correction prompt.
+        retry_msgs = optimized + [
+            {"role": "assistant", "content": full},
+            {"role": "user", "content": _retry_instruction}
+        ]
+        retry_full = ""
+        for ev in _stream_tokens(ModelRole.CODE, retry_msgs, max_tokens=8192, temperature=0.2, think_mode="show", settings=settings, system_prompt_override=_patch_sys_prompt):
+            if ev["type"] == "patch_summary":
+                _patch_summary = ev
+            else:
                 if ev["type"] == "token":
                     retry_full += ev["content"]
+                else:
+                    yield ev
+                    
+        if not _keep_loaded:
+            unload_model()
+        
+        _force_nuclear = False
+        if retry_full.strip():
+            # Check if the retry was actually a full rewrite (attempted == 0)
+            _retry_full_rewrite = _patch_summary and _patch_summary.get("attempted", 0) == 0
+            if _retry_full_rewrite:
+                _rw_code_str = ""
+                _rw_lang_str = _real_file_lang
+                _rw_blocks = extract_code_blocks(retry_full)
+                if _rw_blocks:
+                    _rw_lang_str, _rw_code_str = max(_rw_blocks, key=lambda b: len(b[1]))
+                else:
+                    # Model forgot fences, detect raw code block
+                    _raw_lines = retry_full.splitlines()
+                    _code_lines = [l for l in _raw_lines if not l.strip().startswith("<think>") and not l.strip().startswith("</think>")]
+                    _rw_code_str = "\n".join(_code_lines)
+                    
+                _new_len = len(_rw_code_str.strip().split('\n'))
+                _orig_len = len(_real_file_code.strip().split('\n')) if _real_file_code else 0
+                
+                _is_valid_retry = True
+                if _orig_len > 10 and _new_len < _orig_len * 0.5:
+                    _is_valid_retry = False
+                elif _orig_len <= 10 and _orig_len > 0 and _new_len < 2:
+                    _is_valid_retry = False
+                    
+                if _is_valid_retry:
+                    full = f"\n```{_rw_lang_str}\n{_rw_code_str}\n```\n"
+                    yield {"type": "clear"}
+                    yield {"type": "token", "content": full}
+                else:
+                    logger.warning(f"[Simple Coding] Retry full rewrite was suspiciously small ({_new_len} vs {_orig_len}). Rejecting hallucination.")
+                    _force_nuclear = True
+            else:
+                full = retry_full
+                # It was a patch, we need to yield it since we buffered it silently
+                yield {"type": "clear"}
+                yield {"type": "token", "content": full}
+
+        # ── Nuclear fallback: retry patches ALSO failed ──────────────────────
+        # Both attempts produced SEARCH text that didn't match the real file.
+        # At this point continuing to patch is futile — ask for a full rewrite
+        # so the user gets an actually-modified file instead of the original.
+        _retry_also_failed = _force_nuclear or (
+            _patch_summary
+            and _patch_summary.get("applied", 0) == 0
+            and _patch_summary.get("failed", 0) > 0
+        )
+        if _retry_also_failed and _real_file_code:
+            logger.warning("[Simple Coding] Retry patches also failed — falling back to full rewrite.")
+            yield {"type": "clear"}
+            yield {"type": "status", "content": "Switching to full rewrite..."}
+            _rewrite_instruction = (
+                f"Your SEARCH/REPLACE patches keep failing. "
+                f"Instead, output the COMPLETE modified file as a single ```{_real_file_lang} code block. "
+                f"Apply this change to the file: {user_query}\n\n"
+                f"Current file:\n```{_real_file_lang}\n{_real_file_code}\n```\n\n"
+                f"Output the entire modified file now — do not use SEARCH/REPLACE."
+            )
+            rewrite_msgs = optimized + [
+                {"role": "user", "content": _rewrite_instruction}
+            ]
+            rewrite_full = ""
+            # Force the code fence open immediately so the UI renders it as code
+            yield {"type": "token", "content": f"\n```{_real_file_lang}\n"}
+            
+            _stripped_initial_fence = False
+            for ev in _stream_tokens(ModelRole.CODE, rewrite_msgs, max_tokens=8192, temperature=0.15, think_mode="show", settings=settings):
+                if ev["type"] == "patch_summary":
+                    pass
+                else:
+                    # Yield tokens so UI isn't frozen; we'll clear and format it at the end
+                    if ev["type"] == "token":
+                        content = ev["content"]
+                        if not _stripped_initial_fence:
+                            if "```" in content:
+                                content = content.replace(f"```{_real_file_lang}", "").replace("```", "")
+                                _stripped_initial_fence = True
+                            elif "python" in content.lower():
+                                content = content.replace("python", "", 1).lstrip()
+                                _stripped_initial_fence = True
+                        
+                        rewrite_full += content
+                        yield {"type": "token", "content": content}
+                    else:
+                        yield ev
             if not _keep_loaded:
                 unload_model()
-            if retry_full.strip():
-                full = retry_full
+
+            if rewrite_full.strip():
+                # Force close the code fence
+                yield {"type": "token", "content": "\n```\n"}
+                _rw_code = rewrite_full.strip()
+                rewrite_full = f"\n```{_real_file_lang}\n{_rw_code}\n```\n"
+
+                _new_len = len(_rw_code.strip().split('\n'))
+                _orig_len = len(_real_file_code.strip().split('\n')) if _real_file_code else 0
+                
+                _is_valid_nuclear = True
+                if _orig_len > 10 and _new_len < _orig_len * 0.5:
+                    _is_valid_nuclear = False
+                elif _orig_len <= 10 and _orig_len > 0 and _new_len < 2:
+                    _is_valid_nuclear = False
+                    
+                if _is_valid_nuclear:
+                    yield {"type": "clear"}
+                    yield {"type": "token", "content": rewrite_full}
+                    full = rewrite_full
+                else:
+                    logger.error(f"[Simple Coding] Nuclear fallback produced a truncated rewrite ({_new_len} vs {_orig_len}). Aborting to protect user code.")
+                    yield {"type": "clear"}
+                    yield {"type": "status", "content": "Failed to rewrite file (model output was truncated)."}
+                    yield {"type": "token", "content": "⚠️ **Error:** The model failed to generate a complete file and produced a truncated output. To protect your code, the change was aborted. Please try a more specific prompt or use complex coding mode."}
+                    full = "```error\nGeneration aborted\n```"
+
+    # ── Raw code detection: if model output has no fences but looks like code ──
+    # This catches the "plain code with no code block" issue: small models sometimes
+    # just dump code directly without markdown fences. Detect and wrap it.
+    if "```" not in full and not _force_patch and full.strip():
+        _raw_lines = [l for l in full.splitlines() if l.strip() 
+                      and not l.strip().startswith("<think>") 
+                      and not l.strip().startswith("</think>")]
+        if _raw_lines:
+            _code_indicators = sum(
+                1 for l in _raw_lines if re.match(
+                    r'^\s*(def |class |import |from |const |let |var |function |#include|<[a-zA-Z]|@\w|if |for |while |return |print\()', l
+                )
+            )
+            if _code_indicators >= max(2, len(_raw_lines) * 0.3):
+                _raw_code = "\n".join(_raw_lines)
+                _detected_lang = _detect_language(_raw_code) or "python"
+                logger.info(f"[Simple Coding] Detected raw code without fences — wrapping automatically ({_code_indicators}/{len(_raw_lines)} indicators).")
+                yield {"type": "clear"}
+                full = f"\n```{_detected_lang}\n{_raw_code}\n```\n"
+                yield {"type": "token", "content": full}
+
     if _looks_like_refusal(full) and "```" not in full:
         logger.warning(f"[Simple Coding] Model returned a refusal instead of code. Retrying once. Raw: {full[:200]!r}")
         yield {"type": "clear"}
@@ -1051,29 +1230,52 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
     has_prior_code = any(
         m.get("role") == "assistant" and extract_code_blocks(m.get("content", ""))
         for m in (history or [])
-    )
+    ) or (bool(context) and bool(extract_code_blocks(context)))
     if has_prior_code:
-        settings['_force_patch_mode'] = True
+        _model_size = (settings or {}).get("size", "tiny")
+        # Small models (1-3B params) struggle with the SEARCH/REPLACE format —
+        # they hallucinate wrong search lines, produce garbled markers, or just
+        # ignore the format entirely. For tiny/small models, prefer a full rewrite
+        # with the current file embedded for context — higher success rate.
+        _use_patch_mode = _model_size not in ("tiny", "small", "nano")
+        settings['_force_patch_mode'] = _use_patch_mode
+        
         # Extract the actual code so we can embed it right next to the user's request.
         # A 3B model struggles to recall code buried pages back in history — putting it
         # inline is the single most effective way to get a correct SEARCH/REPLACE patch.
         _prior_code = ""
         _prior_lang = "python"
-        for _m in reversed(history or []):
-            if _m.get("role") == "assistant":
-                _pblocks = extract_code_blocks(_m.get("content", ""))
-                if _pblocks:
-                    _prior_lang, _prior_code = _pblocks[-1]
-                    break
+        candidates = []
+        for _m in (history or []):
+            _pblocks = extract_code_blocks(_m.get("content", ""))
+            for lang, code in _pblocks:
+                candidates.append((lang, code))
+        if context:
+            _pblocks = extract_code_blocks(context)
+            for lang, code in _pblocks:
+                candidates.append((lang, code))
+        if candidates:
+            _prior_lang, _prior_code = max(candidates, key=lambda c: len(c[1]))
         if _prior_code:
             # Truncate extremely large files to avoid blowing context
             _display_code = _prior_code if len(_prior_code) <= 8000 else _prior_code[:8000] + "\n# ... (truncated) ..."
-            final_query += (
-                f"\n\nHere is the CURRENT file you must edit (do NOT rewrite it, only change the lines that need to change):\n"
-                f"```{_prior_lang}\n{_display_code}\n```\n\n"
-                "Output ONLY SEARCH/REPLACE patch blocks using the <<<<, ====, >>>> markers. "
-                "Do NOT rewrite the entire file."
-            )
+            if _use_patch_mode:
+                final_query += (
+                    f"\n\nHere is the CURRENT file you must edit (do NOT rewrite it, only change the lines that need to change):\n"
+                    f"```{_prior_lang}\n{_display_code}\n```\n\n"
+                    "Output ONLY SEARCH/REPLACE patch blocks using the <<<<<<< SEARCH, =======, >>>>>>> REPLACE markers. "
+                    "Do NOT rewrite the entire file."
+                )
+            else:
+                # Tiny model: give it the current file as context and ask for the
+                # modified version. More reliable than patch format for small models.
+                final_query += (
+                    f"\n\nHere is the CURRENT file:\n"
+                    f"```{_prior_lang}\n{_display_code}\n```\n\n"
+                    f"Apply the requested change to this file and output the COMPLETE modified file "
+                    f"inside a ```{_prior_lang} code block. Only change what needs to change — "
+                    f"keep everything else exactly as it was."
+                )
         else:
             final_query += (
                 "\n\n(There is an existing file from earlier in this conversation, shown above. "

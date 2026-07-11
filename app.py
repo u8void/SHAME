@@ -247,6 +247,7 @@ def chat():
 
     frontend_messages = []
     if "messages" in data:
+        logger.info(f"Frontend messages raw: {data.get('messages')}")
         try:
             frontend_messages = json.loads(data["messages"]) if isinstance(data["messages"], str) else data["messages"]
         except (json.JSONDecodeError, TypeError) as e:

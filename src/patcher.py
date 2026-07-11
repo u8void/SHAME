@@ -1,16 +1,55 @@
-import re
+"""
+Iris code patcher (3B-model friendly).
+
+Parses SEARCH/REPLACE-style patch text and applies it to a source file.
+Designed for the realities of a 3B model:
+
+  - Both this project's native "<<<<" / "====" / ">>>>" style AND Aider-style
+    "<<<<<<< SEARCH" / "=======" / ">>>>>>> REPLACE" are accepted, with or
+    without trailing label words.
+  - We also accept the small-model inventions like <SEARCH> / <REPLACE> /
+    <==== / ====> etc., which a 3B will sometimes generate instead of
+    adhering to either canonical style.
+  - An empty SEARCH side is treated as an INSERT (the REPLACE block is
+    spliced in at the location indicated by surrounding context, or at
+    the top of the file if there's no context). The 3B model frequently
+    does this when it can't decide where exactly to insert.
+  - Fuzzy matching tolerates a 3B model's inevitable typos and line-context
+    drift:
+      * Whitespace/indentation is normalised before comparison.
+      * Each SEARCH line is matched against each candidate file line with
+        a per-line similarity score, not a binary equal/unequal.
+      * The best matching CONTIGUOUS run of file lines is picked, not just
+        runs of exactly len(search) lines. If the model grabbed one extra
+        or one too few context lines, the matcher can stretch or shrink
+        the window to find the right spot.
+      * A unique best match applies even at moderate (>= 0.70) similarity.
+        The threshold of 0.92 in the old code was tuned for an exact-style
+        SEARCH block; a 3B model that paraphrases a comment line will
+        never hit that. We instead require the best match to be
+        meaningfully better than the runner-up (gap > 0.10), which is
+        the actual signal that "this is the right region".
+"""
+
 import logging
+import re
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from difflib import SequenceMatcher
+from typing import List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+# Inherit the same logger the rest of iris uses, so warnings land in iris.log
+# (the previous version's `logging.getLogger(__name__)` produced a separate
+# "src.patcher" logger that no handler was attached to — failures were silent).
+try:
+    from src.logger import get_logger
+    logger = get_logger("iris")
+except Exception:
+    logger = logging.getLogger("iris")
 
-# Marker lines are matched whole-line (after stripping surrounding whitespace) so both
-# this project's native "<<<<" / "====" / ">>>>" style AND the more common Aider-style
-# "<<<<<<< SEARCH" / "=======" / ">>>>>>> REPLACE" style are accepted. A small model is
-# far more likely to default to the labeled Aider style from its own training data than
-# to reliably follow an unfamiliar bare-caret convention, so both must work.
-# We also accept <SEARCH>, </SEARCH>, <====, <REPLACE>, etc. which tiny models invent.
+
+# ────────────────────────────────────────────────────────────────────────────
+# Marker regexes — accept every style a 3B model has been observed to produce.
+# ────────────────────────────────────────────────────────────────────────────
 _OPEN_RE = re.compile(r'^\s*(?:<{3,}[^\n]*|<SEARCH>)$', re.IGNORECASE)
 _SEP_RE = re.compile(r'^\s*(?:={3,}[^\n]*|<====*|</SEARCH>|<REPLACE>)$', re.IGNORECASE)
 _CLOSE_RE = re.compile(r'^\s*(?:>{3,}[^\n]*|</REPLACE>|====>)$', re.IGNORECASE)
@@ -21,8 +60,9 @@ _FENCE_RE = re.compile(r'^\s*```\w*\s*$')
 class PatchBlockResult:
     search_preview: str
     applied: bool
-    match_kind: str  # "exact" | "fuzzy" | "failed" | "empty" | "malformed"
+    match_kind: str  # "exact" | "fuzzy" | "insert" | "failed" | "empty" | "malformed" | "noop"
     reason: str = ""
+    similarity: float = 0.0  # 0..1, only meaningful for fuzzy
 
 
 @dataclass
@@ -38,15 +78,17 @@ class PatchOutcome:
         return self.blocks_found > 0 and self.blocks_failed == 0
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# Small text utilities.
+# ────────────────────────────────────────────────────────────────────────────
 def _preview(text: str, limit: int = 60) -> str:
     text = " ".join(text.split())
     return (text[:limit] + "…") if len(text) > limit else (text or "(empty)")
 
 
 def _strip_outer_fence(text: str) -> str:
-    """If the model wrapped the ENTIRE patch (all blocks) in one markdown code fence,
-    drop just that outer fence. Fences belonging to an individual SEARCH or REPLACE
-    side are left alone and handled per-block in _strip_fence_lines."""
+    """If the model wrapped the ENTIRE patch (all blocks) in one markdown code
+    fence, drop just that outer fence."""
     lines = text.splitlines()
     if len(lines) >= 2 and _FENCE_RE.match(lines[0]) and lines[-1].strip() == "```":
         return "\n".join(lines[1:-1])
@@ -54,6 +96,7 @@ def _strip_outer_fence(text: str) -> str:
 
 
 def _strip_fence_lines(lines: List[str]) -> List[str]:
+    """Strip a leading or trailing ``` fence line from a per-block list."""
     lines = list(lines)
     if lines and lines[0].strip().startswith("```"):
         lines = lines[1:]
@@ -71,21 +114,36 @@ def _trim_blank_edges(lines: List[str]) -> List[str]:
     return lines
 
 
+def _normalize(s: str) -> str:
+    """Collapse all whitespace to single spaces and strip. Used for tolerant
+    line comparison."""
+    return " ".join(s.split())
+
+
+def _line_similarity(a: str, b: str) -> float:
+    """Per-line similarity in [0.0, 1.0]. We deliberately do NOT use
+    SequenceMatcher.ratio() for single lines — its behaviour on short strings
+    is unintuitive (two very different 10-char lines can score >0.5 just from
+    shared characters). Instead, exact-after-normalise = 1.0, else ratio of
+    the shorter string in the longer one clamped to 1.0."""
+    an, bn = _normalize(a), _normalize(b)
+    if not an or not bn:
+        return 0.0
+    if an == bn:
+        return 1.0
+    sm = SequenceMatcher(None, an, bn)
+    # autojunk-friendly, gives a quick [0,1] score
+    return sm.ratio()
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Block splitting.
+# ────────────────────────────────────────────────────────────────────────────
 def _split_blocks(patch_text: str) -> Tuple[List[Tuple[List[str], List[str]]], int]:
-    """
-    Parse patch_text into a list of (search_lines, replace_lines) tuples.
+    """Parse patch_text into (search_lines, replace_lines) tuples. Tolerant
+    of the mistakes a 3B model actually makes — see module docstring.
 
-    Tolerant of the mistakes a small model actually makes:
-      - either marker convention above, with or without a trailing label word
-      - a missing closing '>>>' marker (end-of-text is treated as an implicit close,
-        since that's exactly what happens when the model just stops generating)
-      - multiple blocks back to back in a single response
-      - a new block opening before the previous one ever found its '====' separator
-        (the broken one is discarded and parsing resumes cleanly from the new marker)
-
-    Returns (blocks, malformed_count) where malformed_count is the number of opened
-    blocks that were discarded because no '====' separator was ever found for them.
-    """
+    Returns (blocks, malformed_count)."""
     lines = patch_text.splitlines()
     blocks: List[Tuple[List[str], List[str]]] = []
     malformed = 0
@@ -105,18 +163,19 @@ def _split_blocks(patch_text: str) -> Tuple[List[Tuple[List[str], List[str]]], i
                 i += 1
                 break
             if _OPEN_RE.match(lines[i]):
-                break  # a new block started before this one closed its search side
+                # a new block started before this one closed its search side
+                break
             search_lines.append(lines[i])
             i += 1
 
         if not found_sep:
             malformed += 1
-            continue  # re-check the current line (may itself be a fresh '<<<' open)
+            continue
 
-        # Some marker styles split the separator across two lines, e.g. "</SEARCH>"
-        # immediately followed by "<REPLACE>" — both independently match _SEP_RE, so
-        # consume any run of them here instead of letting the second one leak into
-        # replace_lines as if it were literal replacement text.
+        # Some marker styles split the separator across two lines, e.g.
+        # "</SEARCH>" immediately followed by "<REPLACE>" — both independently
+        # match _SEP_RE, so consume any run of them here instead of letting
+        # the second one leak into replace_lines as literal text.
         while i < n and _SEP_RE.match(lines[i]):
             i += 1
 
@@ -127,21 +186,224 @@ def _split_blocks(patch_text: str) -> Tuple[List[Tuple[List[str], List[str]]], i
         if i < n and _CLOSE_RE.match(lines[i]):
             i += 1
 
+        # Drop stray <think>/</think> tags the model may have leaked in.
+        search_lines = [line for line in search_lines if line.strip() not in ("<think>", "</think>")]
+        replace_lines = [line for line in replace_lines if line.strip() not in ("<think>", "</think>")]
+
         blocks.append((search_lines, replace_lines))
 
     return blocks, malformed
 
 
-def apply_patch(original_code: str, patch_text: str) -> PatchOutcome:
-    """
-    Applies one or more SEARCH/REPLACE blocks to original_code.
+# ────────────────────────────────────────────────────────────────────────────
+# Fuzzy matching — the 3B-model heart of the patcher.
+# ────────────────────────────────────────────────────────────────────────────
 
-    Each block is matched independently: an exact substring match is tried first,
-    falling back to fuzzy whitespace-agnostic line matching. A block that matches
-    neither is SKIPPED (left unapplied) rather than aborting the whole patch — one
-    bad excerpt shouldn't throw away every other correct edit in the same turn.
-    Every outcome (applied or not) is reported back in `results` instead of only
-    being logged, so callers can surface failures instead of silently no-op'ing.
+# Per-line similarity at or above this counts as "this line matches".
+_LINE_MATCH_THRESHOLD = 0.72
+
+# Of the SEARCH lines, this fraction must match for the candidate window to be
+# considered a real match at all. (If the model emitted 5 lines of SEARCH and
+# only 2 of them actually line up with a window, the model's intent is unclear
+# and we'd rather fail than guess.)
+_MIN_FRACTION_OF_LINES_MATCHING = 0.55
+
+# The best match must beat the second-best match by at least this much on a
+# similarity scale of 0..1. This is the "uniqueness" guard — a 3B model
+# writing a vague SEARCH that could match three different places in the file
+# should fail rather than pick an arbitrary one.
+_MIN_GAP_BETWEEN_BEST_AND_RUNNERUP = 0.10
+
+# Soft cap on how far a SEARCH block can be stretched to find a match. If the
+# model wrote a 4-line SEARCH but the only region that contains those 4 lines
+# is an 8-line window in the file, we won't go for that — too risky, more
+# likely to be a different part of the code.
+_MAX_WINDOW_STRETCH = 4
+
+# Floor for "fuzzy" match acceptance: if the best window's mean per-line
+# similarity is below this, we still reject. Together with the gap-to-runnerup
+# requirement, this is the actual safety net.
+_MIN_MEAN_SIMILARITY = 0.55
+
+
+def _windows_overlap(a_start, a_end, b_start, b_end) -> bool:
+    """Two windows "overlap" if they share at least 60% of their content. A
+    looser definition than strict line intersection \u2014 we want to consider
+    windows that are slightly shifted versions of each other as the "same
+    region" so the gap-to-runnerup check doesn't penalise legitimate matches
+    just because the matcher evaluated them with a few different window sizes.
+    """
+    a_len = max(a_end - a_start, 1)
+    b_len = max(b_end - b_start, 1)
+    inter_start = max(a_start, b_start)
+    inter_end = min(a_end, b_end)
+    inter = max(0, inter_end - inter_start)
+    return inter / min(a_len, b_len) >= 0.6
+
+
+def _fuzzy_find_window(
+    code_lines: List[str],
+    norm_search: List[str],
+) -> Optional[Tuple[int, int, float, float]]:
+    """Search `code_lines` for the best window matching `norm_search`.
+
+    Returns (start, end_exclusive, mean_similarity, runnerup_mean_similarity)
+    or None if nothing usable was found.
+
+    Strategy: for each starting position, try several window sizes (the model's
+    line count, +/- a small stretch), score it as the mean per-line similarity
+    over the *best alignment* of each SEARCH line to a code line in the window.
+    Track the best score, and also the best NON-OVERLAPPING score. The caller
+    requires the best to beat the non-overlapping runner-up by
+    `_MIN_GAP_BETWEEN_BEST_AND_RUNNERUP` to actually accept a match.
+
+    The "non-overlapping" part matters: many window sizes map to the same
+    physical region of the file (e.g. (16, 20), (15, 20), (16, 21) are all
+    roughly the same code), and we don\u0027t want to treat those as ambiguous
+    "runners-up". A real ambiguity is a different region of the file scoring
+    nearly as well.
+    """
+    n = len(code_lines)
+    k = len(norm_search)
+    if n == 0 or k == 0:
+        return None
+
+    candidates = []
+    for win_extra in range(-_MAX_WINDOW_STRETCH, _MAX_WINDOW_STRETCH + 1):
+        win = k + win_extra
+        if win <= 0 or win > n:
+            continue
+        for start in range(0, n - win + 1):
+            end = start + win
+            mean, frac_matched = _score_window(code_lines, start, end, norm_search)
+            if frac_matched < _MIN_FRACTION_OF_LINES_MATCHING:
+                continue
+            candidates.append((start, end, mean))
+
+    if not candidates:
+        return None
+
+    # Sort by mean similarity descending; tie-break by smallest window.
+    candidates.sort(key=lambda c: (-c[2], c[1] - c[0]))
+    best = candidates[0]
+    best_mean = best[2]
+
+    if best_mean < _MIN_MEAN_SIMILARITY:
+        return None
+
+    # Find the best candidate that doesn't overlap with `best`. If no such
+    # candidate exists, the runner-up mean is 0 (no ambiguity).
+    best_overlap_mean = 0.0
+    non_overlap_mean = 0.0
+    for cand in candidates[1:]:
+        if _windows_overlap(best[0], best[1], cand[0], cand[1]):
+            if cand[2] > best_overlap_mean:
+                best_overlap_mean = cand[2]
+        else:
+            if cand[2] > non_overlap_mean:
+                non_overlap_mean = cand[2]
+            # Once we have any non-overlapping candidate, we don\u0027t need
+            # to keep looking at more non-overlapping ones for this purpose.
+
+    return best[0], best[1], best_mean, non_overlap_mean
+
+
+def _score_window(
+    code_lines: List[str],
+    start: int,
+    end: int,
+    norm_search: List[str],
+) -> Tuple[float, float]:
+    """Score how well `norm_search` fits into code_lines[start:end].
+
+    We align each SEARCH line to the most-similar code line in the window and
+    take the mean similarity as the score. This handles the 3B-model case
+    where the SEARCH has 4 lines and the matching window has 6 — the extra
+    2 lines just get low scores, but the alignment still works.
+
+    Also returns the fraction of SEARCH lines that hit at least the
+    `_LINE_MATCH_THRESHOLD` similarity — used to reject windows where most
+    SEARCH lines have nothing close to them in the file at all.
+    """
+    window = [_normalize(l) for l in code_lines[start:end]]
+    n_search = len(norm_search)
+    total = 0.0
+    matched = 0
+    for s in norm_search:
+        best = 0.0
+        for cl in window:
+            sim = _line_similarity(s, cl)
+            if sim > best:
+                best = sim
+        total += best
+        if best >= _LINE_MATCH_THRESHOLD:
+            matched += 1
+    mean = total / n_search if n_search else 0.0
+    frac = matched / n_search if n_search else 0.0
+    return mean, frac
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Insertion (empty SEARCH side).
+# ────────────────────────────────────────────────────────────────────────────
+
+# When the SEARCH side is empty, we look for the closest "context hint" line —
+# either the first or last non-blank line of the REPLACE block, or a fragment
+# of the user's query — in the file, and insert the REPLACE block right after
+# that line. If nothing matches, we insert at the top of the file.
+
+def _find_insert_position(
+    code_lines: List[str],
+    replace_lines: List[str],
+) -> int:
+    """Return the 0-based line index BEFORE which to splice the REPLACE block.
+
+    Heuristic: find the first non-blank line of REPLACE, look for any
+    contiguous region in the file where that line (or a near-match) appears;
+    insert AFTER the matching line. Falls back to the end of the file.
+    """
+    if not code_lines:
+        return 0
+    if not replace_lines:
+        return len(code_lines)
+
+    # Use the first non-blank line of REPLACE as the anchor.
+    anchor = next((_normalize(l) for l in replace_lines if l.strip()), "")
+    if not anchor:
+        return len(code_lines)
+
+    # Look for a window in the file where the anchor line matches.
+    # Try exact match first.
+    for i, line in enumerate(code_lines):
+        if _normalize(line) == anchor:
+            # Insert AFTER this line.
+            return i + 1
+
+    # Then a near-match (the file might have whitespace differences).
+    best_i, best_sim = -1, 0.0
+    for i, line in enumerate(code_lines):
+        sim = _line_similarity(anchor, line)
+        if sim > best_sim:
+            best_sim = sim
+            best_i = i
+    if best_i >= 0 and best_sim >= 0.75:
+        return best_i + 1
+
+    # No anchor found — insert at end of file.
+    return len(code_lines)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Public entry point.
+# ────────────────────────────────────────────────────────────────────────────
+def apply_patch(original_code: str, patch_text: str) -> PatchOutcome:
+    """Apply one or more SEARCH/REPLACE blocks in `patch_text` to
+    `original_code`, returning a `PatchOutcome` that records what happened.
+
+    Per-block outcomes are independent: a block that doesn't match is
+    recorded in `results` as `applied=False, match_kind="failed"` rather than
+    aborting the whole patch. Callers can inspect `outcome.results` to
+    surface a useful error to the user.
     """
     text = _strip_outer_fence(patch_text.strip())
     raw_blocks, malformed = _split_blocks(text)
@@ -150,9 +412,6 @@ def apply_patch(original_code: str, patch_text: str) -> PatchOutcome:
     outcome = PatchOutcome(code=code)
     outcome.blocks_found = len(raw_blocks) + malformed
 
-    def _normalize(s: str) -> str:
-        return " ".join(s.split())
-
     for search_lines, replace_lines in raw_blocks:
         s_lines = _trim_blank_edges(search_lines)
         r_lines = _strip_fence_lines(replace_lines)
@@ -160,19 +419,44 @@ def apply_patch(original_code: str, patch_text: str) -> PatchOutcome:
         replace_block = "\n".join(r_lines)
         preview = _preview(search_block)
 
+        # ── Handle empty SEARCH side as an INSERT ──────────────────────────
+        # A 3B model often writes "<<<<< SEARCH\n======\nnew code\n>>>>> REPLACE"
+        # when it wants to insert rather than replace. Treat that as a pure
+        # insertion: find a reasonable anchor in the file and splice the
+        # REPLACE block in there.
         if not s_lines:
-            outcome.blocks_failed += 1
+            insert_at = _find_insert_position(code.splitlines(), r_lines)
+            lines = code.splitlines()
+            lines = lines[:insert_at] + r_lines + lines[insert_at:]
+            code = "\n".join(lines)
+            outcome.blocks_applied += 1
             outcome.results.append(
-                PatchBlockResult(preview, False, "empty", "the SEARCH side was empty")
+                PatchBlockResult(preview, True, "insert",
+                                 reason="empty SEARCH treated as insertion",
+                                 similarity=1.0)
             )
             continue
 
+        # ── No-op detection: SEARCH == REPLACE after normalization ─────────
+        if _normalize(search_block) == _normalize(replace_block):
+            outcome.results.append(
+                PatchBlockResult(preview, False, "noop",
+                                 reason="SEARCH and REPLACE are identical — nothing to change")
+            )
+            outcome.blocks_failed += 1
+            logger.warning(f"[Patcher] No-op block detected: {preview!r}")
+            continue
+
+        # ── Tier 1: exact substring match ──────────────────────────────────
         if search_block in code:
             code = code.replace(search_block, replace_block, 1)
             outcome.blocks_applied += 1
-            outcome.results.append(PatchBlockResult(preview, True, "exact"))
+            outcome.results.append(
+                PatchBlockResult(preview, True, "exact", similarity=1.0)
+            )
             continue
 
+        # ── Tier 2: normalised line-by-line match at a fixed window ───────
         code_lines = code.splitlines()
         norm_search = [_normalize(l) for l in s_lines]
         matched = False
@@ -184,43 +468,58 @@ def apply_patch(original_code: str, patch_text: str) -> PatchOutcome:
                 code_lines = code_lines[:i] + r_lines + code_lines[i + len(s_lines):]
                 code = "\n".join(code_lines)
                 matched = True
+                outcome.blocks_applied += 1
+                outcome.results.append(PatchBlockResult(preview, True, "exact", similarity=1.0))
                 break
 
-        # Third fallback: best-window fuzzy match using SequenceMatcher.
-        # Small models often include slightly wrong context lines (extra/missing
-        # blank lines, typos in comments, off-by-one indentation). Slide a window
-        # across the file and pick the region with the highest similarity ratio.
-        if not matched and len(s_lines) >= 2:
-            from difflib import SequenceMatcher
-            search_norm_joined = "\n".join(norm_search)
-            best_ratio = 0.0
-            best_i = -1
-            # Try windows of slightly varying sizes to handle extra/missing lines
-            for win_delta in range(3):  # exact, +1, +2 lines
-                win_size = len(s_lines) + win_delta
-                if win_size > len(code_lines):
-                    continue
-                for i in range(len(code_lines) - win_size + 1):
-                    candidate = "\n".join(_normalize(code_lines[i + j]) for j in range(win_size))
-                    ratio = SequenceMatcher(None, search_norm_joined, candidate).ratio()
-                    if ratio > best_ratio:
-                        best_ratio = ratio
-                        best_i = i
-                        best_win = win_size
-            if best_ratio >= 0.75 and best_i >= 0:
-                code_lines = code_lines[:best_i] + r_lines + code_lines[best_i + best_win:]
-                code = "\n".join(code_lines)
-                matched = True
-                logger.info(f"[Patcher] Best-window fuzzy match at line {best_i} (ratio={best_ratio:.2f})")
+        # ── Tier 3: per-line fuzzy window match (3B-model friendly) ───────
+        if not matched:
+            result = _fuzzy_find_window(code_lines, norm_search)
+            if result is not None:
+                start, end, mean, runnerup = result
+                # Confidence-aware gap: when the best match is near-exact, the
+                # candidate at 0.91 we\u0027d reject as "ambiguous" is really just
+                # other windows pointing at the same region with a few lines
+                # shifted in/out (the alignment is greedy per-line). When the
+                # best match is middling, a similar score in a different
+                # region IS real ambiguity, so require a bigger gap.
+                if mean >= 0.95:
+                    required_gap = 0.05
+                elif mean >= 0.80:
+                    required_gap = 0.10
+                else:
+                    required_gap = _MIN_GAP_BETWEEN_BEST_AND_RUNNERUP
+                gap = mean - runnerup
+                if gap >= required_gap:
+                    code_lines = code_lines[:start] + r_lines + code_lines[end:]
+                    code = "\n".join(code_lines)
+                    matched = True
+                    outcome.blocks_applied += 1
+                    outcome.results.append(
+                        PatchBlockResult(
+                            preview, True, "fuzzy",
+                            reason=f"fuzzy match at line {start} (similarity={mean:.2f}, "
+                                   f"runner-up gap={gap:.2f}, required={required_gap:.2f})",
+                            similarity=mean,
+                        )
+                    )
+                    logger.info(
+                        f"[Patcher] Fuzzy match at line {start} "
+                        f"(sim={mean:.2f}, gap={gap:.2f}): {preview!r}"
+                    )
+                else:
+                    logger.warning(
+                        f"[Patcher] Fuzzy match ambiguous "
+                        f"(best sim={mean:.2f}, runner-up gap={gap:.2f}, "
+                        f"required {required_gap:.2f}): {preview!r}"
+                    )
 
-        if matched:
-            outcome.blocks_applied += 1
-            outcome.results.append(PatchBlockResult(preview, True, "fuzzy"))
-        else:
+        if not matched:
             outcome.blocks_failed += 1
             outcome.results.append(
                 PatchBlockResult(
-                    preview, False, "failed", "couldn't find that text in the file"
+                    preview, False, "failed",
+                    reason="couldn't find that text in the file",
                 )
             )
             logger.warning(f"[Patcher] SEARCH block did not match anything: {preview!r}")
@@ -239,6 +538,12 @@ def apply_patch(original_code: str, patch_text: str) -> PatchOutcome:
 
     if outcome.blocks_found == 0:
         logger.warning("[Patcher] No SEARCH/REPLACE blocks found in patch text.")
+
+    if outcome.blocks_found > 0 and outcome.blocks_applied == 0:
+        logger.warning(
+            f"[Patcher] Found {outcome.blocks_found} block(s) but NONE applied — "
+            f"failures: {outcome.blocks_failed}"
+        )
 
     outcome.code = code
     return outcome

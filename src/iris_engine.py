@@ -1602,12 +1602,14 @@ def _stream_tokens(
         # shared by REASONING/GENERAL/MATH too, and a leftover code block from an earlier
         # coding turn (or one the user themselves pasted in) sitting in history must not
         # make some later, unrelated answer eligible for "<<<" being misread as a patch.
-        for _msg in reversed(full_messages):
-            if _msg.get("role") == "assistant":
+        candidates = []
+        for _msg in full_messages:
+            if _msg.get("role") in ("assistant", "user"):
                 _blocks = extract_code_blocks(_msg.get("content", ""))
-                if _blocks:
-                    base_lang, base_code = _blocks[-1]
-                    break
+                for lang, code in _blocks:
+                    candidates.append((lang, code))
+        if candidates:
+            base_lang, base_code = max(candidates, key=lambda c: len(c[1]))
 
     in_patch = False
     patch_buffer = ""
@@ -1928,9 +1930,18 @@ def _stream_tokens(
                 idx = _open_match.start()
                 if idx > 0:
                     pre_patch_text = buffer[:idx]
-                    # Strip orphaned code fences that would create empty code blocks
-                    pre_patch_text = re.sub(r'```+\s*```+', '', pre_patch_text)
-                    pre_patch_text = re.sub(r'^\s*```\w*\s*$', '', pre_patch_text, flags=re.MULTILINE)
+                    # Only strip truly empty/orphaned fences — don't touch valid
+                    # code-fence pairs that happen to precede a patch block.
+                    # 1) Collapse adjacent empty fences (```   ```) to nothing
+                    pre_patch_text = re.sub(r'```\s*```', '', pre_patch_text)
+                    # 2) If after stripping we have an *unpaired* trailing fence (odd count),
+                    #    remove just that last orphaned one — it was auto-closed by the model
+                    #    and leaving it in creates a broken half-block.
+                    fence_count = len(re.findall(r'```', pre_patch_text))
+                    if fence_count % 2 != 0:
+                        last_fence = pre_patch_text.rfind('```')
+                        if last_fence != -1:
+                            pre_patch_text = pre_patch_text[:last_fence] + pre_patch_text[last_fence+3:]
                     pre_patch_text = pre_patch_text.strip()
                     if pre_patch_text:
                         yield {"type": "token", "content": pre_patch_text}
@@ -1970,6 +1981,7 @@ def _stream_tokens(
                     # it, feed it back through the normal buffer on the next iteration.
                     leftover = patch_buffer[idx:]
 
+                    old_code_before_block = base_code
                     outcome = apply_patch(base_code, final_patch)
                     # Cumulative: a second (or third...) block later this turn patches
                     # the already-patched file, not the original pre-edit one.
@@ -1984,14 +1996,21 @@ def _stream_tokens(
                                 "content": f"An edit didn't apply ({r.reason}): \"{r.search_preview}\"",
                             }
 
-                    patched_output = f"\n```{base_lang}\n{outcome.code}\n```\n"
-                    
-                    # Yield in chunks to prevent frontend markdown parser from glitching
-                    chunk_size = 50
-                    for i in range(0, len(patched_output), chunk_size):
-                        yield {"type": "token", "content": patched_output[i:i+chunk_size]}
-                        
-                    loop_content += patched_output
+                    # Only emit the updated code if it ACTUALLY changed. Emitting
+                    # the same code the user already has is confusing and looks
+                    # like the patcher "didn't work" or "sent the same thing."
+                    code_changed = outcome.blocks_applied > 0 and outcome.code != old_code_before_block
+                    if code_changed:
+                        patched_output = f"\n```{base_lang}\n{outcome.code}\n```\n"
+                        # Yield in chunks to prevent frontend markdown parser from glitching
+                        chunk_size = 50
+                        for i in range(0, len(patched_output), chunk_size):
+                            yield {"type": "token", "content": patched_output[i:i+chunk_size]}
+                        loop_content += patched_output
+                    elif outcome.blocks_applied == 0 and outcome.blocks_failed > 0:
+                        # Emit a visible note that the patch failed so user knows
+                        yield {"type": "token", "content": f"\n> ⚠️ Patch could not be applied — the lines the model tried to change weren\'t found in the current file. You may need to ask again with more context.\n\n"}
+                        loop_content += f"\n> ⚠️ Patch could not be applied — the lines the model tried to change weren\'t found in the current file.\n\n"
                     in_patch = False
                     patch_buffer = ""
 
@@ -2017,9 +2036,11 @@ def _stream_tokens(
                         break
 
                     buffer = leftover
-                    # Strip orphaned code fences from leftover text after patch
+                    # Only strip truly empty fence pairs from leftover text.
+                    # A single ``` might be the start of the model's next code
+                    # block (e.g. explanation before showing the updated file).
                     if buffer:
-                        buffer = re.sub(r'^\s*```\w*\s*$', '', buffer, flags=re.MULTILINE).strip()
+                        buffer = re.sub(r'```\s*```', '', buffer).strip()
                 continue
             if think_mode == "hide":
                 while True:
@@ -2241,6 +2262,7 @@ def _stream_tokens(
             # truncation. On real truncation (finish_reason == "length") we deliberately
             # leave in_patch/patch_buffer untouched so the next loop_idx keeps appending
             # to this SAME block below, instead of us finalizing half of it right now.
+            old_code_before_final = base_code
             outcome = apply_patch(base_code, patch_buffer)
             base_code = outcome.code
             patches_applied_this_turn += outcome.blocks_applied
@@ -2251,9 +2273,14 @@ def _stream_tokens(
                         "type": "text",
                         "content": f"An edit didn't apply ({r.reason}): \"{r.search_preview}\"",
                     }
-            patched_output = f"\n```{base_lang}\n{outcome.code}\n```\n"
-            yield {"type": "token", "content": patched_output}
-            loop_content += patched_output
+            code_changed = outcome.blocks_applied > 0 and outcome.code != old_code_before_final
+            if code_changed:
+                patched_output = f"\n```{base_lang}\n{outcome.code}\n```\n"
+                yield {"type": "token", "content": patched_output}
+                loop_content += patched_output
+            elif outcome.blocks_applied == 0 and outcome.blocks_failed > 0:
+                yield {"type": "token", "content": "\n> ⚠️ Patch could not be applied.\n\n"}
+                loop_content += "\n> ⚠️ Patch could not be applied.\n\n"
             in_patch = False
             patch_buffer = ""
             buffer = ""
@@ -2297,7 +2324,7 @@ def _stream_tokens(
                     from src.iris_pro import verify_code_syntax
 
                     blocks = re.findall(r"```(\w*)\n(.*?)```", loop_content, re.DOTALL)
-                    if blocks:
+                    if blocks and patches_failed_this_turn == 0:
                         lang, code = blocks[-1]
                         err = verify_code_syntax(code, lang)
                         if err is not None:
