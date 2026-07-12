@@ -904,6 +904,58 @@ def resolve_roles(train_role: List[str]) -> List[str]:
             resolved.append(r)
     return resolved
 
+def ensure_chat_template(model_dir: str):
+    import json
+    config_path = os.path.join(model_dir, "tokenizer_config.json")
+    if not os.path.exists(config_path):
+        return
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        
+        if "chat_template" in cfg and cfg["chat_template"]:
+            return
+            
+        # Check if Llama 3 special tokens are used
+        is_llama3 = False
+        vocab_path = os.path.join(model_dir, "tokenizer.json")
+        if os.path.exists(vocab_path):
+            with open(vocab_path, "r", encoding="utf-8") as f:
+                vocab_content = f.read()
+                if "<|start_header_id|>" in vocab_content:
+                    is_llama3 = True
+        
+        if is_llama3:
+            # Llama 3 Chat Template
+            template = (
+                "{% set loop_messages = messages %}"
+                "{% for message in loop_messages %}"
+                "{% set content = '<|start_header_id|>' + message['role'] + '<|end_header_id|>\\n\\n' + message['content'] | trim + '<|eot_id|>' %}"
+                "{% if loop.first %}{% set content = bos_token + content %}{% endif %}"
+                "{{ content }}"
+                "{% endfor %}"
+                "{% if add_generation_prompt %}"
+                "{{ '<|start_header_id|>assistant<|end_header_id|>\\n\\n' }}"
+                "{% endif %}"
+            )
+        else:
+            # Default ChatML Template (Hermes, Qwen, DeepSeek, etc.)
+            template = (
+                "{% for message in messages %}"
+                "{{ '<|im_start|>' + message['role'] + '\\n' + message['content'] + '<|im_end|>' + '\\n' }}"
+                "{% endfor %}"
+                "{% if add_generation_prompt %}"
+                "{{ '<|im_start|>assistant\\n' }}"
+                "{% endif %}"
+            )
+            
+        cfg["chat_template"] = template
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+        print(f"[INFO] Injected chat_template into {config_path}")
+    except Exception as e:
+        print(f"[WARNING] Failed to ensure chat_template in {model_dir}: {e}")
+
 def ensure_training_subdirs():
     subdirs = {
         "training/coding": "Place coding tutorials, code examples, debugging guides, and programming Q&A here.",
@@ -1155,6 +1207,8 @@ def main():
                             base_model = cuda_4bit_map[base_model]
         
         args.model = base_model
+        if os.path.isdir(base_model):
+            ensure_chat_template(base_model)
         
         # Keep --output-dir if provided by the user, otherwise construct it from --base-dir
         if not hasattr(args, "_original_output_dir"):

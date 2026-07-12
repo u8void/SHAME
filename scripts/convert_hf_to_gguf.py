@@ -1345,6 +1345,17 @@ class TextModel(ModelBase):
             res = "qwen2"
 
         if res is None:
+            # Fallback based on model type or architectures
+            model_type = self.hparams.get("model_type")
+            arches = self.hparams.get("architectures", [])
+            if model_type == "qwen2" or any("Qwen2" in arch for arch in arches):
+                res = "qwen2"
+                logger.info(f"Fell back to 'qwen2' pre-tokenizer based on model metadata (type={model_type}, architectures={arches})")
+            elif model_type == "llama" or any("Llama" in arch for arch in arches):
+                res = "llama-bpe"
+                logger.info(f"Fell back to 'llama-bpe' pre-tokenizer based on model metadata (type={model_type}, architectures={arches})")
+
+        if res is None:
             logger.warning("\n")
             logger.warning("**************************************************************************************")
             logger.warning("** WARNING: The BPE pre-tokenizer was not recognized!")
