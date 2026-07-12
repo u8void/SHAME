@@ -2,10 +2,10 @@
 
 torch>=2.0.0
 transformers>=4.40.0
-datasets==4.8.5
-flask==3.1.3
+datasets>=4.8.5
+flask>=3.1.3
 pyngrok
-tqdm==4.67.3
+tqdm>=4.67.3
 gguf>=0.10.0
 numpy>=1.24.0,<2.1.0
 peft 
