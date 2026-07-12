@@ -807,7 +807,7 @@ def merge_and_save(base_model_id: str, adapter_dir: str, out_dir: str):
     tokenizer.save_pretrained(out_dir)
 
 
-def convert_to_gguf(hf_adapter_dir: str, role: str, base_model_id: str, is_mlx: bool, quant_type: str = "q4_k_m") -> str:
+def convert_to_gguf(hf_adapter_dir: str, role: str, base_model_id: str, is_mlx: bool, quant_type: str = "q4_k_m", base_dir: str = ".") -> str:
     convert_script = None
     for candidate in [
         "./scripts/convert_hf_to_gguf.py",
@@ -835,8 +835,8 @@ def convert_to_gguf(hf_adapter_dir: str, role: str, base_model_id: str, is_mlx: 
         else:
             merge_and_save(base_model_id, hf_adapter_dir, temp_dir)
 
-        os.makedirs("./models", exist_ok=True)
-        f16_gguf = f"./models/iris_{ROLE_NUMBERS.get(role, role)}_f16.gguf"
+        os.makedirs(f"{base_dir}/models", exist_ok=True)
+        f16_gguf = f"{base_dir}/models/iris_{ROLE_NUMBERS.get(role, role)}_f16.gguf"
         print(f"[GGUF] Converting merged model to F16 GGUF...")
         convert_cmd = [
             "python3", convert_script, temp_dir,
@@ -846,7 +846,7 @@ def convert_to_gguf(hf_adapter_dir: str, role: str, base_model_id: str, is_mlx: 
         subprocess.run(convert_cmd, check=True)
 
         quant_type_upper = quant_type.upper()
-        final_gguf = f"./models/iris_{ROLE_NUMBERS.get(role, role)}.gguf"
+        final_gguf = f"{base_dir}/models/iris_{ROLE_NUMBERS.get(role, role)}.gguf"
 
         if quant_type_upper == "F16":
             os.rename(f16_gguf, final_gguf)
@@ -1216,7 +1216,8 @@ def main():
                     role=role,
                     base_model_id=base_model,
                     is_mlx=(target == "mps"),
-                    quant_type=args.quant_type
+                    quant_type=args.quant_type,
+                    base_dir=args.base_dir
                 )
             else:
                 print(f"[INFO] GGUF model {final_gguf} already exists and matches base model. Skipping GGUF conversion.")
