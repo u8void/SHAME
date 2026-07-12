@@ -662,11 +662,12 @@ def run_torch_path(args, device_type: str, role: str):
     eval_dataset = ChatDataset(eval_pairs, tokenizer, args.max_seq_length)
 
     if device_type == "cuda":
+        compute_dtype = torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) else torch.float16
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True, 
             bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.bfloat16
+            bnb_4bit_compute_dtype=compute_dtype
         )
         local_rank = int(os.environ.get("LOCAL_RANK", -1))
         device_map = {"": local_rank} if local_rank != -1 else "auto"
