@@ -125,7 +125,7 @@ Edit `config/datasets.json` to control which datasets each role trains on:
 
 | Role | Training Directories |
 |------|---------------------|
-| Triage | `training/general`, `training/shared` |
+| Triage | `training/triage`, `training/shared` |
 | Router | `training/control`, `training/shared` |
 | Control | `training/control`, `training/shared` |
 | Math | `training/math`, `training/shared` |
@@ -151,12 +151,15 @@ training/
 │   ├── reasoning_examples.md      # Action reasoning
 │   └── ...
 ├── math/             # Math & algorithms
+├── triage/           # Triage query routing
+│   ├── triage_dataset.md
+│   └── ...
 ├── general/          # General knowledge
-│   ├── triage_prompt_engineer.md  # Triage classification
 │   ├── chat_*.md                  # Conversational data
 │   └── ...
 ├── control/          # PC controller actions
 │   └── control.md
+...
 └── shared/           # Shared across all roles
     ├── iris_identity.md
     ├── chain_of_thought.md

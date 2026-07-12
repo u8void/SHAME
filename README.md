@@ -143,7 +143,8 @@ Iris-AI/
 │   ├── coding/             # Code training data (generated_code.md, etc.)
 │   ├── reasoning/          # Reasoning training (chain_of_thought.md, etc.)
 │   ├── math/               # Math training data
-│   ├── general/            # General knowledge (triage_prompt_engineer.md, etc.)
+│   ├── triage/             # Triage routing data (triage_dataset.md, etc.)
+│   ├── general/            # General knowledge (chat_general.md, etc.)
 │   ├── control/            # PC controller training
 │   └── shared/             # Shared across all roles
 │

@@ -82,7 +82,7 @@ Web results are injected into the system prompt as context before the specialist
 
 ## Training the Triage Model
 
-The triage model is trained on `training/general/` with the `triage_prompt_engineer.md` dataset:
+The triage model is trained on `training/triage/` with the `triage_dataset.md` dataset, and on `training/shared/` with the `triage_prompt_engineer.md` dataset:
 
 ```bash
 python train.py --train-role triage --iters 2000
