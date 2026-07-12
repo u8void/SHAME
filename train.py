@@ -53,6 +53,7 @@ from src.iris_datasets import (
     load_evol_instruct_code_80k,
     load_webdev_coding_dataset,
     load_ui_reasoning,
+    load_ultrachat_200k,
 )
 
 SYSTEM_PROMPT = "You are Iris, an intelligent and helpful AI assistant trained to assist the user with their tasks."
@@ -191,6 +192,7 @@ LOADER_FUNCTIONS = {
     "ise-uiuc/Magicoder-OSS-Instruct-75K": load_magicoder_dataset,
     "nvidia/OpenCodeReasoning": load_open_code_reasoning,
     "bigcode/self-oss-instruct-sc2-exec-filter-50k": load_self_oss_instruct,
+    "HuggingFaceH4/ultrachat_200k": load_ultrachat_200k,
 }
 
 def load_generic_hf_dataset(path: str, limit: int = None) -> List[Tuple[str, str]]:
@@ -663,7 +665,7 @@ def run_torch_path(args, device_type: str, role: str):
             load_in_4bit=True, 
             bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.float16
+            bnb_4bit_compute_dtype=torch.bfloat16
         )
         model = AutoModelForCausalLM.from_pretrained(args.model, quantization_config=bnb_config, device_map="auto")
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)

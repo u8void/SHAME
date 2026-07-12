@@ -1,4 +1,5 @@
 import os
+import re
 import glob
 import json
 import random
@@ -406,6 +407,9 @@ def load_webdev_coding_dataset(subset_size=None):
 
 def load_ui_reasoning(subset_size=None):
     return _load_generic("smirki/UI_REASONING_v1.01", subset_size)
+
+def load_ultrachat_200k(subset_size=None):
+    return _load_generic("HuggingFaceH4/ultrachat_200k", subset_size, split="train_sft")
 
 
 
