@@ -687,6 +687,10 @@ def run_torch_path(args, device_type: str, role: str):
     config = LoraConfig(r=lora_r, lora_alpha=lora_r*2, target_modules="all-linear", task_type=TaskType.CAUSAL_LM)
     model = get_peft_model(model, config)
 
+    if device_type == "cuda" and getattr(model, "is_model_parallel", False) is False:
+        setattr(model, "is_model_parallel", True)
+        setattr(model, "model_parallel", True)
+
     data_collator = DataCollatorForSeq2Seq(tokenizer, model=model, padding=True)
 
     bf16_supported = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
