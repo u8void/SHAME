@@ -96,7 +96,7 @@ SIZE_CONFIG = None
 
 
 ROLE_TRAINING_DIRS = {
-    "triage":    ["training/general",   "training/shared"],
+    "triage":    ["training/triage",    "training/shared"],
     "router":    ["training/control",   "training/shared"],
     "control":   ["training/control",   "training/shared"],
     "math":      ["training/math",      "training/shared"],
@@ -883,6 +883,7 @@ def ensure_training_subdirs():
         "training/coding": "Place coding tutorials, code examples, debugging guides, and programming Q&A here.",
         "training/reasoning": "Place logic puzzles, system design documents, architecture discussions, and analytical essays here.",
         "training/math": "Place math textbook excerpts, worked problems, equation explanations, and proofs here.",
+        "training/triage": "Place triage classification prompt examples and query routing rules here.",
         "training/general": "Place general knowledge documents, conversational examples, and factual reference material here.",
         "training/control": "Place tool-use examples, JSON action schemas, and agent instruction documents here.",
         "training/shared": "Documents here are included in training for all roles."
