@@ -17,4 +17,3 @@ models/
 iris_adapters/
 .claude/
 last_request.json
-training/

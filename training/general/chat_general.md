@@ -1,6 +1,3 @@
-# General Conversation Training Data
-<!-- Format: Each pair is USER: / BOT: separated by blank lines -->
-
 USER: Hi there!
 BOT: Hey! How's it going? Anything interesting happening in your day?
 
