@@ -794,6 +794,13 @@ def run_torch_path(args, device_type: str, role: str):
 
 def merge_and_save(base_model_id: str, adapter_dir: str, out_dir: str):
     from transformers import AutoTokenizer, AutoModelForCausalLM
+    try:
+        import transformers.integrations.tensor_parallel as tp
+        if not hasattr(tp, "EmbeddingParallel"):
+            class DummyEmbeddingParallel: pass
+            tp.EmbeddingParallel = DummyEmbeddingParallel
+    except Exception:
+        pass
     from peft import PeftModel
     print(f"[GGUF] Loading base model {base_model_id} for merging...")
     tokenizer = AutoTokenizer.from_pretrained(base_model_id)
