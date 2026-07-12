@@ -10,7 +10,7 @@ accelerate
 bitsandbytes>=0.43.0
 sentence-transformers
 mlx-lm>=0.1.11; sys_platform == "darwin"
-llama-cpp-python>=0.2.75
+llama-cpp-python==0.3.33
 ddgs>=9.0.0
 kokoro-onnx
 soundfile
