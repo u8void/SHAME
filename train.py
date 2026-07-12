@@ -597,6 +597,10 @@ def run_torch_path(args, device_type: str, role: str):
     print("="*60)
 
     if device_type == "cuda":
+        local_rank = int(os.environ.get("LOCAL_RANK", -1))
+        if local_rank != -1:
+            torch.cuda.set_device(local_rank)
+            
         import gc
         gc.collect()
         torch.cuda.empty_cache()
@@ -1281,9 +1285,11 @@ def main():
                 print(f"[INFO] Worker rank {local_rank} skipping GGUF conversion (handled by rank 0).")
 
         # Clean up the converted base model to force a fresh conversion from the updated GGUF next time
-        if training_success and base_model and os.path.exists(base_model) and ("hf_base_models" in base_model or "mlx_base_models" in base_model):
-            print(f"[INFO] Cleaning up intermediate converted model at {base_model}...")
-            shutil.rmtree(base_model, ignore_errors=True)
+        local_rank = int(os.environ.get("LOCAL_RANK", -1))
+        if local_rank in [-1, 0]:
+            if training_success and base_model and os.path.exists(base_model) and ("hf_base_models" in base_model or "mlx_base_models" in base_model):
+                print(f"[INFO] Cleaning up intermediate converted model at {base_model}...")
+                shutil.rmtree(base_model, ignore_errors=True)
 
 
 def download_all_models(roles_to_train: List[str] = None):
