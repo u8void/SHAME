@@ -667,7 +667,10 @@ def run_torch_path(args, device_type: str, role: str):
             bnb_4bit_use_double_quant=True,
             bnb_4bit_compute_dtype=torch.bfloat16
         )
-        model = AutoModelForCausalLM.from_pretrained(args.model, quantization_config=bnb_config, device_map="auto")
+        local_rank = int(os.environ.get("LOCAL_RANK", -1))
+        device_map = {"": local_rank} if local_rank != -1 else "auto"
+
+        model = AutoModelForCausalLM.from_pretrained(args.model, quantization_config=bnb_config, device_map=device_map)
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
         
         # Dynamically set rank to 8 if total VRAM is less than 8GB to save memory
@@ -688,8 +691,10 @@ def run_torch_path(args, device_type: str, role: str):
     model = get_peft_model(model, config)
 
     if device_type == "cuda":
-        setattr(model, "is_model_parallel", True)
-        setattr(model, "model_parallel", True)
+        local_rank = int(os.environ.get("LOCAL_RANK", -1))
+        if local_rank == -1:
+            setattr(model, "is_model_parallel", True)
+            setattr(model, "model_parallel", True)
         if not hasattr(model, "hf_device_map"):
             base_model = getattr(model, "base_model", None)
             if base_model and hasattr(base_model, "model") and hasattr(base_model.model, "hf_device_map"):
@@ -727,7 +732,9 @@ def run_torch_path(args, device_type: str, role: str):
     )
 
     if device_type == "cuda":
-        training_args._n_gpu = 1
+        local_rank = int(os.environ.get("LOCAL_RANK", -1))
+        if local_rank == -1:
+            training_args._n_gpu = 1
 
     trainer = Trainer(
         model=model,
