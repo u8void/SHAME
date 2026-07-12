@@ -1210,17 +1210,21 @@ def main():
         if not training_success:
             print(f"[ERROR] Training failed or was aborted for role '{role}'. Skipping GGUF conversion.")
         elif not args.skip_gguf:
-            if not args.resume or not os.path.exists(final_gguf) or not gguf_matches:
-                convert_to_gguf(
-                    hf_adapter_dir=args.output_dir,
-                    role=role,
-                    base_model_id=base_model,
-                    is_mlx=(target == "mps"),
-                    quant_type=args.quant_type,
-                    base_dir=args.base_dir
-                )
+            local_rank = int(os.environ.get("LOCAL_RANK", -1))
+            if local_rank in [-1, 0]:
+                if not args.resume or not os.path.exists(final_gguf) or not gguf_matches:
+                    convert_to_gguf(
+                        hf_adapter_dir=args.output_dir,
+                        role=role,
+                        base_model_id=base_model,
+                        is_mlx=(target == "mps"),
+                        quant_type=args.quant_type,
+                        base_dir=args.base_dir
+                    )
+                else:
+                    print(f"[INFO] GGUF model {final_gguf} already exists and matches base model. Skipping GGUF conversion.")
             else:
-                print(f"[INFO] GGUF model {final_gguf} already exists and matches base model. Skipping GGUF conversion.")
+                print(f"[INFO] Worker rank {local_rank} skipping GGUF conversion (handled by rank 0).")
 
         # Clean up the converted base model to force a fresh conversion from the updated GGUF next time
         if training_success and base_model and os.path.exists(base_model) and ("hf_base_models" in base_model or "mlx_base_models" in base_model):
