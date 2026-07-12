@@ -174,6 +174,7 @@ def parse_args():
     parser.add_argument("--cleanup", action="store_true", help="Clean adapters after fusion (MLX only)")
     parser.add_argument("--num-layers", type=int, default=16, help="Layers to tune (MLX only)")
     parser.add_argument("--output-dir", default=None, help="Override output directory")
+    parser.add_argument("--base-dir", default=".", help="Base directory for outputs (e.g. /kaggle/working)")
 
     return parser.parse_args()
 
@@ -706,6 +707,9 @@ def run_torch_path(args, device_type: str, role: str):
 
     bf16_supported = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
 
+    total_steps = (len(train_dataset) // (args.batch_size * args.accum_steps)) * args.epochs
+    warmup_steps = max(10, int(total_steps * 0.05))
+
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.batch_size,
@@ -720,7 +724,7 @@ def run_torch_path(args, device_type: str, role: str):
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={'use_reentrant': False},
         lr_scheduler_type="cosine",
-        warmup_ratio=0.05,
+        warmup_steps=warmup_steps,
         eval_strategy="steps" if len(eval_dataset) > 0 else "no",
         eval_steps=100,
         save_strategy="steps",
@@ -1150,10 +1154,19 @@ def main():
                             base_model = cuda_4bit_map[base_model]
         
         args.model = base_model
-        args.output_dir = f"./iris_adapters/{role}"
+        
+        # Keep --output-dir if provided by the user, otherwise construct it from --base-dir
+        if not hasattr(args, "_original_output_dir"):
+            args._original_output_dir = args.output_dir
+            
+        if args._original_output_dir is not None and len(roles_to_train) == 1:
+            args.output_dir = args._original_output_dir
+        else:
+            args.output_dir = f"{args.base_dir}/iris_adapters/{role}"
+            
         args.md_dir = ROLE_TRAINING_DIRS[role]
 
-        final_gguf = f"./models/iris_{ROLE_NUMBERS.get(role, role)}.gguf"
+        final_gguf = f"{args.base_dir}/models/iris_{ROLE_NUMBERS.get(role, role)}.gguf"
         
         has_finished_adapter = False
         if os.path.exists(args.output_dir):
