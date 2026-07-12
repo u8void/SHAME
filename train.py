@@ -687,9 +687,15 @@ def run_torch_path(args, device_type: str, role: str):
     config = LoraConfig(r=lora_r, lora_alpha=lora_r*2, target_modules="all-linear", task_type=TaskType.CAUSAL_LM)
     model = get_peft_model(model, config)
 
-    if device_type == "cuda" and getattr(model, "is_model_parallel", False) is False:
+    if device_type == "cuda":
         setattr(model, "is_model_parallel", True)
         setattr(model, "model_parallel", True)
+        if not hasattr(model, "hf_device_map"):
+            base_model = getattr(model, "base_model", None)
+            if base_model and hasattr(base_model, "model") and hasattr(base_model.model, "hf_device_map"):
+                setattr(model, "hf_device_map", base_model.model.hf_device_map)
+            elif base_model and hasattr(base_model, "hf_device_map"):
+                setattr(model, "hf_device_map", base_model.hf_device_map)
 
     data_collator = DataCollatorForSeq2Seq(tokenizer, model=model, padding=True)
 
@@ -716,8 +722,12 @@ def run_torch_path(args, device_type: str, role: str):
         save_steps=100,
         save_total_limit=3,
         report_to="none",
-        remove_unused_columns=False
+        remove_unused_columns=False,
+        ddp_find_unused_parameters=False
     )
+
+    if device_type == "cuda":
+        training_args._n_gpu = 1
 
     trainer = Trainer(
         model=model,
