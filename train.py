@@ -4,6 +4,7 @@ import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["GGML_CUDA_NO_VMM"] = "1"
 import sys
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 import json
 import random
 import argparse
