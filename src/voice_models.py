@@ -1,5 +1,5 @@
 import os
-os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+os.environ["HF_XET_HIGH_PERFORMANCE"] = "1"
 import io
 import torch
 import numpy as np
@@ -50,7 +50,7 @@ def _download_file(url, dest):
             repo_id = parts[0]
             subparts = parts[1].split("/")
             remote_name = "/".join(subparts[1:])
-            logger.info("  [Voice] Using accelerated hf_transfer...")
+            logger.info("  [Voice] Using accelerated Xet high-performance transfer...")
             
             os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
             dl_path = hf_hub_download(repo_id=repo_id, filename=remote_name, local_dir=os.path.dirname(dest) or ".", local_dir_use_symlinks=False)

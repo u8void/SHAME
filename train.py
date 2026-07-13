@@ -4,7 +4,7 @@ import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["GGML_CUDA_NO_VMM"] = "1"
 import sys
-os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+os.environ["HF_XET_HIGH_PERFORMANCE"] = "1"
 import json
 import random
 import argparse
@@ -1417,7 +1417,7 @@ def download_all_models(roles_to_train: List[str] = None):
                     repo_id = parts[0]
                     subparts = parts[1].split("/")
                     remote_name = "/".join(subparts[1:])
-                    print("  Using accelerated hf_transfer (progress bar disabled to prevent deadlocks)...")
+                    print("  Using accelerated Xet high-performance transfer...")
                     dl_path = hf_hub_download(
                         repo_id=repo_id,
                         filename=remote_name,
