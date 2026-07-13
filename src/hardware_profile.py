@@ -243,6 +243,7 @@ def _ctx_for_ram(
     total_ram_gb: float,
     model_size_gb: float = 4.0,
     backend: AccelBackend = AccelBackend.CPU,
+    vram_gb: float = 0.0,
 ) -> dict:
     
     
@@ -266,6 +267,14 @@ def _ctx_for_ram(
         base = 16384
     else:
         base = 32768
+
+    # VRAM safety cap: if using CUDA/ROCM and VRAM is low, the KV cache will OOM the GPU
+    # if we let the context grow to 32K, even if System RAM is huge.
+    if backend in (AccelBackend.CUDA, AccelBackend.ROCM):
+        if vram_gb > 0 and vram_gb < 8.0:
+            base = min(base, 8192)
+        elif vram_gb > 0 and vram_gb < 12.0:
+            base = min(base, 16384)
 
     return {
         "ctx_triage":    max(base, 8192),
@@ -516,7 +525,7 @@ def _build_profile() -> HardwareProfile:
 
     
     
-    ctx_vals = _ctx_for_ram(p.total_ram_gb, model_size_gb=4.0, backend=p.backend)
+    ctx_vals = _ctx_for_ram(p.total_ram_gb, model_size_gb=4.0, backend=p.backend, vram_gb=p.total_vram_gb)
     for key, val in ctx_vals.items():
         setattr(p, key, val)
 
