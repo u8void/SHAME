@@ -885,6 +885,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> "Llama"
         except ValueError:
             _kv_pref_enum = KVQuantLevel.AUTO
 
+        _flash_attn = cfg.get("flash_attn", hw.flash_attn)
         _kv_quant = select_kv_quant(
             model_size_gb=os.path.getsize(path) / (1024**3),
             n_ctx=n_ctx,
@@ -893,6 +894,10 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> "Llama"
             profile=_profile,
         )
         _selected_kv_type = _get_ftype(_kv_quant)
+        if not _flash_attn:
+            # V cache quantization requires flash_attn. Override to F16.
+            _selected_kv_type = 1  # F16
+            _kv_quant = KVQuantLevel.F16
         _kv_ram_mb = estimate_kv_cache_ram(
             os.path.getsize(path) / (1024**3), n_ctx, _kv_quant
         )
@@ -998,7 +1003,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> "Llama"
         if str(_n_ubatch).lower() == "auto":
             _n_ubatch = hw.n_ubatch
 
-        _flash_attn = hw.flash_attn
+        _flash_attn = cfg.get("flash_attn", hw.flash_attn)
 
         _main_gpu = cfg.get("main_gpu", 0)
         _tensor_split = cfg.get("tensor_split", None)
