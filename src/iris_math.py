@@ -124,7 +124,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
 
     display_content = ""
     if thought_clean:
-        display_content = f"<think>\n{thought_clean}\n</think>\n\n{cleaned}"
+        display_content = f"<thought>\n{thought_clean}\n</thought>\n\n{cleaned}"
     else:
         display_content = cleaned
 

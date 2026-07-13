@@ -133,15 +133,15 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
             
             _assistant_context = visible_answer
             if thought_clean:
-                _assistant_context = f"<think>{thought_clean}</think>\n{cleaned_answer}"
+                _assistant_context = f"<thought>{thought_clean}</thought>\n{cleaned_answer}"
                 
             _retry_nudge = (
                 "Your previous reply was a refusal, but this is an ordinary, benign request with "
                 "nothing sensitive about it. Please provide the actual, complete answer now outside "
-                "of any <think> tags. Do not skip or abbreviate."
+                "of any <thought> tags. Do not skip or abbreviate."
                 if _is_refusal else
                 "Your previous response was incomplete — it only contained a thought process or closing phrase without the actual answer. "
-                "Please provide the FULL, complete explanation now outside of any <think> tags. Do not skip or abbreviate."
+                "Please provide the FULL, complete explanation now outside of any <thought> tags. Do not skip or abbreviate."
             )
             retry_msgs = optimized + [
                 {"role": "assistant", "content": _assistant_context},
@@ -159,7 +159,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
                     
             # Use the retry answer; combine think from both rounds
             retry_answer = retry_full.strip()
-            retry_answer = re.sub(r'</?think>', '', retry_answer, flags=re.IGNORECASE).strip()
+            retry_answer = re.sub(r'</?thought>', '', retry_answer, flags=re.IGNORECASE).strip()
             
             retry_answer = re.sub(r'</?span[\s\S]*?(?:>|&gt;|$)', '', retry_answer, flags=re.IGNORECASE)
             retry_answer = re.sub(r'&lt;/?span[\s\S]*?(?:>|&gt;|$)', '', retry_answer, flags=re.IGNORECASE).strip()
@@ -168,7 +168,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
                 cleaned_answer = _quality_guard(retry_answer)
             # Merge retry thought into thought_clean for the final raw_response
             if retry_thought.strip():
-                retry_thought_clean = re.sub(r'</?think>', '', retry_thought, flags=re.IGNORECASE).strip()
+                retry_thought_clean = re.sub(r'</?thought>', '', retry_thought, flags=re.IGNORECASE).strip()
                 thought_clean = (thought_clean + "\n\n[Retry]\n" + retry_thought_clean).strip()
     finally:
         if not _keep_loaded:
@@ -184,7 +184,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
     # Re-assemble: think block (always English) + translated visible answer
     display_content = ""
     if thought_clean:
-        display_content = f"<think>\n{thought_clean}\n</think>\n\n{cleaned_answer}"
+        display_content = f"<thought>\n{thought_clean}\n</thought>\n\n{cleaned_answer}"
     else:
         display_content = cleaned_answer
 
