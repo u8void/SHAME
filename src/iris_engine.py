@@ -86,14 +86,6 @@ from .hardware_profile import apply_to_config, ctx_for_role, get_hardware_profil
 from .hardware_profile import summary as hw_summary
 
 try:
-    from sentence_transformers import SentenceTransformer, util
-
-    RAG_AVAILABLE = True
-except Exception as e:
-    logger.warning(f"[WARNING] RAG disabled due to library error: {e}")
-    RAG_AVAILABLE = False
-
-try:
     import torch
     import torch.nn.functional as F
     from torch.utils.data import DataLoader, Dataset
@@ -101,6 +93,14 @@ try:
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
+
+try:
+    from sentence_transformers import SentenceTransformer, util
+
+    RAG_AVAILABLE = True
+except Exception as e:
+    logger.warning(f"[WARNING] RAG disabled due to library error: {e}")
+    RAG_AVAILABLE = False
 
 try:
     import mlx.core as mx
