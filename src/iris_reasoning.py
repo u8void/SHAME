@@ -53,11 +53,8 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
         final_query = (
             f"--- SEARCH RESULTS ---\n{web_context}\n--- END SEARCH RESULTS ---\n\n"
             f"User Query:\n{final_query}\n\n"
-            f"INSTRUCTIONS:\nYou MUST think step-by-step before answering. You MUST enclose ALL step-by-step reasoning strictly inside <think> and </think> tags.\n"
-            f"Start your response immediately with <think>. Do not add any introductory text or meta-commentary.\n"
-            f"DO NOT pretend to search the web inside your thought process. The search results have ALREADY been provided to you in the SEARCH RESULTS block above. Read the provided results directly.\n"
+            f"INSTRUCTIONS:\n"
             f"Use the search results above to inform your answer. If the search results are incomplete, you may use your internal knowledge to supplement the answer.\n"
-            f"CRITICAL: After you output </think>, write ONLY the clean final answer. Do NOT include 'Final Answer:', 'Step-by-Step Explanation:', or numbered analysis steps outside of <think> tags. The text after </think> is shown directly to the user.\n"
         )
         
     final_query += _language_directive(user_query, role=ModelRole.REASONING)
