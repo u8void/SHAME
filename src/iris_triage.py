@@ -90,8 +90,20 @@ except Exception:
 _ROUTES = ["SEARCH", "REASONING", "GENERAL", "MATH", "CODE_SIMPLE", "CODE_COMPLEX", "CONTROL"]
 
 _TRIAGE_JSON_SCHEMA = {
-    "type": "string",
-    "enum": _ROUTES
+    "type": "object",
+    "properties": {
+        "route": {
+            "type": "string",
+            "enum": _ROUTES
+        },
+        "keywords": {
+            "type": "string"
+        },
+        "confidence": {
+            "type": "number"
+        }
+    },
+    "required": ["route", "keywords", "confidence"]
 }
 
 _ROUTE_TAG_MAP: Dict[str, TaskType] = {
