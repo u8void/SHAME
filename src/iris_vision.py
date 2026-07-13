@@ -55,7 +55,7 @@ def _load_vision_model():
                         "n_ctx": ROLE_CTX.get(ModelRole.VISION, 4096),
                         "n_gpu_layers": n_gpu_layers,
                         "n_threads": n_threads,
-                        "flash_attn": True,
+                        "flash_attn": cfg.get("flash_attn", True),
                         "type_k": getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
                         "type_v": getattr(llama_cpp, "LLAMA_FTYPE_MOSTLY_Q8_0", 7),
                         "verbose": False,

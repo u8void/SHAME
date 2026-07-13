@@ -255,6 +255,14 @@ _IDENTITY_PATTERN = re.compile(
     _IDENTITY_QUESTIONS,
     re.IGNORECASE,
 )
+_RUDE_WORDS = (
+    r"fuck(?:\s+off|\s+you)?|shut\s+up|go\s+away|screw\s+you|you\s+are\s+(?:stupid|dumb|idiot|useless|rubbish)|"
+    r"idiot|asshole|bitch|bastard|dick|piss\s+off"
+)
+_RUDE_PATTERN = re.compile(
+    r"\b(?:" + _RUDE_WORDS + r")\b",
+    re.IGNORECASE,
+)
 
 
 def _general_override_route(query: str):
@@ -276,6 +284,8 @@ def _general_override_route(query: str):
         return "greeting"
     if _IDENTITY_PATTERN.search(q):
         return "identity"
+    if _RUDE_PATTERN.search(q):
+        return "rude"
     return None
 
 

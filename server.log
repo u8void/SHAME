@@ -11,3 +11,24 @@
  * Running on http://127.0.0.1:5050
  * Running on http://192.168.1.13:5050
 [33mPress CTRL+C to quit[0m
+127.0.0.1 - - [13/Jul/2026 15:39:47] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [13/Jul/2026 15:39:47] "GET /static/logo-dark.png HTTP/1.1" 200 -
+127.0.0.1 - - [13/Jul/2026 15:39:47] "[36mGET /static/voice_style.css?v=21 HTTP/1.1[0m" 304 -
+127.0.0.1 - - [13/Jul/2026 15:39:47] "GET /static/logo-light.png HTTP/1.1" 200 -
+127.0.0.1 - - [13/Jul/2026 15:39:47] "[36mGET /static/vendor/purify.min.js HTTP/1.1[0m" 304 -
+127.0.0.1 - - [13/Jul/2026 15:39:47] "[36mGET /static/style.css?v=21 HTTP/1.1[0m" 304 -
+127.0.0.1 - - [13/Jul/2026 15:39:47] "[36mGET /static/vendor/marked.min.js HTTP/1.1[0m" 304 -
+127.0.0.1 - - [13/Jul/2026 15:39:47] "[36mGET /static/script.js?v=16 HTTP/1.1[0m" 304 -
+127.0.0.1 - - [13/Jul/2026 15:39:47] "[36mGET /static/voice.js?v=16 HTTP/1.1[0m" 304 -
+127.0.0.1 - - [13/Jul/2026 15:39:47] "[36mGET /static/setup.js?v=16 HTTP/1.1[0m" 304 -
+127.0.0.1 - - [13/Jul/2026 15:39:47] "GET /static/scriptchat.js?v=21 HTTP/1.1" 200 -
+127.0.0.1 - - [13/Jul/2026 15:39:47] "[36mGET /static/settings.js?v=16 HTTP/1.1[0m" 304 -
+127.0.0.1 - - [13/Jul/2026 15:39:47] "GET /get_settings HTTP/1.1" 200 -
+Frontend messages raw: [{"role":"user","content":"Hi","displayText":"Hi","imageUrl":null,"attachmentName":null}]
+127.0.0.1 - - [13/Jul/2026 15:39:51] "POST /chat HTTP/1.1" 200 -
+[Iris] Online language detection: detected 'en' -> 'English'
+[Triage] Pre-filter override: query matched GENERAL pattern (reason='greeting'); routing directly to GENERAL.
+[Iris] Online language detection: detected 'en' -> 'English'
+[Iris] Instantiating Llama: model=/Users/ahmed/Iris-AI/models/iris_005.gguf, n_gpu_layers=-1, n_threads=4, main_gpu=0, tensor_split=None
+/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/resource_tracker.py:475: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/loky-7435-otruo4yh'}
+  warnings.warn(

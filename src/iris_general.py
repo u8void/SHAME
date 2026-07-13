@@ -19,7 +19,6 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     # 1. RAG
     context = ""
     if retriever is not None and len(user_query.split()) >= 3:
-        # Avoid RAG for short contextual queries like "what about him?"
         is_contextual = False
         if history:
             pronouns = re.compile(r'\b(he|him|his|she|her|it|its|they|them|this|that)\b', re.IGNORECASE)
