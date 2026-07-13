@@ -454,12 +454,17 @@ def classify_task(
     lower_query_custom = query_for_classification.lower()
     
     # 1. Full-Stack / Skeleton / Complex Code Rules (Arabic & English)
-    if any(kw in lower_query_custom for kw in ["backend", "server", "api", "full stack", "full-stack", "node", "express", "skeleton", "هيكل", "قالب", "فراغات"]):
+    kw_en_pattern = r"\b(?:backend|server|api|full stack|full-stack|node|express|skeleton)\b"
+    kw_ar_pattern = r"(?:هيكل|قالب|فراغات)"
+    if re.search(kw_en_pattern, lower_query_custom) or re.search(kw_ar_pattern, lower_query_custom):
         logger.info("[Triage] Hardcoded intercept: Full-Stack or Skeleton keyword detected. Routing to CODING_COMPLEX.")
         return TaskType.CODING_COMPLEX, None
         
     # 2. Web Development Rules (Arabic & English)
-    if ("tailwind" in lower_query_custom or "html" in lower_query_custom or "css" in lower_query_custom or "react" in lower_query_custom) and ("build" in lower_query_custom or "landing page" in lower_query_custom or "website" in lower_query_custom or "موقع" in lower_query_custom or "صفحة" in lower_query_custom or "صمم" in lower_query_custom or "برمج" in lower_query_custom):
+    tech_pattern = r"\b(?:tailwind|html|css|react)\b"
+    action_en_pattern = r"\b(?:build|landing page|website)\b"
+    action_ar_pattern = r"(?:موقع|صفحة|صمم|برمج)"
+    if re.search(tech_pattern, lower_query_custom) and (re.search(action_en_pattern, lower_query_custom) or re.search(action_ar_pattern, lower_query_custom)):
         logger.info("[Triage] Hardcoded intercept: Web development query detected. Routing to CODING_COMPLEX.")
         return TaskType.CODING_COMPLEX, None
     # --- End of Fix ---

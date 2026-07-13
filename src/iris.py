@@ -36,8 +36,13 @@ def ask_stream(
         settings = {}
         
     # --- [MODIFICATION: Detect Full-Stack and Skeleton Tasks] ---
-    is_fullstack = any(kw in user_query.lower() for kw in ["backend", "server", "api", "full stack", "full-stack", "node", "express"])
-    is_skeleton = any(kw in user_query.lower() for kw in ["skeleton", "هيكل", "قالب", "فراغات"])
+    kw_en_pattern = r"\b(?:backend|server|api|full stack|full-stack|node|express|skeleton)\b"
+    kw_ar_pattern = r"(?:هيكل|قالب|فراغات)"
+    
+    import re
+    lower_q = user_query.lower()
+    is_fullstack = bool(re.search(r"\b(?:backend|server|api|full stack|full-stack|node|express)\b", lower_q))
+    is_skeleton = bool(re.search(r"\b(?:skeleton)\b", lower_q)) or bool(re.search(r"(?:هيكل|قالب|فراغات)", lower_q))
     
     settings["is_fullstack"] = is_fullstack
     settings["is_skeleton"] = is_skeleton
