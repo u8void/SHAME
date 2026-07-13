@@ -1020,7 +1020,7 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> "Llama"
                 n_threads_batch=_n_threads_batch,
                 use_mmap=hw.use_mmap,
                 use_mlock=hw.use_mlock,
-                flash_attn=True,
+                flash_attn=cfg.get("flash_attn", _flash_attn),
                 type_k=_selected_kv_type,
                 type_v=_selected_kv_type,
                 n_batch=_n_batch,
@@ -1029,8 +1029,10 @@ def load_model(role: ModelRole, override_n_ctx: Optional[int] = None) -> "Llama"
                 logits_all=(draft_model is not None),
                 main_gpu=_main_gpu,
                 tensor_split=_tensor_split,
-                chat_format="chatml",
             )
+            if "tokenizer.chat_template" not in _new_llm.metadata:
+                logger.info(f"[Iris] No chat template found in {path} metadata; falling back to ChatML format.")
+                _new_llm.chat_format = "chatml"
         except Exception as e:
             logger.error(
                 f"[Iris] Failed to load model from file: {path}. Error: {e}",
