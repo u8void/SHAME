@@ -22,5 +22,4 @@ sentencepiece
 pyautogui
 pyperclip
 deep-translator
-hf_transfer
 torchao>=0.16.0

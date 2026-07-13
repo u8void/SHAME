@@ -44,7 +44,6 @@ def _download_file(url, dest):
     downloaded = False
     if "huggingface.co" in url and "/resolve/" in url:
         try:
-            os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
             from huggingface_hub import hf_hub_download
             parts = url.split("huggingface.co/")[-1].split("/resolve/")
             repo_id = parts[0]
