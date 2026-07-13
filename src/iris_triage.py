@@ -329,6 +329,11 @@ def _search_override_route(query: str) -> bool:
     )
     if any(kw in q for kw in search_keywords):
         return True
+    
+    # Absolute priority triggers for SEARCH (matches triage_routing_guide.md)
+    if q.startswith("what is ") or q.startswith("who is ") or q.startswith("where is ") or q.startswith("when did "):
+        return True
+        
     return False
 
 
