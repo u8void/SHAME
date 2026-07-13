@@ -1411,23 +1411,17 @@ def download_all_models(roles_to_train: List[str] = None):
                 try:
                     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
                     from huggingface_hub import hf_hub_download
-                    from tqdm import tqdm
-                    class ForceTqdm(tqdm):
-                        def __init__(self, *args, **kwargs):
-                            kwargs['disable'] = False
-                            super().__init__(*args, **kwargs)
-
+                    
                     parts = url.split("huggingface.co/")[-1].split("/resolve/")
                     repo_id = parts[0]
                     subparts = parts[1].split("/")
                     remote_name = "/".join(subparts[1:])
-                    print("  Using accelerated hf_transfer...")
+                    print("  Using accelerated hf_transfer (progress bar disabled to prevent deadlocks)...")
                     dl_path = hf_hub_download(
                         repo_id=repo_id,
                         filename=remote_name,
                         local_dir="./models",
-                        local_dir_use_symlinks=False,
-                        tqdm_class=ForceTqdm
+                        local_dir_use_symlinks=False
                     )
                     if os.path.abspath(dl_path) != os.path.abspath(dest_path):
                         if os.path.exists(dest_path): os.remove(dest_path)
