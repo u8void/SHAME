@@ -10,6 +10,7 @@ logger = logging.getLogger('iris')
 
 RAG_AVAILABLE = True
 try:
+    import torch
     from sentence_transformers import SentenceTransformer, util
 except Exception as e:
     logger.warning(f"[RAG] Failed to import sentence-transformers: {e}")

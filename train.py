@@ -14,6 +14,11 @@ import tempfile
 from typing import List, Tuple
 
 try:
+    import transformers
+except ImportError:
+    pass
+
+try:
     import torch
 except ImportError:
     torch = None
