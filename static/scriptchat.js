@@ -507,7 +507,7 @@ document.addEventListener("DOMContentLoaded", () => {
         let isThoughtClosed = true;
         let firstThoughtId = "";
 
-        work = work.replace(/(?:<think>|<\|thought_start\|>|<thought>|\[thinking\])([\s\S]*?)(?:<\/think>|<\|thought_end\|>|<\/thought>|\[answer\]|\[\/thinking\]|$)/gi, (match, p1) => {
+        work = work.replace(/(?:<think>|<\|thought_start\|>|<thought>|<z>|\[thinking\])([\s\S]*?)(?:<\/think>|<\|thought_end\|>|<\/thought>|<\/z>|\[answer\]|\[\/thinking\]|$)/gi, (match, p1) => {
             const content = p1.trim();
             if (!content) return '';
 
