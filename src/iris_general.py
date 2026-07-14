@@ -57,7 +57,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     try:
         for ev in _stream_tokens(ModelRole.GENERAL, optimized, max_tokens=8192, temperature=0.6, think_mode="show"):
             if ev["type"] == "token":
-                ev["content"] = ev["content"].replace("`", "")
+                ev["content"] = ev["content"].replace("`", "").replace("~", "").replace("<file_card", "")
                 full += ev["content"]
 
             if user_lang == "English" or ev["type"] != "token":

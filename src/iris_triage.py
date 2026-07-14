@@ -48,6 +48,7 @@ if not TRIAGE_SYSTEM_PROMPT:
         "  MATH          - arithmetic, algebra, calculus, proofs, geometry, probability, math word\n"
         "                  problems, math explanations, raw formulas, and trigonometry.\n"
         "  CODE_SIMPLE   - a single isolated snippet, function, or small canvas/SVG/HTML/CSS/JS piece.\n"
+        "                  (DO NOT route math or short equations to CODE_SIMPLE)\n"
         "  CODE_COMPLEX  - a multi-file project, full app, or full website/web app build request.\n"
         "  CONTROL       - direct OS/hardware/local-app automation on the user's machine.\n\n"
         'Populate "keywords" with a short search query for SEARCH; use an empty string "" for\n'
