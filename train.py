@@ -1311,6 +1311,7 @@ def download_all_models(roles_to_train: List[str] = None):
     import urllib.request
     import time
 
+    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
     os.makedirs("./models", exist_ok=True)
 
     
