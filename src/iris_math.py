@@ -90,10 +90,14 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     thought_process = ""
     try:
         for ev in _stream_tokens(ModelRole.GENERAL, general_messages, max_tokens=8192, temperature=0.5, think_mode="show"):
+            if ev["type"] == "token":
+                # Nuke all backticks so the UI can never mistake this for a code file block
+                ev["content"] = ev["content"].replace("`", "")
+                full += ev["content"]
+
             if user_lang == "English" or ev["type"] != "token":
                 yield ev
-            if ev["type"] == "token":
-                full += ev["content"]
+            
             elif ev["type"] == "thinking":
                 thought_process += ev["content"]
     finally:
