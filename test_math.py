@@ -1,7 +1,14 @@
-from src.iris_engine import ModelRole, _stream_tokens
-messages = [{"role": "user", "content": "2+2"}]
-tokens = []
-for ev in _stream_tokens(ModelRole.MATH, messages, max_tokens=100, temperature=0.2, think_mode="show"):
-    if ev["type"] in ("token", "thinking"):
-        tokens.append(ev["content"])
-print("".join(tokens))
+import asyncio
+from src.iris_math import run_stream
+
+async def main():
+    msgs = [{"role": "user", "content": "integrate sin x cos x"}]
+    # It requires a retriever and settings
+    gen = run_stream("integrate sin x cos x", msgs, None, {"user_lang": "English"})
+    for x in gen:
+        if x["type"] in ("token", "raw_response"):
+            print(x["content"], end="")
+        else:
+            print(f"\n[{x['type']}]: {x.get('content', '')}\n")
+
+asyncio.run(main())

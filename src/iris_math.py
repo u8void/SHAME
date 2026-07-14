@@ -77,7 +77,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
         f"CRITICAL: Do NOT re-derive the problem yourself. Do NOT second-guess or redo the math model's calculations. "
         f"Trust the work above as correct and focus entirely on explaining it in a clear, structured, and elegant way. "
         f"Use flawless LaTeX for all mathematical expressions. "
-        f"CRITICAL RULE: DO NOT wrap your response in triple backticks (```). DO NOT output a code block. Write plain text with inline/display LaTeX.\n"
+        f"CRITICAL RULE: DO NOT wrap your response in ANY markdown code blocks (no triple backticks ```, no tildes ~~~). DO NOT use <file_card> tags. DO NOT indent your text with spaces. Write plain text with inline/display LaTeX.\n"
         f"CRITICAL RULE: For inline math, YOU MUST use single dollar signs (like $x = 5$). DO NOT use \\( and \\) because the frontend renderer does not support them."
     )
 
@@ -92,9 +92,10 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     try:
         for ev in _stream_tokens(ModelRole.GENERAL, general_messages, max_tokens=8192, temperature=0.5, think_mode="show"):
             if ev["type"] == "token":
-                # Nuke all backticks so the UI can never mistake this for a code file block
-                ev["content"] = ev["content"].replace("`", "")
-                full += ev["content"]
+                # Nuke all backticks, tildes, and file_card tags so the UI can never mistake this for a code file block
+                c = ev["content"].replace("`", "").replace("~", "").replace("<file_card", "")
+                ev["content"] = c
+                full += c
 
             if user_lang == "English" or ev["type"] != "token":
                 yield ev
