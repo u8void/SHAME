@@ -76,7 +76,8 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
         f"Your job is to present and explain this solution clearly to the user. "
         f"CRITICAL: Do NOT re-derive the problem yourself. Do NOT second-guess or redo the math model's calculations. "
         f"Trust the work above as correct and focus entirely on explaining it in a clear, structured, and elegant way. "
-        f"Use flawless LaTeX for all mathematical expressions."
+        f"Use flawless LaTeX for all mathematical expressions. "
+        f"CRITICAL RULE: DO NOT wrap your response in triple backticks (```). DO NOT output a code block. Write plain text with inline/display LaTeX."
     )
 
     general_messages = []
