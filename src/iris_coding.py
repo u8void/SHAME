@@ -510,10 +510,8 @@ def _run_complex_coding(
     if context:
         reasoning_prompt = f"REFERENCE EXCERPT:\n{context}\n\n{reasoning_prompt}"
 
-    reasoning_msgs = [{"role": "system", "content": reasoning_prompt}] + optimized
-
     raw_reasoning = ""
-    for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="status", settings=settings, extra_stop_words=["```"]):
+    for ev in _stream_tokens(ModelRole.REASONING, optimized, max_tokens=8192, temperature=0.6, think_mode="status", settings=settings, system_prompt_override=reasoning_prompt, extra_stop_words=["```"]):
         if ev["type"] == "status":
             yield ev
         if ev["type"] in ("token", "thinking"):
