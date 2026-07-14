@@ -543,6 +543,22 @@ document.addEventListener("DOMContentLoaded", () => {
             return id;
         });
 
+        function isMathEquation(text) {
+            const t = text.trim().toLowerCase();
+            if (t.length < 150 && /^[0-9a-z\s+\-*/=^().,]+$/.test(t) && /[+\-*/=^]/.test(t)) {
+                if (!/(?:def |class |function |const |let |var |import |return |if |for |while )/.test(t)) {
+                    return true;
+                }
+            }
+            // Catch simple trigonometric functions like "sinx + cosx"
+            if (t.length < 100 && (t.includes('sin') || t.includes('cos') || t.includes('tan') || t.includes('log'))) {
+                if (!/(?:def |class |function |const |let |var |import |return |if |for |while )/.test(t)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         function isCommandOrShortBlock(lang, content) {
             const lowerLang = (lang || '').toLowerCase();
             if (['bash', 'sh', 'shell', 'cmd', 'powershell', 'terminal', 'run', 'install'].includes(lowerLang)) {
@@ -704,7 +720,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
                 
                 // Python/JS/CSS/Shell auto-wrap (catches trailing rambled code in any language)
-                if (!tail.includes("```")) {
+                if (!tail.includes("```") && !isMathEquation(tail)) {
                     // CSS patterns: selectors, @ rules, or property blocks
                     tail = tail.replace(
                         /(?:^|\n)(?:css\s*\n)?((?:(?:[.#@]\w|[a-z\[\]&*+>~])[\s\S]*\{\s*[\s\S]*\}|@\w+\s[^{;]+;?)[\s\S]*)$/im,
@@ -785,8 +801,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 type: 'code',
                 lang: detectedLang,
                 content: cleanContent,
-                hidden: !isCmdOrShort,
-                autoCard: !isCmdOrShort,
+                hidden: !isCmdOrShort && !isMathEquation(cleanContent),
+                autoCard: !isCmdOrShort && !isMathEquation(cleanContent),
                 claimed: false,
                 finished: isFinished
             });
