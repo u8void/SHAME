@@ -74,7 +74,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
         user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
         for ev in _stream_tokens(ModelRole.REASONING, optimized, max_tokens=_r_tokens, temperature=_r_temp, think_mode="show"):
             if ev["type"] == "token":
-                ev["content"] = ev["content"].replace("`", "").replace("~", "").replace("<file_card", "").replace("    ", "").replace("\t", "")
+                ev["content"] = ev["content"].replace("`", "").replace("~", "")
                 full += ev["content"]
 
             if user_lang == "English" or ev["type"] != "token":
@@ -154,7 +154,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, d
             retry_thought = ""
             for ev in _stream_tokens(ModelRole.REASONING, retry_msgs, max_tokens=_r_tokens, temperature=0.5, think_mode="show"):
                 if ev["type"] == "token":
-                    ev["content"] = ev["content"].replace("`", "").replace("~", "").replace("<file_card", "").replace("    ", "").replace("\t", "")
+                    ev["content"] = ev["content"].replace("`", "").replace("~", "")
                     retry_full += ev["content"]
 
                 if user_lang == "English" or ev["type"] != "token":

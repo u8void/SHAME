@@ -155,6 +155,16 @@ def ask_stream(
         from src.iris_triage import classify_task
         task_type, direct_answer = classify_task(user_query, history)
 
+    # HARD OVERRIDE: If the router was poisoned by chat history and incorrectly routed
+    # a simple math equation to CODE_SIMPLE, force it back to MATH.
+    if task_type == TaskType.CODING_SIMPLE:
+        q_clean = user_query.strip().lower()
+        # If the query is short and looks like a math equation or trigonometry
+        if len(q_clean) < 50 and any(op in q_clean for op in ['+', '-', '*', '/', '=', 'sin', 'cos', 'tan', 'log']):
+            # Unless they explicitly asked for code
+            if not any(cw in q_clean for cw in ['code', 'python', 'script', 'c++', 'html', 'css']):
+                task_type = TaskType.MATH
+
     
     gen = None
     if task_type == TaskType.CONTROL:

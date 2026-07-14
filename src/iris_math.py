@@ -92,7 +92,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
         for ev in _stream_tokens(ModelRole.GENERAL, general_messages, max_tokens=8192, temperature=0.5, think_mode="show"):
             if ev["type"] == "token":
                 # Nuke all backticks, tildes, file_card tags, and 4-space/tab indentations
-                ev["content"] = ev["content"].replace("`", "").replace("~", "").replace("<file_card", "").replace("    ", "").replace("\t", "")
+                ev["content"] = ev["content"].replace("`", "").replace("~", "")
                 full += ev["content"]
 
             if user_lang == "English" or ev["type"] != "token":
