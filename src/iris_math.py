@@ -77,7 +77,8 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
         f"CRITICAL: Do NOT re-derive the problem yourself. Do NOT second-guess or redo the math model's calculations. "
         f"Trust the work above as correct and focus entirely on explaining it in a clear, structured, and elegant way. "
         f"Use flawless LaTeX for all mathematical expressions. "
-        f"CRITICAL RULE: DO NOT wrap your response in triple backticks (```). DO NOT output a code block. Write plain text with inline/display LaTeX."
+        f"CRITICAL RULE: DO NOT wrap your response in triple backticks (```). DO NOT output a code block. Write plain text with inline/display LaTeX.\n"
+        f"CRITICAL RULE: For inline math, YOU MUST use single dollar signs (like $x = 5$). DO NOT use \\( and \\) because the frontend renderer does not support them."
     )
 
     general_messages = []
