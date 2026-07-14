@@ -112,9 +112,7 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     # Also strip any remaining orphaned HTML tags
     visible_answer = re.sub(r'</?(?:span|div|section|article|style|script)[^>]*>', '', visible_answer, flags=re.IGNORECASE)
     # Strip HTML-encoded angle brackets
-    visible_answer = re.sub(r'&lt;/?[\w]+[^&]*?&gt;', '', visible_answer, flags=re.IGNORECASE).strip()
-    # Strip any remaining HTML tags
-    visible_answer = re.sub(r'<[^>]+>', '', visible_answer).strip()
+    visible_answer = re.sub(r'&lt;/?(?:span|div|section|article|style|script)[^&]*?&gt;', '', visible_answer, flags=re.IGNORECASE).strip()
 
     cleaned = _quality_guard(visible_answer) if visible_answer else ""
 

@@ -150,6 +150,7 @@ expressions, "differential equation", "algebra", "calculus", "math", geometry te
 requests per the paper's explicit override, as well as algorithmic problem solving (Codeforces, LeetCode, competitive programming).
 **Triggers:** "write a python function", "fix this regex", "create an HTML button", "bash
 script to move files", "canvas animation", "codeforces", "leetcode", "competitive programming", "solve in cpp", "c++".
+**NEGATIVE CONSTRAINT:** DO NOT route purely mathematical expressions or algebra to `CODE_SIMPLE`. Even if they look like variables, if it is math, it MUST route to `MATH`.
 **OVERRIDE RULE:** ANY QUERY ASKING TO SOLVE A COMPETITIVE PROGRAMMING PROBLEM, A CODEFORCES PROBLEM, LEETCODE, OR ANY PASTED TEXT ASKING TO "solve in cpp", "solve in python", OR WRITE CODE TO SOLVE IT, MUST ROUTE TO `CODE_SIMPLE`, NOT `REASONING` OR `MATH`.
 **Anchor:** "Make a canvas animation of a bouncing ball." → `{"route": "CODE_SIMPLE", "keywords": "", "confidence": 0.95}`
 **Anchor (Competitive Programming):** "I have a Codeforces problem where I need to find the shortest path." → `{"route": "CODE_SIMPLE", "keywords": "", "confidence": 0.98}`
