@@ -2466,6 +2466,15 @@ def detect_user_language(text: str) -> Optional[str]:
     if not text or not text.strip():
         return None
 
+    import re
+    # 0. Fast bypass for short, purely mathematical expressions or code snippets.
+    # Prevents Google Translate from misidentifying variables like "cotx" as Vietnamese.
+    if len(text) < 50 and any(op in text for op in "+-=/*^()[]{}<>_"):
+        # If it's purely ASCII and has no long words, it's just math/code
+        if all(ord(c) < 128 for c in text) and not re.search(r'[a-zA-Z]{6,}', text):
+            return "English"
+
+
     # 1. Try online detection via Google Translate API
     try:
         import requests
