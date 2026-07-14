@@ -707,19 +707,19 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (!tail.includes("```")) {
                     // CSS patterns: selectors, @ rules, or property blocks
                     tail = tail.replace(
-                        /(?:^|\n)(?:css\s*\n)?((?:(?:[.#@]\w|[a-z\[\]&*+>~])[\s\S]*\{\s*[\s\S]*\}|@\w+\s[^{;]+;?)[\s\S]*)$/im,
+                        /(?:^|\n)(?:css\s*\n)((?:(?:[.#@]\w|[a-z\[\]&*+>~])[^{}]*\{[^}]*\}|@\w+\s[^{;]+;?)[\s\S]*)$/im,
                         '\n```css\n$1\n```\n'
                     );
                     // Shell/bash patterns
                     if (!tail.includes("```bash") && !tail.includes("```sh")) {
                         tail = tail.replace(
-                            /(?:^|\n)(?:bash\s*\n|shell\s*\n|sh\s*\n)?((?:(?:#!\/|sudo |apt |pip |npm |yarn |docker |git |cd |ls |mkdir |rm |cp |mv |cat |echo |export |source |chmod |chown |curl |wget |grep |find |sed |awk |tar |unzip |python[23]? |node |rustc |cargo |go |javac |make |cmake ))[\s\S]*)$/im,
+                            /(?:^|\n)(?:bash\s*\n|shell\s*\n|sh\s*\n)((?:(?:#!\/|sudo |apt |pip |npm |yarn |docker |git |cd |ls |mkdir |rm |cp |mv |cat |echo |export |source |chmod |chown |curl |wget |grep |find |sed |awk |tar |unzip |python[23]? |node |rustc |cargo |go |javac |make |cmake ))[\s\S]*)$/im,
                             '\n```bash\n$1\n```\n'
                         );
                     }
                     // Generic Python/JS fallback
                     tail = tail.replace(
-                        /(?:^|\n)(?:python\s*\n|js\s*\n|javascript\s*\n|CODE\s*\n)?((?:def |class |import |from [\w.]+ import |function |const |let |var |async |export |require\()\s*[\s\S]*)$/m,
+                        /(?:^|\n)(?:python\s*\n|js\s*\n|javascript\s*\n|CODE\s*\n)((?:def |class |import |from [\w.]+ import |function |const |let |var |async |export |require\()\s*[\s\S]*)$/m,
                         '\n```code\n$1\n```\n'
                     );
                 }
