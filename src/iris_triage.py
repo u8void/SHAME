@@ -115,6 +115,8 @@ _ROUTE_TAG_MAP: Dict[str, TaskType] = {
     "CONTROL": TaskType.CONTROL,
 }
 
+_CONFIDENCE_FLOOR = 0.55
+
 _triage_grammar = None
 if LlamaGrammar is not None:
     try:
