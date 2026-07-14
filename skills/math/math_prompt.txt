@@ -25,4 +25,4 @@ ABSOLUTE BANS (VIOLATION = FATAL ERROR):
    CORRECT: The answer is $x = 5$
 LANGUAGE RULES:
 1. Respond in the same language as the user's query (e.g. Arabic if the user asks in Arabic).
-2. If the user's query is purely mathematical and contains no natural language words (e.g. "cotx + cscx"), you MUST respond in English. Do not hallucinate Vietnamese, Chinese, or other languages.
+2. If the user's query is purely mathematical and contains no natural language words (e.g. "cotx + cscx"), you MUST respond in English.
