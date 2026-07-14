@@ -138,13 +138,13 @@ exploitable "the model can choose to output plain text instead of JSON" surface.
 **Intent:** Formal mathematics, arithmetic, symbolic algebra, equations, proofs, probability,
 physics calculations, geometry, combinatorics, math word problems.
 **Triggers:** "calculate", "solve", "derivative", "integral", "prove that", bare arithmetic
-expressions, "differential equation", "algebra", "calculus", "math", geometry terms ("circle", "triangle"), formulas (e.g. `$n$`), trigonometric functions ("sin", "cos", "tan", "log", "sqrt"), bare equations and expressions like "cosx +sinx".
-**OVERRIDE RULE:** ANY QUERY CONTAINING RAW MATH FORMULAS, TRIGONOMETRIC FUNCTIONS (sin, cos, tan), OR ASKING HOW TO SOLVE A MATH PROBLEM, EXPLAIN A MATH CONCEPT, OR INVOLVING MATH WORD PROBLEMS MUST ALWAYS BE ROUTED TO `MATH`, NOT `CODE_SIMPLE` OR `REASONING`.
+expressions, "differential equation", "algebra", "calculus", "math", geometry terms ("circle", "triangle"), formulas (e.g. `$n$`).
+**OVERRIDE RULE:** ANY QUERY CONTAINING RAW MATH FORMULAS, OR ASKING HOW TO SOLVE A MATH PROBLEM, EXPLAIN A MATH CONCEPT, OR INVOLVING MATH WORD PROBLEMS MUST ALWAYS BE ROUTED TO `MATH`, NOT `CODE_SIMPLE` OR `REASONING`.
 **Anchor:** "Prove that there are infinitely many primes." → `{"route": "MATH", "keywords": "", "confidence": 0.96}`
 **Anchor (Math Word Problem):** "You are given a positive integer $n$. There are $n$ points placed distinctively on the circumference of a circle. Into how many distinct regions is the interior divided?" → `{"route": "MATH", "keywords": "", "confidence": 0.98}`
 **Anchor (Math Explanation):** "How do I find the general solution to a second-order linear homogeneous differential equation with constant coefficients?" → `{"route": "MATH", "keywords": "", "confidence": 0.98}`
 **Anchor (Math Roleplay):** "Act as an empathetic and brilliant math professor. I want to learn how to solve differential equations." → `{"route": "MATH", "keywords": "", "confidence": 0.99}`
-**Anchor (Raw Expression):** "cosx +sinx" → `{"route": "MATH", "keywords": "", "confidence": 0.99}`
+
 ### 4.5 `CODE_SIMPLE`
 **Intent:** Isolated, single-file programming tasks. Includes canvas/SVG/procedural-art/animation
 requests per the paper's explicit override, as well as algorithmic problem solving (Codeforces, LeetCode, competitive programming).
@@ -243,7 +243,7 @@ Two honest caveats worth stating plainly:
 | "Why did the Roman Empire fall?" | `REASONING` | explanatory, not a live-fact lookup |
 | "Write me a haiku about the sea" | `GENERAL` | creative writing |
 | "Solve x^2 - 5x + 6 = 0" | `MATH` | symbolic equation |
-| "cosx +sinx" | `MATH` | raw math/trigonometry expression, not a Python code request |
+
 | "Reverse a string in JS" | `CODE_SIMPLE` | single isolated snippet |
 | "Solve this Codeforces DP problem" | `CODE_SIMPLE` | algorithmic coding challenge |
 | "Build me a full e-commerce site with cart + auth" | `CODE_COMPLEX` | multi-file, multi-feature |
