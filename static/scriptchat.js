@@ -462,6 +462,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function _formatRefined(text, isStreaming = false) {
+        const isCodingTask = window.currentTaskType && window.currentTaskType.includes('CODING');
         if (!text) return '';
         let work = text;
         const blocks = [];
@@ -801,8 +802,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 type: 'code',
                 lang: detectedLang,
                 content: cleanContent,
-                hidden: !isCmdOrShort && !isMathEquation(cleanContent),
-                autoCard: !isCmdOrShort && !isMathEquation(cleanContent),
+                hidden: !isCmdOrShort && isCodingTask && !isMathEquation(cleanContent),
+                autoCard: !isCmdOrShort && isCodingTask && !isMathEquation(cleanContent),
                 claimed: false,
                 finished: isFinished
             });
@@ -856,8 +857,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 let fileCardId = '';
                 if (codeIndex !== -1) {
-                    if (isMathEquation(blocks[codeIndex].content || '')) {
-                        // ABSOLUTE BAN: If the code block is just a math equation, reject the explicit file card.
+                    if (!isCodingTask || isMathEquation(blocks[codeIndex].content || '')) {
+                        // ABSOLUTE BAN: Only allow file cards if this is explicitly a CODING task, and not a math equation.
                         blocks[codeIndex].hidden = false;
                         blocks[codeIndex].autoCard = false;
                         return '';
@@ -1500,6 +1501,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = "";
+            let firstTokenReceived = false;
+            window.currentTaskType = '';
 
             // Create the container but keep it hidden until the first text/token arrives
             aiMessageDiv = document.createElement("div");
@@ -1602,7 +1605,7 @@ document.addEventListener("DOMContentLoaded", () => {
                             currentResponseText += event.content;
                             scheduleRender();
                         } else if (event.type === "status") {
-
+                            window.currentTaskType = event.content;
                             console.log("[Agent Status]", event.content);
                             if (!firstTokenReceived) {
                                 const ind = document.getElementById("typingIndicator");
