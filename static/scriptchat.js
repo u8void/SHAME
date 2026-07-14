@@ -856,6 +856,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 let fileCardId = '';
                 if (codeIndex !== -1) {
+                    if (isMathEquation(blocks[codeIndex].content || '')) {
+                        // ABSOLUTE BAN: If the code block is just a math equation, reject the explicit file card.
+                        blocks[codeIndex].hidden = false;
+                        blocks[codeIndex].autoCard = false;
+                        return '';
+                    }
                     blocks[codeIndex].claimed = true;
                     blocks[codeIndex].hidden = true;
                     if (isStreaming) {
@@ -1211,9 +1217,12 @@ document.addEventListener("DOMContentLoaded", () => {
                         html = '';
                     }
                 } else {
-                    html = `
-                        <div class="code-container">
-                            <div class="code-header">
+                    if (isMathEquation(block.content || '')) {
+                        html = `<div style="padding: 12px; font-family: monospace; font-size: 15px; color: #e2e8f0; background: rgba(255,255,255,0.02); border-radius: 8px; margin: 8px 0; border: 1px solid rgba(255,255,255,0.05);">${escapeHtml(block.content).replace(/\n/g, '<br>')}</div>`;
+                    } else {
+                        html = `
+                            <div class="code-container">
+                                <div class="code-header">
                                 <span class="code-lang">${escapeHtml(block.lang)}</span>
                                 <div style="display: flex; gap: 8px;">
                                     ${block.lang && block.lang.toLowerCase() === 'html' ? `
@@ -1235,6 +1244,7 @@ document.addEventListener("DOMContentLoaded", () => {
                             <pre><code>${escapeHtml(block.content)}</code></pre>
                         </div>
                     `;
+                    }
                 }
             } else {
                 id = `@@@${block.type.toUpperCase()}_${index}@@@`;
