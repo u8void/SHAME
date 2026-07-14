@@ -462,7 +462,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function _formatRefined(text, isStreaming = false) {
-        const isCodingTask = window.currentTaskType && window.currentTaskType.includes('CODING');
         if (!text) return '';
         let work = text;
         const blocks = [];
@@ -543,22 +542,6 @@ document.addEventListener("DOMContentLoaded", () => {
             blocks.push({ type: 'review', content: p1.trim() });
             return id;
         });
-
-        function isMathEquation(text) {
-            const t = text.trim().toLowerCase();
-            if (t.length < 150 && /^[0-9a-z\s+\-*/=^().,]+$/.test(t) && /[+\-*/=^]/.test(t)) {
-                if (!/(?:def |class |function |const |let |var |import |return |if |for |while )/.test(t)) {
-                    return true;
-                }
-            }
-            // Catch simple trigonometric functions like "sinx + cosx"
-            if (t.length < 100 && (t.includes('sin') || t.includes('cos') || t.includes('tan') || t.includes('log'))) {
-                if (!/(?:def |class |function |const |let |var |import |return |if |for |while )/.test(t)) {
-                    return true;
-                }
-            }
-            return false;
-        }
 
         function isCommandOrShortBlock(lang, content) {
             const lowerLang = (lang || '').toLowerCase();
@@ -721,7 +704,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
                 
                 // Python/JS/CSS/Shell auto-wrap (catches trailing rambled code in any language)
-                if (!tail.includes("```") && !isMathEquation(tail)) {
+                if (!tail.includes("```")) {
                     // CSS patterns: selectors, @ rules, or property blocks
                     tail = tail.replace(
                         /(?:^|\n)(?:css\s*\n)?((?:(?:[.#@]\w|[a-z\[\]&*+>~])[\s\S]*\{\s*[\s\S]*\}|@\w+\s[^{;]+;?)[\s\S]*)$/im,
@@ -802,8 +785,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 type: 'code',
                 lang: detectedLang,
                 content: cleanContent,
-                hidden: !isCmdOrShort && isCodingTask && !isMathEquation(cleanContent),
-                autoCard: !isCmdOrShort && isCodingTask && !isMathEquation(cleanContent),
+                hidden: !isCmdOrShort,
+                autoCard: !isCmdOrShort,
                 claimed: false,
                 finished: isFinished
             });
@@ -857,12 +840,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 let fileCardId = '';
                 if (codeIndex !== -1) {
-                    if (!isCodingTask || isMathEquation(blocks[codeIndex].content || '')) {
-                        // ABSOLUTE BAN: Only allow file cards if this is explicitly a CODING task, and not a math equation.
-                        blocks[codeIndex].hidden = false;
-                        blocks[codeIndex].autoCard = false;
-                        return '';
-                    }
                     blocks[codeIndex].claimed = true;
                     blocks[codeIndex].hidden = true;
                     if (isStreaming) {
@@ -1218,12 +1195,9 @@ document.addEventListener("DOMContentLoaded", () => {
                         html = '';
                     }
                 } else {
-                    if (isMathEquation(block.content || '')) {
-                        html = `<div style="padding: 12px; font-family: monospace; font-size: 15px; color: #e2e8f0; background: rgba(255,255,255,0.02); border-radius: 8px; margin: 8px 0; border: 1px solid rgba(255,255,255,0.05);">${escapeHtml(block.content).replace(/\n/g, '<br>')}</div>`;
-                    } else {
-                        html = `
-                            <div class="code-container">
-                                <div class="code-header">
+                    html = `
+                        <div class="code-container">
+                            <div class="code-header">
                                 <span class="code-lang">${escapeHtml(block.lang)}</span>
                                 <div style="display: flex; gap: 8px;">
                                     ${block.lang && block.lang.toLowerCase() === 'html' ? `
@@ -1245,7 +1219,6 @@ document.addEventListener("DOMContentLoaded", () => {
                             <pre><code>${escapeHtml(block.content)}</code></pre>
                         </div>
                     `;
-                    }
                 }
             } else {
                 id = `@@@${block.type.toUpperCase()}_${index}@@@`;
@@ -1501,8 +1474,6 @@ document.addEventListener("DOMContentLoaded", () => {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = "";
-            let firstTokenReceived = false;
-            window.currentTaskType = '';
 
             // Create the container but keep it hidden until the first text/token arrives
             aiMessageDiv = document.createElement("div");
@@ -1605,7 +1576,7 @@ document.addEventListener("DOMContentLoaded", () => {
                             currentResponseText += event.content;
                             scheduleRender();
                         } else if (event.type === "status") {
-                            window.currentTaskType = event.content;
+
                             console.log("[Agent Status]", event.content);
                             if (!firstTokenReceived) {
                                 const ind = document.getElementById("typingIndicator");
