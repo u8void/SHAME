@@ -46,7 +46,7 @@ if not TRIAGE_SYSTEM_PROMPT:
         "                  place elsewhere.\n"
         "  GENERAL       - casual chat, greetings, creative writing, identity questions.\n"
         "  MATH          - arithmetic, algebra, calculus, proofs, geometry, probability, math word\n"
-        "                  problems, math explanations.\n"
+        "                  problems, math explanations, raw formulas, and trigonometry (sin, cos, tan).\n"
         "  CODE_SIMPLE   - a single isolated snippet, function, or small canvas/SVG/HTML/CSS/JS piece.\n"
         "  CODE_COMPLEX  - a multi-file project, full app, or full website/web app build request.\n"
         "  CONTROL       - direct OS/hardware/local-app automation on the user's machine.\n\n"
@@ -115,247 +115,6 @@ _ROUTE_TAG_MAP: Dict[str, TaskType] = {
     "CONTROL": TaskType.CONTROL,
 }
 
-# Section 1 of the guide: below this confidence, default to REASONING (lowest
-# blast radius) instead of guessing at CONTROL or CODE_COMPLEX. This reads the
-# model's own calibrated confidence score — it never inspects query content,
-# so it is not a content-classification heuristic, just a safety valve.
-_CONFIDENCE_FLOOR = 0.55
-
-# Post-check override pattern (see classify_task for the design rationale). This is
-# a *post-routing* check, not a pre-filter: the model's classification still runs
-# first and its choice is the default. We only override when (a) the model picked
-# a non-code route, AND (b) the query contains BOTH a coding verb and a code-shaped
-# target noun. The verb list is the only list here that would be dangerous to
-# broaden \u2014 "create a pizza" must NOT match. The code-shaped target list is
-# intentionally restricted to words that strongly imply a code artifact.
-#
-#   "create a calculator in python"        verb=create, target=calculator (CODE_SIMPLE)
-#   "build me a web app in flask"          verb=build,  target=web app    (CODE_COMPLEX)
-#   "write a function to reverse a list"   verb=write,  target=function   (CODE_SIMPLE)
-#   "make a website for a pizza place"     verb=make,   target=website    (CODE_COMPLEX)
-#   "create a pizza"                       no target noun -> no match, stays REASONING
-_CODE_VERBS = (
-    r"create|build|write|implement|code|make|develop|design|generate|"
-    r"add|fix|patch|modify|update|refactor|rewrite|convert|port|translate"
-)
-_CODE_TARGETS = (
-    r"(?:calculator|function|method|class|module|script|program|app|application|"
-    r"website|site|web\s*app|web\s*page|landing\s*page|api|service|server|"
-    r"endpoint|backend|frontend|ui|gui|cli|tool|library|package|component|"
-    r"plugin|extension|game|binary|bot|scraper|crawler|pipeline|algorithm|"
-    r"snippets?|codebase)"
-)
-# We allow a LANG_QUALIFIER to appear either before the target ("a flask
-# app" \u2014 "flask" is a language, "app" is the target) or after it
-# ("calculator in python"). To handle both, the LANG_QUALIFIER is allowed
-# inside the function-word sequence and after the target.
-_LQ_BODY = (
-    r"\s+(?:in|using|with|for)\s+(?:python|javascript|typescript|js|ts|"
-    r"c\+\+|cpp|c#|csharp|java|kotlin|swift|go|rust|ruby|php|"
-    r"html|css|sql|bash|shell|matlab|r|lua|scala|haskell|elixir|dart|"
-    r"flask|django|fastapi|express|react|vue|angular|next\.js|nuxt|svelte|"
-    r"spring|laravel|rails|node|node\.js|deno|bun|"
-    r"tensorflow|pytorch|numpy|pandas|"
-    r"tailwind|bootstrap|jquery)"
-)
-_LQ_AT_END = "(" + _LQ_BODY + ")?"
-
-# Explicit "code/script" nouns anywhere in the query, which is enough on its own.
-_EXPLICIT_CODE_NOUN = r"\b(?:code|script|function|program|class|module)\b"
-
-# Primary: verb, then zero or more function words (which may include a
-# language qualifier like "flask" / "in python"), then a target noun
-# optionally followed by a language qualifier. The LANG_QUALIFIER by
-# itself is not enough \u2014 we need EITHER a target noun OR an explicit
-# language tag, so "create something in python" works but "write a haiku
-# about the sea" does not.
-_PRIMARY_PATTERN = re.compile(
-    r"\b(?P<verb>" + _CODE_VERBS + r")\b"
-    r"(?:[^.?!\n])*"
-    r"\b(?P<target>" + _CODE_TARGETS + r")\b",
-    re.IGNORECASE,
-)
-
-
-def _is_explicit_coding_query(query: str) -> Optional[TaskType]:
-    q = query.strip().lower()
-    
-    # 1. Programming languages / file extensions co-occurring with programming terms
-    languages = (
-        r"\b(?:python|javascript|typescript|js|ts|cpp|c\+\+|c#|csharp|java|kotlin|swift|"
-        r"go|rust|ruby|php|html|css|sql|bash|shell|powershell|rustlang|golang)\b"
-    )
-    code_terms = (
-        r"\b(?:code|script|function|program|class|module|array|string|list|dict|map|set|"
-        r"loop|variable|sorting|regex|json|api|hashmap|matrix|tree|binary|algorithm|"
-        r"dp|dynamic programming|recursion|reverse|print|parse|write|solve|implement)\b"
-    )
-    
-    # If the query contains a programming language AND a coding term:
-    if re.search(languages, q) and re.search(code_terms, q):
-        # Determine simple vs complex
-        if any(tok in q for tok in ("app", "website", "site", "api", "service", "server", "project")):
-            return TaskType.CODING_COMPLEX
-        return TaskType.CODING_SIMPLE
-
-    # 2. Known algorithmic coding platforms or terminology (e.g. Codeforces, LeetCode)
-    if "codeforces" in q or "leetcode" in q or "hackerrank" in q or "codewars" in q:
-        return TaskType.CODING_SIMPLE
-        
-    return None
-# Secondary: code-modification verbs followed by a non-target word ("the bug"),
-# where an explicit code noun (code/script/function/...) appears later in the
-# query. This is intentionally narrower than the primary pattern.
-_MODIFY_VERBS = (
-    r"fix|patch|modify|update|refactor|rewrite|optimise|optimize|improve|clean\s+up|"
-    r"debug|review|audit|annotate|document|format|lint"
-)
-_SECONDARY_PATTERN = re.compile(
-    r"\b(?P<verb>" + _MODIFY_VERBS + r")\b"
-    r"(?:[^.?!\n])*"
-    r"\b(?P<target>" + _EXPLICIT_CODE_NOUN + r")\b",
-    re.IGNORECASE,
-)
-
-
-def _code_override_route(query: str):
-    """Return (chosen_task, verb, target_str) if the query matches an unambiguous
-    coding pattern, else None. Called only as a post-check after the model has
-    routed \u2014 it never *initiates* a routing decision.
-    """
-    m = _PRIMARY_PATTERN.search(query)
-    if not m:
-        m = _SECONDARY_PATTERN.search(query)
-    if not m:
-        return None
-    verb = m.group("verb")
-    target_raw = m.group("target")
-    # The PRIMARY pattern has two alternatives: target noun, or language qualifier
-    # (in which case no "target" group is captured). For the language-qualifier
-    # path we fall back to the matched span as the target string so the
-    # COMPLEX-vs-SIMPLE decision below can still inspect it.
-    target = (target_raw or m.group(0)).lower()
-    if any(tok in target for tok in ("app", "website", "site", "api", "service", "server", "project")):
-        return TaskType.CODING_COMPLEX, verb, target
-    return TaskType.CODING_SIMPLE, verb, target
-
-
-# Post-check override for GENERAL: catches greetings and short identity questions
-# that the model often misroutes to REASONING when its structured output is
-# degenerating into noise. The "hi" -> REASONING bug was the trigger.
-#
-# The scope is intentionally narrow:
-#   - The query must be short (<= 8 words) so it can't be "hi, can you help
-#     me debug this code" (which is genuinely a coding request that happens
-#     to start with a greeting).
-#   - The query must START with a known greeting word ("hi", "hello", ...) or
-#     contain a direct identity question ("who are you", "what are you").
-_GREETING_WORDS = (
-    r"hi|hello|hey|howdy|greetings|yo|hola|sup|hiya|ahoy|good\s+(morning|afternoon|evening)"
-)
-_IDENTITY_QUESTIONS = (
-    r"who\s+(are|r\s+you|made|created|built)\s+you|"
-    r"what\s+(are|r\s+you)\s+(you|a|an)|"
-    r"your\s+name|"
-    r"are\s+you\s+(a|an)\s+(human|bot|ai|robot|llm|model|assistant)"
-)
-_GENERAL_OVERRIDE_PATTERN = re.compile(
-    r"^\s*(?:" + _GREETING_WORDS + r")\b[\s\S]*$",
-    re.IGNORECASE,
-)
-_IDENTITY_PATTERN = re.compile(
-    _IDENTITY_QUESTIONS,
-    re.IGNORECASE,
-)
-_RUDE_WORDS = (
-    r"fuck(?:\s+off|\s+you)?|shut\s+up|go\s+away|screw\s+you|you\s+are\s+(?:stupid|dumb|idiot|useless|rubbish)|"
-    r"idiot|asshole|bitch|bastard|dick|piss\s+off"
-)
-_RUDE_PATTERN = re.compile(
-    r"\b(?:" + _RUDE_WORDS + r")\b",
-    re.IGNORECASE,
-)
-
-
-def _general_override_route(query: str):
-    """Return True if the query is a short greeting or identity question that
-    should route to GENERAL even if the model picked something else. Returns
-    a short reason string for logging, or None if no override applies.
-    """
-    q = query.strip()
-    if not q:
-        return None
-    # Word-count cap: keep this rule from swallowing real requests that happen
-    # to start with a greeting ("hi can you fix the bug in my code"). 6 words
-    # is the longest pure greeting that's still plausible ("hi how are you doing
-    # today") and short enough that real requests ("hi, can you help me debug
-    # this code") comfortably exceed it.
-    if len(q.split()) > 6:
-        return None
-    if _GENERAL_OVERRIDE_PATTERN.match(q):
-        return "greeting"
-    if _IDENTITY_PATTERN.search(q):
-        return "identity"
-    if _RUDE_PATTERN.search(q):
-        return "rude"
-    return None
-
-
-_CREATIVE_PATTERN = re.compile(
-    r"\b(haiku|poem|story|song|joke|write a (?:haiku|poem|story|song|joke))\b",
-    re.IGNORECASE
-)
-
-
-def _math_override_route(query: str) -> bool:
-    q = query.strip().lower()
-    # Patterns for algebraic equations like: x^2 - 5x + 6 = 0 or 2x + 3 = 7
-    if "=" in q and any(c in q for c in "xyz"):
-        if not any(kw in q for kw in ("var ", "let ", "const ", "int ", "float ", "==", "def ")):
-            return True
-    # Patterns for arithmetic operations: e.g. "what is 45 * 34" or "solve 234 / 2.5"
-    if any(op in q for op in ("+", "-", "*", "/", "^")) and any(c.isdigit() for c in q):
-        if not ("/" in q and q.count("/") == 2 and not any(op in q for op in ("+", "-", "*", "^"))):
-            return True
-    return False
-
-
-def _search_override_route(query: str) -> bool:
-    q = query.strip().lower()
-    search_keywords = (
-        "weather", "temperature", "forecast",
-        "today", "latest", "current", "news",
-        "stock", "price of", "time in", "population of"
-    )
-    if any(kw in q for kw in search_keywords):
-        return True
-    
-    # Absolute priority triggers for SEARCH (matches triage_routing_guide.md)
-    if q.startswith("what is ") or q.startswith("who is ") or q.startswith("where is ") or q.startswith("when did "):
-        return True
-        
-    return False
-
-
-def _control_override_route(query: str) -> bool:
-    q = query.strip().lower()
-    control_actions = (
-        "set my brightness", "set brightness", "turn brightness",
-        "delete the files", "delete files in", "empty my trash",
-        "open the app", "open chrome", "open finder",
-        "shut down my", "restart my mac"
-    )
-    if any(kw in q for kw in control_actions):
-        return True
-    return False
-
-
-def _reasoning_override_route(query: str) -> bool:
-    q = query.strip().lower()
-    if q.startswith("why did") or q.startswith("how do i") or q.startswith("explain how"):
-        return True
-    return False
-
 _triage_grammar = None
 if LlamaGrammar is not None:
     try:
@@ -421,51 +180,7 @@ def classify_task(
     query_for_classification = re.sub(r"\[IMAGE_UPLOADED:[^\]]+\]", "", query_for_classification, flags=re.IGNORECASE)
     query_for_classification = query_for_classification.strip()
 
-    # Pre-filter override: bypass the model entirely for short greetings & identity questions
-    general_reason = _general_override_route(query_for_classification)
-    if general_reason is not None:
-        logger.info(
-            f"[Triage] Pre-filter override: query matched GENERAL pattern "
-            f"(reason={general_reason!r}); routing directly to GENERAL."
-        )
-        return TaskType.GENERAL, None
 
-    # If the previous turn was an OBSERVATION, we're mid-CONTROL-agent-loop. That's
-    # protocol/session state carried over from a prior routing decision, not a fresh
-    # content classification, so it bypasses the model entirely.
-    if history and history[-1].get("role") == "user" and history[-1].get("content", "").strip().startswith("OBSERVATION:"):
-        return TaskType.CONTROL, None
-
-    # Explicit coding query bypass -> CODING_SIMPLE / CODING_COMPLEX
-    explicit_code_route = _is_explicit_coding_query(query_for_classification)
-    if explicit_code_route is not None:
-        logger.info(f"[Triage] Pre-filter override: query matched explicit coding pattern; routing to {explicit_code_route.name}.")
-        return explicit_code_route, None
-
-    # Time-sensitive lookup bypass -> SEARCH
-    if _search_override_route(query_for_classification):
-        logger.info(f"[Triage] Pre-filter override: time-sensitive/factual query matched SEARCH pattern; routing to SEARCH.")
-        return TaskType.SEARCH, query_for_classification
-
-    # Control automation bypass -> CONTROL
-    if _control_override_route(query_for_classification):
-        logger.info(f"[Triage] Pre-filter override: hardware/automation query matched CONTROL pattern; routing to CONTROL.")
-        return TaskType.CONTROL, None
-
-    # Math solving bypass -> MATH
-    if _math_override_route(query_for_classification):
-        logger.info(f"[Triage] Pre-filter override: math/equation query matched MATH pattern; routing to MATH.")
-        return TaskType.MATH, None
-
-    # Creative general fallback bypass -> GENERAL
-    if _CREATIVE_PATTERN.search(query_for_classification):
-        logger.info(f"[Triage] Pre-filter override: creative query matched GENERAL pattern; routing to GENERAL.")
-        return TaskType.GENERAL, None
-
-    # Reasoning / Explanatory query bypass -> REASONING
-    if _reasoning_override_route(query_for_classification):
-        logger.info(f"[Triage] Pre-filter override: explanatory/reasoning query matched REASONING pattern; routing to REASONING.")
-        return TaskType.REASONING, None
 
     if history:
         lower_query = query_for_classification.strip().lower()
@@ -474,27 +189,7 @@ def classify_task(
             if "```" in last_asst or "<file_card" in last_asst or "<coding>" in last_asst:
                 return TaskType.CODING_COMPLEX, None
 
-    # --- Start of Fix added by AI ---
-    # الهدف من هذا التعديل: إجبار الترياج على تحويل الطلبات البرمجية باللغة العربية
-    # وطلبات تطوير الويب وتصميم الهياكل مباشرة إلى قسم البرمجة (CODING_COMPLEX)
-    # لتجنب أخطاء الموديل الصغير في فهم اللغة العربية.
-    lower_query_custom = query_for_classification.lower()
-    
-    # 1. Full-Stack / Skeleton / Complex Code Rules (Arabic & English)
-    kw_en_pattern = r"\b(?:backend|server|api|full stack|full-stack|node|express|skeleton)\b"
-    kw_ar_pattern = r"(?:هيكل|قالب|فراغات)"
-    if re.search(kw_en_pattern, lower_query_custom) or re.search(kw_ar_pattern, lower_query_custom):
-        logger.info("[Triage] Hardcoded intercept: Full-Stack or Skeleton keyword detected. Routing to CODING_COMPLEX.")
-        return TaskType.CODING_COMPLEX, None
-        
-    # 2. Web Development Rules (Arabic & English)
-    tech_pattern = r"\b(?:tailwind|html|css|react)\b"
-    action_en_pattern = r"\b(?:build|landing page|website)\b"
-    action_ar_pattern = r"(?:موقع|صفحة|صمم|برمج)"
-    if re.search(tech_pattern, lower_query_custom) and (re.search(action_en_pattern, lower_query_custom) or re.search(action_ar_pattern, lower_query_custom)):
-        logger.info("[Triage] Hardcoded intercept: Web development query detected. Routing to CODING_COMPLEX.")
-        return TaskType.CODING_COMPLEX, None
-    # --- End of Fix ---
+
 
     minimized = _minimize_history(history, max_entries=2)
 
@@ -683,35 +378,7 @@ def classify_task(
         mapped = TaskType.SEARCH
 
     if mapped is not None:
-        # Post-check override: short greetings and identity questions must reach
-        # GENERAL even if the model picked a heavier route. This catches the
-        # common case where the triage model's structured output degenerates
-        # into noise on simple "hi" / "hello" / "who are you" queries and the
-        # model picks REASONING (or worse) by default.
-        if mapped != TaskType.GENERAL:
-            general_reason = _general_override_route(query_for_classification)
-            if general_reason is not None:
-                logger.info(
-                    f"[Triage] Post-check override: query matched GENERAL pattern "
-                    f"(reason={general_reason!r}); "
-                    f"downgrading {mapped.name} -> GENERAL."
-                )
-                return TaskType.GENERAL, None
-        # Post-check override: unambiguous coding requests must reach a code route.
-        # The triage model is sometimes confident-but-wrong on clear coding requests
-        # (e.g. "create a calculator in python" -> REASONING). This is a narrow,
-        # high-precision list of patterns that only fires when the model picked a
-        # non-code route AND the query matches an unambiguous coding pattern.
-        if mapped != TaskType.CODING_SIMPLE and mapped != TaskType.CODING_COMPLEX:
-            override_result = _code_override_route(query_for_classification)
-            if override_result is not None:
-                chosen, verb, target = override_result
-                logger.info(
-                    f"[Triage] Post-check override: query matched coding pattern "
-                    f"(verb={verb!r}, target={target!r}); "
-                    f"upgrading {mapped.name} -> {chosen.name}."
-                )
-                return chosen, None
+
         if mapped == TaskType.SEARCH:
             return TaskType.SEARCH, (keywords or query_for_classification)
         return mapped, None
