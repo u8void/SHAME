@@ -1449,13 +1449,23 @@ def download_all_models(roles_to_train: List[str] = None):
                     )
                     sys.stdout.flush()
 
+                class PreserveUserAgentRedirectHandler(urllib.request.HTTPRedirectHandler):
+                    def redirect_request(self, r, fp, code, msg, headers, newurl):
+                        new_req = super().redirect_request(r, fp, code, msg, headers, newurl)
+                        if new_req is not None:
+                            for k, v in r.headers.items():
+                                if k.lower() == "user-agent":
+                                    new_req.add_header(k, v)
+                        return new_req
+
+                opener = urllib.request.build_opener(PreserveUserAgentRedirectHandler)
                 req = urllib.request.Request(
                     url,
                     headers={
                         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                     }
                 )
-                with urllib.request.urlopen(req) as response:
+                with opener.open(req) as response:
                     total_size = int(response.info().get('Content-Length', 0))
                     block_size = 1024 * 1024
                     count = 0
