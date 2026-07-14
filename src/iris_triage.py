@@ -46,7 +46,7 @@ if not TRIAGE_SYSTEM_PROMPT:
         "                  place elsewhere.\n"
         "  GENERAL       - casual chat, greetings, creative writing, identity questions.\n"
         "  MATH          - arithmetic, algebra, calculus, proofs, geometry, probability, math word\n"
-        "                  problems, math explanations, and mathematical equations.\n"
+        "                  problems, math explanations, raw formulas, and trigonometry.\n"
         "  CODE_SIMPLE   - a single isolated snippet, function, or small canvas/SVG/HTML/CSS/JS piece.\n"
         "  CODE_COMPLEX  - a multi-file project, full app, or full website/web app build request.\n"
         "  CONTROL       - direct OS/hardware/local-app automation on the user's machine.\n\n"

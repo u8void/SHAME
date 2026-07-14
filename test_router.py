@@ -1,13 +1,6 @@
-import asyncio
 from src.iris_triage import classify_task
 
-async def main():
-    route_gen = classify_task("integrate sin x cos x", [])
-    route = None
+route_gen = classify_task("cos x + sin x", [])
+if hasattr(route_gen, "__iter__"):
     for x in route_gen:
-        if x["type"] == "route":
-            route = x["content"]
-            break
-    print("ROUTE IS:", route)
-
-asyncio.run(main())
+        print("YIELD:", x)
