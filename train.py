@@ -1449,7 +1449,24 @@ def download_all_models(roles_to_train: List[str] = None):
                     )
                     sys.stdout.flush()
 
-                urllib.request.urlretrieve(url, temp_path, progress_hook)
+                req = urllib.request.Request(
+                    url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    }
+                )
+                with urllib.request.urlopen(req) as response:
+                    total_size = int(response.info().get('Content-Length', 0))
+                    block_size = 1024 * 1024
+                    count = 0
+                    with open(temp_path, 'wb') as f_out:
+                        while True:
+                            chunk = response.read(block_size)
+                            if not chunk:
+                                break
+                            f_out.write(chunk)
+                            count += 1
+                            progress_hook(count, len(chunk), total_size)
                 if os.path.exists(dest_path):
                     os.remove(dest_path)
                 os.rename(temp_path, dest_path)
