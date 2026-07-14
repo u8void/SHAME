@@ -1409,7 +1409,7 @@ def download_all_models(roles_to_train: List[str] = None):
         start_time = time.time()
         try:
             downloaded = False
-            if "huggingface.co" in url and "/resolve/" in url:
+            if "huggingface.co" in url and "/resolve/" in url and os.environ.get("USE_HF_HUB", "0") == "1":
                 try:
                     from huggingface_hub import hf_hub_download
                     from tqdm import tqdm
