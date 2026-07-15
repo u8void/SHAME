@@ -1418,11 +1418,6 @@ def download_all_models(roles_to_train: List[str] = None):
                         def __init__(self, *args, **kwargs):
                             kwargs['disable'] = False
                             super().__init__(*args, **kwargs)
-                            
-                        def display(self, msg=None, pos=None):
-                            # Output using \n instead of \r so external readline() doesn't block
-                            sys.stdout.write(self.__str__() + "\n")
-                            sys.stdout.flush()
                                 
                     parts = url.split("huggingface.co/")[-1].split("/resolve/")
                     repo_id = parts[0]
@@ -1476,8 +1471,8 @@ def download_all_models(roles_to_train: List[str] = None):
                                 speed = int(progress_size / (1024 * 1024 * max(duration, 0.001)))
                                 percent = int(progress_size * 100 / total_size) if total_size > 0 else 0
                                 sys.stdout.write(
-                                    f"  ... {percent}% | {progress_size / (1024*1024):.1f} MB "
-                                    f"| {speed} MB/s | {duration:.1f}s\n"
+                                    f"\r  ... {percent}% | {progress_size / (1024*1024):.1f} MB "
+                                    f"| {speed} MB/s | {duration:.1f}s"
                                 )
                                 sys.stdout.flush()
                                 
