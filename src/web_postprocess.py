@@ -654,6 +654,31 @@ def _force_dark_theme_consistency(html: str) -> Tuple[str, List[str]]:
     return new_html, fixes
 
 
+def _remove_duplicate_texts(html: str) -> Tuple[str, List[str]]:
+    fixes = []
+    # 1. Strip standalone uppercase/lowercase labels like <p>DESCRIPTION</p> or <div>PRICE:</div>
+    label_pattern = r"<(p|div|span|h[1-6]|strong|b)[^>]*>\s*(?:DESCRIPTION|PRICE|Description|Price)\s*:?\s*</\1>"
+    html, n = re.subn(label_pattern, "", html, flags=re.I)
+    if n > 0:
+        fixes.append(f"removed {n} redundant DESCRIPTION/PRICE labels")
+
+    # 2. Find all paragraphs or div text blocks to check for exact duplicates
+    tag_pattern = r"<(p|div|span|li|h3|h4|h5|h6|strong|b)[^>]*>([^<]{20,})</\1>"
+    seen_texts = set()
+
+    def replacer(match):
+        tag, text = match.group(1), match.group(2)
+        norm_text = " ".join(text.strip().lower().split())
+        if norm_text in seen_texts:
+            fixes.append(f"removed duplicate text block: '{text[:30]}...'")
+            return ""
+        seen_texts.add(norm_text)
+        return match.group(0)
+
+    html = re.sub(tag_pattern, replacer, html)
+    return html, fixes
+
+
 def postprocess_html(html: str, query: str = "") -> Tuple[str, List[str]]:
     """Run all HTML post-processing fixes and return the cleaned HTML plus
     a list of fixes applied (suitable for logging)."""
@@ -682,6 +707,9 @@ def postprocess_html(html: str, query: str = "") -> Tuple[str, List[str]]:
     all_fixes.extend(fixes)
 
     html, fixes = _force_dark_theme_consistency(html)
+    all_fixes.extend(fixes)
+
+    html, fixes = _remove_duplicate_texts(html)
     all_fixes.extend(fixes)
 
     html, fixes = _fix_contrast(html)
