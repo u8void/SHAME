@@ -129,7 +129,7 @@ _CODE_VERBS = (
 )
 _CODE_TARGETS = (
     r"(?:calculator|function|method|class|module|script|program|app|application|"
-    r"website|site|web\s*app|web\s*page|landing\s*page|api|service|server|"
+    r"website|site|web\s*app|web\s*page|landing\s*page|page|api|service|server|"
     r"endpoint|backend|frontend|ui|gui|cli|tool|library|package|component|"
     r"plugin|extension|game|binary|bot|scraper|crawler|pipeline|algorithm|"
     r"snippets?|codebase)"
@@ -148,17 +148,11 @@ _LANG_QUALIFIER_AT_END = "(" + _LANG_QUALIFIER_BODY + ")?"
 # Explicit "code/script" nouns anywhere in the query.
 _EXPLICIT_CODE_NOUN = r"\b(?:code|script|function|program|class|module)\b"
 
-# Primary: verb, then 0+ function words (including LANG_QUALIFIER and bare
-# framework nouns), then a target noun optionally followed by LANG_QUALIFIER.
+# Primary: verb, then 0+ function words/adjectives, then a target noun optionally followed by LANG_QUALIFIER.
 _PRIMARY_PATTERN = re.compile(
     r"\b(?P<verb>" + _CODE_VERBS + r")\b"
-    r"(?:\s+(?:me|you|us|him|her|them|it|this|that|my|your|his|her|their|its|"
-    r"a|an|the|some|any|"
-    + _LANG_QUALIFIER_BODY + r"|"
-    + r"(?:flask|django|fastapi|express|react|vue|angular|next\.js|nuxt|svelte|"
-    + r"spring|laravel|rails|node|node\.js|deno|bun|tailwind|bootstrap|jquery)"
-    + r"))+\s+"
-    r"(?P<target>" + _CODE_TARGETS + r")"
+    r"(?:[^?!\n])*?\b"
+    r"(?P<target>" + _CODE_TARGETS + r")\b"
     + _LANG_QUALIFIER_AT_END,
     re.IGNORECASE,
 )
