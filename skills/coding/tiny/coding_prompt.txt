@@ -18,6 +18,8 @@ WEB DESIGN RULES (CRITICAL FOR WEBSITES/WEB APPS):
 If requested to build a website, web app, or dashboard, you MUST create a SINGLE, self-contained HTML file.
 You MUST follow these design rules for premium, visual excellence (A LIGHT THEME IS STRICTLY FORBIDDEN):
 
+CRITICAL CONTENT RULE: Every name, text, price, and description must be fully written out. NEVER use placeholder text, brackets, or generic stand-in labels (like "[Brand Name]" or "[Item Name]"). Always replace template content with real, appropriate details matching the user's request.
+
 1. SKELETON TEMPLATE: Use this exact premium dark-mode skeleton as your base structure. Customize the names, content, and icons to perfectly match the user's specific request:
 ```html
 <!DOCTYPE html>
@@ -25,7 +27,7 @@ You MUST follow these design rules for premium, visual excellence (A LIGHT THEME
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>[Title]</title>
+  <title>Aura Dining | Modern Culinary Experience</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -45,16 +47,16 @@ You MUST follow these design rules for premium, visual excellence (A LIGHT THEME
         <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
           <i data-lucide="sparkles" class="w-4 h-4 text-white"></i>
         </div>
-        [Brand Name]
+        Aura Dining
       </a>
       <div class="hidden md:flex items-center gap-8 text-sm text-zinc-400">
         <a href="#hero" class="hover:text-white transition-colors">Home</a>
-        <a href="#features" class="hover:text-white transition-colors">Features</a>
+        <a href="#features" class="hover:text-white transition-colors">Menu</a>
         <a href="#about" class="hover:text-white transition-colors">About</a>
         <a href="#contact" class="hover:text-white transition-colors">Contact</a>
       </div>
       <button type="button" class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-sm font-semibold transition-colors">
-        Get Started
+        Order Now
       </button>
     </nav>
   </header>
@@ -64,20 +66,20 @@ You MUST follow these design rules for premium, visual excellence (A LIGHT THEME
     <div class="max-w-5xl mx-auto px-6 text-center space-y-8">
       <span class="inline-flex items-center gap-2 bg-zinc-900/80 border border-zinc-800 rounded-full px-4 py-1.5 text-sm text-zinc-400">
         <i data-lucide="sparkles" class="w-4 h-4 text-indigo-400"></i>
-        Introducing [Brand Name]
+        Introducing Aura Dining
       </span>
       <h1 class="text-5xl md:text-6xl font-extrabold tracking-tight text-white leading-tight">
-        [Main Headline] <span class="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">[Highlighted Phrase]</span>
+        Crafting culinary stories <span class="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">one plate at a time</span>
       </h1>
       <p class="text-lg text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-        [Supporting Subtext / Tagline]
+        Experience an unforgettable journey of modern gastronomy, fine wines, and ambient luxury in the heart of the city.
       </p>
       <div class="flex flex-col sm:flex-row gap-4 justify-center pt-4">
         <button type="button" class="bg-gradient-to-r from-indigo-500 to-purple-600 hover:opacity-95 text-white font-semibold px-8 py-4 rounded-xl transition-all duration-300 shadow-lg shadow-indigo-500/20">
-          Primary Action
+          Explore Menu
         </button>
         <button type="button" class="bg-zinc-900/50 border border-zinc-800 hover:border-zinc-700 text-white font-semibold px-8 py-4 rounded-xl transition-all duration-300">
-          Secondary Action
+          Book Table
         </button>
       </div>
     </div>
@@ -87,16 +89,16 @@ You MUST follow these design rules for premium, visual excellence (A LIGHT THEME
   <section id="features" class="py-16 lg:py-24">
     <div class="max-w-5xl mx-auto px-6 space-y-12">
       <header class="text-center space-y-4">
-        <h2 class="text-4xl font-bold text-white tracking-tight">[Section Title]</h2>
-        <p class="text-zinc-400 max-w-xl mx-auto">[Section description]</p>
+        <h2 class="text-4xl font-bold text-white tracking-tight">Chef's Signatures</h2>
+        <p class="text-zinc-400 max-w-xl mx-auto">A curated selection of our finest seasonal creations, prepared with wild-caught seafood and locally sourced herbs.</p>
       </header>
       
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <!-- Glassmorphic Card -->
         <div class="bg-zinc-900/50 backdrop-blur-md border border-zinc-800/80 rounded-2xl p-6 transition-all duration-300 hover:-translate-y-1 hover:border-indigo-500/30 flex flex-col justify-between space-y-4">
           <div class="space-y-2">
-            <h3 class="text-xl font-bold text-white">[Item Name]</h3>
-            <p class="text-sm text-zinc-400 leading-relaxed">[Item description]</p>
+            <h3 class="text-xl font-bold text-white">Pan-Seared Sea Bass</h3>
+            <p class="text-sm text-zinc-400 leading-relaxed">Fresh wild-caught sea bass served with roasted asparagus, baby capers, and a warm lemon-herb butter reduction.</p>
           </div>
         </div>
       </div>
@@ -106,7 +108,7 @@ You MUST follow these design rules for premium, visual excellence (A LIGHT THEME
   <!-- Footer -->
   <footer class="py-12 mt-16 border-t border-zinc-900 bg-zinc-950">
     <div class="max-w-5xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6 text-sm text-zinc-500">
-      <p>&copy; 2026 [Brand Name]. All rights reserved.</p>
+      <p>&copy; 2026 Aura Dining. All rights reserved.</p>
       <div class="flex gap-6">
         <a href="#" class="hover:text-white transition-colors">Privacy Policy</a>
         <a href="#" class="hover:text-white transition-colors">Terms of Service</a>
