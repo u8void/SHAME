@@ -62,6 +62,10 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     # 4. Fallback if Math model returned nothing
     if not math_solution:
         math_solution = "[No mathematical solution calculated by 003]"
+    else:
+        math_solution = re.sub(r'\\boxed{([^}]+)}', r'**\1**', math_solution)
+        math_solution = re.sub(r'\\\[|\\\]|\\\(|\\\)|(\$\$)|(\$)', '', math_solution)
+        math_solution = math_solution.replace('\\', '').replace('{', '').replace('}', '')
 
     # 5. Explaining with General Model (005)
     yield {"type": "status", "content": "Explaining solution..."}
@@ -76,8 +80,9 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
         f"Your job is to present and explain this solution clearly to the user. "
         f"CRITICAL: Do NOT re-derive the problem yourself. Do NOT second-guess or redo the math model's calculations. "
         f"Trust the work above as correct and focus entirely on explaining it in a clear, structured, and elegant way. "
-        f"Use flawless LaTeX for all mathematical expressions. "
-        f"CRITICAL RULE: DO NOT wrap your response in triple backticks (```). DO NOT output a code block. Write plain text with inline/display LaTeX."
+        f"Write all mathematical expressions in plain text. Do NOT use LaTeX formatting (no $, $$, \\(, \\), \\[ or \\]). "
+        f"Use markdown bold (**text**) to highlight key mathematical expressions, important steps, and the final answer. "
+        f"CRITICAL RULE: DO NOT wrap your response in triple backticks (```). DO NOT output a code block. Write plain text only."
     )
 
     general_messages = []
@@ -91,8 +96,12 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict) -
     try:
         for ev in _stream_tokens(ModelRole.GENERAL, general_messages, max_tokens=8192, temperature=0.5, think_mode="show"):
             if ev["type"] == "token":
-                # Nuke all backticks, tildes, file_card tags, and 4-space/tab indentations
+                # Nuke all backticks, tildes, file_card tags, and LaTeX delimiters
                 ev["content"] = ev["content"].replace("`", "").replace("~", "")
+                ev["content"] = ev["content"].replace("\\[", "").replace("\\]", "")
+                ev["content"] = ev["content"].replace("\\(", "").replace("\\)", "")
+                ev["content"] = ev["content"].replace("$", "").replace("\\", "")
+                ev["content"] = ev["content"].replace("{", "").replace("}", "")
                 full += ev["content"]
 
             if user_lang == "English" or ev["type"] != "token":
