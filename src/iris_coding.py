@@ -660,17 +660,47 @@ def _run_complex_coding(
                     final_output = corrected
 
     
-    yield {"type": "status", "content": "Verifying complex code in sandbox..."}
-    _, sandbox = apply_smart_harness_code(final_output, language=lang or "python")
-    if sandbox.result == SandboxResult.PASS:
-        yield {"type": "status", "content": f"Sandbox: {sandbox.tests_passed} tests passed"}
-    elif sandbox.result == SandboxResult.FAIL:
-        yield {"type": "harness_warning", "content": f"Sandbox: {sandbox.tests_passed}/{sandbox.tests_passed + sandbox.tests_failed} tests passed — some tests failed"}
-    elif sandbox.syntax_error:
-        yield {"type": "syntax_error", "content": f"Sandbox: {sandbox.syntax_error}"}
-    elif sandbox.runtime_errors:
-        for rerr in sandbox.runtime_errors[:3]:
-            yield {"type": "harness_warning", "content": f"Runtime: {rerr[:200]}"}
+    MAX_RETRIES = 3
+    for attempt in range(MAX_RETRIES):
+        yield {"type": "status", "content": f"Verifying code in sandbox (Attempt {attempt+1}/{MAX_RETRIES})..."}
+        from src.harness import apply_smart_harness_code, SandboxResult
+        _, sandbox = apply_smart_harness_code(final_output, language=lang or "python")
+        
+        if sandbox.result == SandboxResult.PASS:
+            yield {"type": "status", "content": f"Sandbox: {sandbox.tests_passed} tests passed"}
+            break
+            
+        error_msg = ""
+        if sandbox.syntax_error:
+            error_msg = f"Syntax Error:\n{sandbox.syntax_error}"
+            yield {"type": "syntax_error", "content": f"Sandbox: {sandbox.syntax_error}"}
+        elif sandbox.runtime_errors:
+            error_msg = f"Runtime Error:\n{sandbox.runtime_errors[0]}"
+            yield {"type": "harness_warning", "content": f"Runtime: {sandbox.runtime_errors[0][:200]}"}
+        elif sandbox.result == SandboxResult.FAIL:
+            error_msg = f"Test Failed: {sandbox.tests_passed}/{sandbox.tests_passed + sandbox.tests_failed} passed."
+            yield {"type": "harness_warning", "content": error_msg}
+            
+        if attempt < MAX_RETRIES - 1 and error_msg:
+            yield {"type": "status", "content": "Auto-debugging... applying self-healing fix..."}
+            correction_msgs = review_msgs + [
+                {"role": "assistant", "content": final_output},
+                {"role": "user", "content": f"The sandbox reported the following error:\n\n{error_msg}\n\nFix the error and return the COMPLETE corrected code inside a ```{lang or 'python'}``` block. Do not use diffs."}
+            ]
+            corrected = ""
+            for ev in _stream_tokens(ModelRole.CODE, correction_msgs, max_tokens=8192, temperature=0.2, think_mode="show", system_prompt_override=get_reviewer_prompt("Iris")):
+                if user_lang == "English" or ev["type"] != "token":
+                    yield ev
+                if ev["type"] == "token":
+                    corrected += ev["content"]
+            if not _keep_loaded:
+                unload_model()
+                
+            if "```" in corrected:
+                from src.harness import CodeSandbox
+                final_output = CodeSandbox.extract_code(corrected, lang) or final_output
+                if user_lang == "English":
+                    yield {"type": "clear"}
 
     
     if isinstance(settings, dict) and settings.get("code_review"):
@@ -723,9 +753,23 @@ def _run_complex_coding(
             with open(fpath, "w", encoding="utf-8") as f:
                 f.write(content)
         
+        import socket
+        import subprocess
+        import sys
+        
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        
+        subprocess.Popen([sys.executable, "-m", "http.server", str(port)], cwd=workspace_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
         scaffold_msg = f"\n\n> 📁 **Project Scaffolding Generated!** Your files have been saved locally in `{workspace_dir}`."
+        scaffold_msg += f"\n> 🎨 **Live Preview Server:** http://127.0.0.1:{port}"
+        
         if user_lang != "English":
-            scaffold_msg = f"\n\n> 📁 **تم بناء المشروع بنجاح!** لقد قمت بتوليد مجلد للمشروع وحفظ جميع الملفات الجاهزة للتشغيل محلياً في: `{workspace_dir}`."
+            scaffold_msg = f"\n\n> 📁 **تم بناء المشروع بنجاح!** لقد قمت بتوليد مجلد للمشروع وحفظ جميع الملفات محلياً في: `{workspace_dir}`."
+            scaffold_msg += f"\n> 🎨 **رابط المعاينة الحية:** [http://127.0.0.1:{port}](http://127.0.0.1:{port})"
             
         final_output += scaffold_msg
         yield {"type": "token", "content": scaffold_msg}
@@ -1085,6 +1129,33 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
             f"{final_query}"
         )
         
+    import os
+    path_match = re.search(r'\[(?:path|مسار):\s*(.+?)\]', user_query, re.IGNORECASE)
+    if path_match:
+        target_path = path_match.group(1).strip()
+        if os.path.exists(target_path) and os.path.isdir(target_path):
+            tree = []
+            for root, dirs, files in os.walk(target_path):
+                dirs[:] = [d for d in dirs if d not in ['.git', 'node_modules', '__pycache__', 'venv', 'env', '.env', '.next', 'build', 'dist']]
+                level = root.replace(target_path, '').count(os.sep)
+                indent = ' ' * 4 * (level)
+                tree.append(f"{indent}{os.path.basename(root)}/")
+                subindent = ' ' * 4 * (level + 1)
+                for f in files:
+                    tree.append(f"{subindent}{f}")
+                if len(tree) > 500:
+                    tree.append(f"{subindent}... [Truncated]")
+                    break
+            
+            workspace_context = "\n".join(tree)
+            final_query = (
+                f"<workspace_tree path='{target_path}'>\n"
+                f"{workspace_context}\n"
+                f"</workspace_tree>\n"
+                f"Use the workspace tree above to understand the project structure when generating or editing files.\n\n"
+                f"{final_query}"
+            )
+
     final_query += _language_directive(user_query, role=ModelRole.CODE)
     
     # 2. History & Compaction
