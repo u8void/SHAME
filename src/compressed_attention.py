@@ -301,11 +301,12 @@ Rules:
 - Drop greetings, filler, and repetitive confirmation
 - Write in telegram style: short sentences, no filler
 - Maximum 300 words
+- CRITICAL: You MUST write the summary in ENGLISH ONLY. Do NOT use Esperanto or any other language. Do NOT include your internal thought process. Just output the summary directly.
 
 Conversation to compress:
 {conversation}
 
-Dense digest:"""
+Dense digest in ENGLISH ONLY:"""
 
 
 def _summarize_dropped(text: str, llm=None) -> str:

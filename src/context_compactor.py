@@ -72,11 +72,12 @@ _SUMMARIZE_PROMPT = """You are a conversation compressor. Summarize the followin
 5. Code file paths that were created or modified
 
 Keep it under 200 words. Write in telegram-style: short sentences, no filler.
+CRITICAL INSTRUCTION: You MUST write the summary in ENGLISH ONLY. Do NOT use Esperanto or any other language. Do NOT include your internal thought process. Just output the summary directly.
 
 Conversation excerpt:
 {conversation}
 
-Dense digest:"""
+Dense digest in ENGLISH ONLY:"""
 
 
 def _summarize_with_model(messages: List[Dict[str, str]], max_output_tokens: int = 300) -> str:
