@@ -33,9 +33,21 @@ def estimate_tokens(messages: List[Dict[str, str]]) -> int:
 def compact_light(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
     
     result = []
-    for msg in messages:
-        content = msg.get("content", "")
+    # Keep the last 3 messages completely intact (no code omission, no truncation)
+    # so that the model can reference/edit the most recent code blocks and queries.
+    keep_intact_count = 3
+    split_idx = max(0, len(messages) - keep_intact_count)
+
+    for i, msg in enumerate(messages):
         role = msg.get("role", "user")
+        content = msg.get("content", "")
+        
+        if i >= split_idx:
+            # Preserve fully intact
+            result.append({"role": role, "content": content})
+            continue
+
+        # For older messages, apply light compaction
         content = re.sub(
             r'```[\s\S]*?```',
             '[code block omitted — preserved in digest]',
