@@ -5,6 +5,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["GGML_CUDA_NO_VMM"] = "1"
 import sys
 os.environ["HF_XET_HIGH_PERFORMANCE"] = "1"
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 import json
 import random
 import argparse
@@ -1411,11 +1412,6 @@ def download_all_models(roles_to_train: List[str] = None):
             if "huggingface.co" in url and "/resolve/" in url:
                 try:
                     from huggingface_hub import hf_hub_download
-                    from tqdm import tqdm
-                    class ForceTqdm(tqdm):
-                        def __init__(self, *args, **kwargs):
-                            kwargs['disable'] = False
-                            super().__init__(*args, **kwargs)
                     
                     parts = url.split("huggingface.co/")[-1].split("/resolve/")
                     repo_id = parts[0]
@@ -1426,56 +1422,51 @@ def download_all_models(roles_to_train: List[str] = None):
                         repo_id=repo_id,
                         filename=remote_name,
                         local_dir="./models",
-                        local_dir_use_symlinks=False,
-                        tqdm_class=ForceTqdm
+                        local_dir_use_symlinks=False
                     )
                     if os.path.abspath(dl_path) != os.path.abspath(dest_path):
                         if os.path.exists(dest_path): os.remove(dest_path)
                         os.rename(dl_path, dest_path)
                     downloaded = True
                 except Exception as e:
-                    print(f"  HF transfer failed ({e}), falling back to standard download...")
+                    print(f"  hf_hub_download failed ({e}), falling back to requests...")
 
             if not downloaded:
-                def progress_hook(count, block_size, total_size):
-                    duration = time.time() - start_time
-                    progress_size = int(count * block_size)
-                    speed = int(progress_size / (1024 * 1024 * max(duration, 0.001)))
-                    percent = int(count * block_size * 100 / total_size) if total_size > 0 else 0
-                    sys.stdout.write(
-                        f"\r  ... {percent}% | {progress_size / (1024*1024):.1f} MB "
-                        f"| {speed} MB/s | {duration:.1f}s"
-                    )
-                    sys.stdout.flush()
-
-                class PreserveUserAgentRedirectHandler(urllib.request.HTTPRedirectHandler):
-                    def redirect_request(self, r, fp, code, msg, headers, newurl):
-                        new_req = super().redirect_request(r, fp, code, msg, headers, newurl)
-                        if new_req is not None:
-                            for k, v in r.headers.items():
-                                if k.lower() == "user-agent":
-                                    new_req.add_header(k, v)
-                        return new_req
-
-                opener = urllib.request.build_opener(PreserveUserAgentRedirectHandler)
-                req = urllib.request.Request(
-                    url,
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    }
-                )
-                with opener.open(req) as response:
-                    total_size = int(response.info().get('Content-Length', 0))
-                    block_size = 1024 * 1024
+                import requests
+                from requests.adapters import HTTPAdapter
+                from urllib3.util.retry import Retry
+                
+                print("  Using requests fallback downloader...")
+                session = requests.Session()
+                retries = Retry(total=5, backoff_factor=1, status_forcelist=[502, 503, 504])
+                session.mount('http://', HTTPAdapter(max_retries=retries))
+                session.mount('https://', HTTPAdapter(max_retries=retries))
+                
+                headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
+                with session.get(url, headers=headers, stream=True, timeout=30) as response:
+                    response.raise_for_status()
+                    total_size = int(response.headers.get('content-length', 0))
+                    block_size = 8 * 1024 * 1024  # 8MB chunks
+                    
                     count = 0
                     with open(temp_path, 'wb') as f_out:
-                        while True:
-                            chunk = response.read(block_size)
-                            if not chunk:
-                                break
-                            f_out.write(chunk)
-                            count += 1
-                            progress_hook(count, len(chunk), total_size)
+                        for chunk in response.iter_content(chunk_size=block_size):
+                            if chunk:
+                                f_out.write(chunk)
+                                count += 1
+                                
+                                duration = time.time() - start_time
+                                progress_size = count * block_size
+                                if progress_size > total_size and total_size > 0:
+                                    progress_size = total_size
+                                speed = int(progress_size / (1024 * 1024 * max(duration, 0.001)))
+                                percent = int(progress_size * 100 / total_size) if total_size > 0 else 0
+                                sys.stdout.write(
+                                    f"\r  ... {percent}% | {progress_size / (1024*1024):.1f} MB "
+                                    f"| {speed} MB/s | {duration:.1f}s"
+                                )
+                                sys.stdout.flush()
+                                
                 if os.path.exists(dest_path):
                     os.remove(dest_path)
                 os.rename(temp_path, dest_path)
