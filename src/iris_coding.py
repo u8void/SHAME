@@ -1263,6 +1263,18 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
         for m in (history or [])
     ) or (bool(context) and bool(extract_code_blocks(context)))
     if has_prior_code:
+        q_lower = user_query.lower()
+        creation_patterns = [
+            r"\bcreate\s+(?:a|an|new)\b",
+            r"\bbuild\s+(?:a|an|new)\b",
+            r"\bwrite\s+(?:a|an|new)\b",
+            r"\bgenerate\s+(?:a|an|new)\b",
+            r"\bmake\s+(?:a|an|new)\b",
+        ]
+        if any(re.search(p, q_lower) for p in creation_patterns):
+            has_prior_code = False
+
+    if has_prior_code:
         _model_size = (settings or {}).get("size", "tiny")
         # Always enable patch mode for file edits. The patcher was rewritten
         # to be 3B-friendly: per-line fuzzy alignment, paraphrased-comment
