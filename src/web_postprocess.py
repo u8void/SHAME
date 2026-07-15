@@ -612,6 +612,48 @@ def _ensure_doctype(html: str) -> Tuple[str, List[str]]:
     return html, fixes
 
 
+def _force_dark_theme_consistency(html: str) -> Tuple[str, List[str]]:
+    fixes = []
+    # Only enforce if the body class has dark-mode signifiers
+    body_match = re.search(r"<body[^>]*class=\"([^\"]*)\"", html)
+    is_dark_theme = False
+    if body_match:
+        body_class = body_match.group(1)
+        if any(dark in body_class for dark in ["bg-zinc-95", "bg-black", "bg-slate-95", "bg-neutral-95", "bg-stone-95", "bg-gray-95"]):
+            is_dark_theme = True
+            
+    if not is_dark_theme:
+        return html, fixes
+
+    replacements = [
+        (r"\bbg-white\b", "bg-zinc-900/50 backdrop-blur-md"),
+        (r"\bbg-gray-(?:50|100|200)\b", "bg-zinc-900/40"),
+        (r"\bbg-zinc-(?:50|100|200)\b", "bg-zinc-900/40"),
+        (r"\bbg-slate-(?:50|100|200)\b", "bg-zinc-900/40"),
+        (r"\bborder-gray-(?:100|200|300)\b", "border-zinc-800"),
+        (r"\bborder-zinc-(?:100|200|300)\b", "border-zinc-800/80"),
+        (r"\bborder-slate-(?:100|200|300)\b", "border-zinc-800"),
+        (r"\btext-gray-(?:800|900)\b", "text-zinc-100"),
+        (r"\btext-zinc-(?:800|900)\b", "text-zinc-100"),
+        (r"\btext-slate-(?:800|900)\b", "text-zinc-100"),
+        (r"\btext-gray-500\b", "text-zinc-400"),
+        (r"\btext-zinc-500\b", "text-zinc-400"),
+        (r"\btext-slate-500\b", "text-zinc-400"),
+    ]
+    
+    new_html = html
+    changes_made = 0
+    for pattern, repl in replacements:
+        new_html, count = re.subn(pattern, repl, new_html)
+        if count > 0:
+            changes_made += count
+
+    if changes_made > 0:
+        fixes.append(f"enforced dark-theme consistency in {changes_made} class occurrences")
+        
+    return new_html, fixes
+
+
 def postprocess_html(html: str, query: str = "") -> Tuple[str, List[str]]:
     """Run all HTML post-processing fixes and return the cleaned HTML plus
     a list of fixes applied (suitable for logging)."""
@@ -637,6 +679,9 @@ def postprocess_html(html: str, query: str = "") -> Tuple[str, List[str]]:
     all_fixes.extend(fixes)
 
     html, fixes = _fix_lucide_icons(html)
+    all_fixes.extend(fixes)
+
+    html, fixes = _force_dark_theme_consistency(html)
     all_fixes.extend(fixes)
 
     html, fixes = _fix_contrast(html)
