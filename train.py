@@ -1,5 +1,3 @@
-
-
 import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["GGML_CUDA_NO_VMM"] = "1"
@@ -41,7 +39,6 @@ from src.iris_datasets import (
     load_magicoder_dataset,
     load_open_code_reasoning,
     load_self_oss_instruct,
-    # --- New JS / Tailwind / Node.js / Frameworks datasets ---
     load_code_alpaca_20k,
     load_python_code_instructions_18k,
     load_code_instructions_122k,
@@ -138,7 +135,6 @@ def apply_size_config(size: str):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Unified GGUF Training for Iris AI")
-
     parser.add_argument("--role", nargs="+", default=["all"],
                         help="Roles to train: triage, router, math, code, reasoning, general, all")
     parser.add_argument("--quant-type", choices=["q4_k_m", "q8_0", "f16"], default="q4_k_m",
@@ -150,8 +146,7 @@ def parse_args():
     parser.add_argument("--download-only", action="store_true", help="Download all models for the selected tier and exit without training")
     parser.add_argument("--skip-download", action="store_true", help="Skip downloading models and start training automatically")
     parser.add_argument("--skip-gguf", action="store_true", help="Skip merge and GGUF conversion")
-    parser.add_argument("--resume", action="store_true", help="Resume training from the last successful checkpoint/model")
-    
+    parser.add_argument("--resume", action="store_true", help="Resume training from the last successful checkpoint/model")  
     parser.add_argument("--model", default=None, help="Override base model ID")
     parser.add_argument("--iters", type=int, default=3000, help="Iterations (MLX) or max pairs (Torch)")
     parser.add_argument("--epochs", type=int, default=3, help="Epochs (Torch path only)")
@@ -161,22 +156,18 @@ def parse_args():
     parser.add_argument("--max-seq-length", type=int, default=4096, help="Maximum sequence length")
     parser.add_argument("--max-length", type=int, default=None, help="Alias for max-seq-length")
     parser.add_argument("--device", choices=["cuda", "mps", "cpu"], default=None)
-
     parser.add_argument("--max-pairs", type=int, default=5000)
     parser.add_argument("--no-bst", action="store_true")
     parser.add_argument("--no-dd", action="store_true")
     parser.add_argument("--no-md", action="store_true")
-    parser.add_argument("--md-dir", default=None, help="Override Markdown training directory")
-    
+    parser.add_argument("--md-dir", default=None, help="Override Markdown training directory")    
     parser.add_argument("--claude-reasoning", type=int, default=600)
     parser.add_argument("--dolci-think", type=int, default=600)
     parser.add_argument("--deepthink", type=int, default=600)
     parser.add_argument("--strip-reasoning")
-
     parser.add_argument("--openhermes", type=int, default=0)
     parser.add_argument("--math-qa", type=int, default=0)
     parser.add_argument("--code-feedback", type=int, default=0)
-
     parser.add_argument("--fuse", action="store_true", help="Fuse model after training (MLX only)")
     parser.add_argument("--cleanup", action="store_true", help="Clean adapters after fusion (MLX only)")
     parser.add_argument("--num-layers", type=int, default=16, help="Layers to tune (MLX only)")
@@ -685,8 +676,6 @@ def run_torch_path(args, device_type: str, role: str):
 
         model = AutoModelForCausalLM.from_pretrained(args.model, quantization_config=bnb_config, device_map=device_map)
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
-        
-        # Dynamically set rank to 8 if total VRAM is less than 8GB to save memory
         try:
             total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
             if total_vram_gb < 8.0:
@@ -1010,14 +999,11 @@ def main():
             explicit_layers = any(arg.startswith("--num-layers") for arg in sys.argv)
             if not explicit_layers:
                 args.num_layers = SIZE_CONFIG["num_layers"]
-
-    # Proactive VRAM capping for low-end GPUs (< 8GB VRAM)
     if torch is not None and torch.cuda.is_available():
         try:
             total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
             if total_vram_gb < 8.0:
                 old_val = args.max_seq_length
-                # Cap sequence length to 256 on < 8GB GPUs unless explicitly overridden in command line
                 explicit_len = any(arg.startswith("--max-seq-length") or arg.startswith("--max-length") for arg in sys.argv)
                 if not explicit_len:
                     args.max_seq_length = min(old_val, 256)
@@ -1125,7 +1111,6 @@ def main():
                         base_model = mlx_base_path
         
         elif target == "cuda" and base_model == ROLE_MODEL_MAP[role]:
-            # Convert GGUF to Hugging Face format locally if GGUF is available
             target_gguf_name = None
             if SIZE_CONFIG and "gguf" in SIZE_CONFIG:
                 target_gguf_name = SIZE_CONFIG["gguf"].get(role)
@@ -1297,8 +1282,6 @@ def main():
                     print(f"[INFO] GGUF model {final_gguf} already exists and matches base model. Skipping GGUF conversion.")
             else:
                 print(f"[INFO] Worker rank {local_rank} skipping GGUF conversion (handled by rank 0).")
-
-        # Clean up the converted base model to force a fresh conversion from the updated GGUF next time
         local_rank = int(os.environ.get("LOCAL_RANK", -1))
         if local_rank in [-1, 0]:
             if training_success and base_model and os.path.exists(base_model) and ("hf_base_models" in base_model or "mlx_base_models" in base_model):

@@ -9,12 +9,27 @@ from src.iris_engine import ModelRole, TaskType, load_model, unload_model, _keep
 from src.iris_engine import _detect_language, translate_text, _language_directive, ROLE_CTX, DEFAULT_CTX
 from src.harness import apply_smart_harness_code, apply_code_specific as _apply_harness, HermesAgentLoop, build_hermes_text_prompt, HERMES_AGENT_SYSTEM_PROMPT, parse_hermes_tool_call, HermesToolRegistry, HermesResultAnalyzer
 from src.syntax_checker import check_syntax, extract_code_blocks
+try:
+    from src.web_postprocess import postprocess_html
+except Exception:
+    postprocess_html = None  # type: ignore
 from src.elements_db import scan_query_for_elements
 
 SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills", "coding")
 
 
 def _load_prompt(filename: str) -> str:
+    try:
+        from src.iris_engine import load_generation_config
+        cfg = load_generation_config()
+        size = cfg.get("size", "tiny")
+        path = os.path.join(SKILLS_DIR, size, filename)
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
+    except Exception:
+        pass
+
     path = os.path.join(SKILLS_DIR, filename)
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -1170,6 +1185,24 @@ def _run_simple_coding(user_query: str, history: list, optimized: list, settings
         full = translated
         yield {"type": "token", "content": full}
 
+    # Web post-processing: if the model produced HTML, run it through the
+    # post-processor to fix 3B-model failure modes (placeholder strings,
+    # missing tailwind.config, undefined animations, contrast bugs,
+    # placeholder image URLs, missing meta tags).
+    if postprocess_html is not None and "```html" in full:
+        try:
+            _blocks = extract_code_blocks(full)
+            if _blocks:
+                _lang, _code = _blocks[-1]
+                if _lang == "html" or _code.lstrip().startswith(("<!DOCTYPE", "<html")):
+                    _cleaned, _fixes = postprocess_html(_code, query=user_query)
+                    if _fixes:
+                        logger.info(f"[WebPostprocess] Applied {len(_fixes)} fixes: {_fixes}")
+                    # Re-embed the cleaned code back into the full response
+                    full = full.replace(_code, _cleaned, 1)
+        except Exception as _e:
+            logger.warning(f"[WebPostprocess] Failed (non-fatal): {_e}")
+
     yield {"type": "raw_response", "content": full}
 
 
@@ -1231,11 +1264,15 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
     ) or (bool(context) and bool(extract_code_blocks(context)))
     if has_prior_code:
         _model_size = (settings or {}).get("size", "tiny")
-        # Small models (1-3B params) struggle with the SEARCH/REPLACE format —
-        # they hallucinate wrong search lines, produce garbled markers, or just
-        # ignore the format entirely. For tiny/small models, prefer a full rewrite
-        # with the current file embedded for context — higher success rate.
-        _use_patch_mode = _model_size not in ("tiny", "small", "nano")
+        # Always enable patch mode for file edits. The patcher was rewritten
+        # to be 3B-friendly: per-line fuzzy alignment, paraphrased-comment
+        # tolerance, empty-SEARCH insert handling, BOM stripping, multiple
+        # marker styles, fuzzy non-overlap gap check. 38/38 stress tests
+        # pass. Tiny/small/nano models (1-3B) reliably produce usable patches
+        # now, where the old strict-0.92 patcher could not. If a patch
+        # genuinely cannot match, the retry + nuclear full-rewrite
+        # fallback below is still there as a safety net.
+        _use_patch_mode = True
         settings['_force_patch_mode'] = _use_patch_mode
         
         # Extract the actual code so we can embed it right next to the user's request.

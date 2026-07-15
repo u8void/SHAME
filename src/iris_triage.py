@@ -118,6 +118,114 @@ _ROUTE_TAG_MAP: Dict[str, TaskType] = {
 
 _CONFIDENCE_FLOOR = 0.55
 
+# Post-check override pattern (see classify_task for the design rationale). This is
+# a *post-routing* check, not a pre-filter: the model\u0027s classification still runs
+# first and its choice is the default. We only override when (a) the model picked
+# a non-code route, AND (b) the query contains BOTH a coding verb and a code-shaped
+# target noun.
+_CODE_VERBS = (
+    r"create|build|write|implement|code|make|develop|design|generate|"
+    r"add|fix|patch|modify|update|refactor|rewrite|convert|port|translate"
+)
+_CODE_TARGETS = (
+    r"(?:calculator|function|method|class|module|script|program|app|application|"
+    r"website|site|web\s*app|web\s*page|landing\s*page|api|service|server|"
+    r"endpoint|backend|frontend|ui|gui|cli|tool|library|package|component|"
+    r"plugin|extension|game|binary|bot|scraper|crawler|pipeline|algorithm|"
+    r"snippets?|codebase)"
+)
+_LANG_QUALIFIER_BODY = (
+    r"\s+(?:in|using|with|for)\s+(?:python|javascript|typescript|js|ts|"
+    r"c\+\+|cpp|c#|csharp|java|kotlin|swift|go|rust|ruby|php|"
+    r"html|css|sql|bash|shell|matlab|r|lua|scala|haskell|elixir|dart|"
+    r"flask|django|fastapi|express|react|vue|angular|next\.js|nuxt|svelte|"
+    r"spring|laravel|rails|node|node\.js|deno|bun|"
+    r"tensorflow|pytorch|numpy|pandas|"
+    r"tailwind|bootstrap|jquery)"
+)
+_LANG_QUALIFIER_AT_END = "(" + _LANG_QUALIFIER_BODY + ")?"
+
+# Explicit "code/script" nouns anywhere in the query.
+_EXPLICIT_CODE_NOUN = r"\b(?:code|script|function|program|class|module)\b"
+
+# Primary: verb, then 0+ function words (including LANG_QUALIFIER and bare
+# framework nouns), then a target noun optionally followed by LANG_QUALIFIER.
+_PRIMARY_PATTERN = re.compile(
+    r"\b(?P<verb>" + _CODE_VERBS + r")\b"
+    r"(?:\s+(?:me|you|us|him|her|them|it|this|that|my|your|his|her|their|its|"
+    r"a|an|the|some|any|"
+    + _LANG_QUALIFIER_BODY + r"|"
+    + r"(?:flask|django|fastapi|express|react|vue|angular|next\.js|nuxt|svelte|"
+    + r"spring|laravel|rails|node|node\.js|deno|bun|tailwind|bootstrap|jquery)"
+    + r"))+\s+"
+    r"(?P<target>" + _CODE_TARGETS + r")"
+    + _LANG_QUALIFIER_AT_END,
+    re.IGNORECASE,
+)
+# Secondary: code-modification verbs followed by an explicit code noun.
+_MODIFY_VERBS = (
+    r"fix|patch|modify|update|refactor|rewrite|optimise|optimize|improve|clean\s+up|"
+    r"debug|review|audit|annotate|document|format|lint"
+)
+_SECONDARY_PATTERN = re.compile(
+    r"\b(?P<verb>" + _MODIFY_VERBS + r")\b"
+    r"(?:[^.?!\n])*"
+    r"\b(?P<target>" + _EXPLICIT_CODE_NOUN + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _code_override_route(query: str):
+    """Return (chosen_task, verb, target_str) if the query matches an unambiguous
+    coding pattern, else None. Called only as a post-check after the model has
+    routed.
+    """
+    m = _PRIMARY_PATTERN.search(query)
+    if not m:
+        m = _SECONDARY_PATTERN.search(query)
+    if not m:
+        return None
+    verb = m.group("verb")
+    target_raw = m.group("target")
+    target = (target_raw or m.group(0)).lower()
+    if any(tok in target for tok in ("app", "website", "site", "api", "service", "server", "project")):
+        return TaskType.CODING_COMPLEX, verb, target
+    return TaskType.CODING_SIMPLE, verb, target
+
+
+# Post-check override for GENERAL: short greetings and identity questions.
+_GREETING_WORDS = (
+    r"hi|hello|hey|howdy|greetings|yo|hola|sup|hiya|ahoy|good\s+(morning|afternoon|evening)"
+)
+_IDENTITY_QUESTIONS = (
+    r"who\s+(are|r\s+you|made|created|built)\s+you|"
+    r"what\s+(are|r\s+you)\s+(you|a|an)|"
+    r"your\s+name|"
+    r"are\s+you\s+(a|an)\s+(human|bot|ai|robot|llm|model|assistant)"
+)
+_GENERAL_OVERRIDE_PATTERN = re.compile(
+    r"^\s*(?:" + _GREETING_WORDS + r")\b[\s\S]*$",
+    re.IGNORECASE,
+)
+_IDENTITY_PATTERN = re.compile(_IDENTITY_QUESTIONS, re.IGNORECASE)
+
+
+def _general_override_route(query: str):
+    """Return a short reason string if the query is a short greeting or identity
+    question that should route to GENERAL, else None.
+    """
+    q = query.strip()
+    if not q:
+        return None
+    if len(q.split()) > 6:
+        return None
+    if _GENERAL_OVERRIDE_PATTERN.match(q):
+        return "greeting"
+    if _IDENTITY_PATTERN.search(q):
+        return "identity"
+    return None
+
+
 _triage_grammar = None
 if LlamaGrammar is not None:
     try:
@@ -381,7 +489,28 @@ def classify_task(
         mapped = TaskType.SEARCH
 
     if mapped is not None:
-
+        # Post-check override: short greetings and identity questions must reach
+        # GENERAL even if the model picked a heavier route.
+        if mapped != TaskType.GENERAL:
+            general_reason = _general_override_route(query_for_classification)
+            if general_reason is not None:
+                logger.info(
+                    f"[Triage] Post-check override: query matched GENERAL pattern "
+                    f"(reason={general_reason!r}); "
+                    f"downgrading {mapped.name} -> GENERAL."
+                )
+                return TaskType.GENERAL, None
+        # Post-check override: unambiguous coding requests must reach a code route.
+        if mapped != TaskType.CODING_SIMPLE and mapped != TaskType.CODING_COMPLEX:
+            override_result = _code_override_route(query_for_classification)
+            if override_result is not None:
+                chosen, verb, target = override_result
+                logger.info(
+                    f"[Triage] Post-check override: query matched coding pattern "
+                    f"(verb={verb!r}, target={target!r}); "
+                    f"upgrading {mapped.name} -> {chosen.name}."
+                )
+                return chosen, None
         if mapped == TaskType.SEARCH:
             return TaskType.SEARCH, (keywords or query_for_classification)
         return mapped, None

@@ -206,24 +206,35 @@ _LINE_MATCH_THRESHOLD = 0.72
 # considered a real match at all. (If the model emitted 5 lines of SEARCH and
 # only 2 of them actually line up with a window, the model's intent is unclear
 # and we'd rather fail than guess.)
+# Of the SEARCH lines, this fraction must match the best window for a real
+# match. (If the model emitted 5 lines of SEARCH and only 2 of them actually
+# line up with a window, the model\u0027s intent is unclear and we\u0027d rather
+# fail than guess.)
 _MIN_FRACTION_OF_LINES_MATCHING = 0.55
 
-# The best match must beat the second-best match by at least this much on a
-# similarity scale of 0..1. This is the "uniqueness" guard — a 3B model
-# writing a vague SEARCH that could match three different places in the file
-# should fail rather than pick an arbitrary one.
-_MIN_GAP_BETWEEN_BEST_AND_RUNNERUP = 0.10
+# The best match must beat the best non-overlapping candidate by at least this
+# much. This is the "uniqueness" guard — a 3B model writing a vague SEARCH
+# that could match several different places in the file should fail rather
+# than pick an arbitrary one. 0.15 is conservative: it\u0027s the gap we want
+# between a real match and "another part of the file that happens to look
+# similar". A high absolute score with a small gap is exactly the
+# non-idempotence case we hit before.
+_MIN_GAP_BETWEEN_BEST_AND_RUNNERUP = 0.15
 
 # Soft cap on how far a SEARCH block can be stretched to find a match. If the
 # model wrote a 4-line SEARCH but the only region that contains those 4 lines
-# is an 8-line window in the file, we won't go for that — too risky, more
+# is an 8-line window in the file, we won\u0027t go for that — too risky, more
 # likely to be a different part of the code.
 _MAX_WINDOW_STRETCH = 4
 
-# Floor for "fuzzy" match acceptance: if the best window's mean per-line
-# similarity is below this, we still reject. Together with the gap-to-runnerup
-# requirement, this is the actual safety net.
-_MIN_MEAN_SIMILARITY = 0.55
+# Floor for "fuzzy" match acceptance: if the best window\u0027s mean per-line
+# similarity is below this, we reject. Raised from 0.55 (too permissive —
+# allowed non-idempotent re-application) to 0.78. A 3B model writing a real
+# SEARCH that exists in the file should be able to get above 0.78 with at
+# most one drifted line. A 3B model hallucinating a SEARCH that doesn\u0027t
+# exist will typically score well below 0.78 because the per-line alignment
+# can\u0027t find genuine matches.
+_MIN_MEAN_SIMILARITY = 0.78
 
 
 def _windows_overlap(a_start, a_end, b_start, b_end) -> bool:
@@ -405,6 +416,12 @@ def apply_patch(original_code: str, patch_text: str) -> PatchOutcome:
     aborting the whole patch. Callers can inspect `outcome.results` to
     surface a useful error to the user.
     """
+    # Strip leading BOM and other zero-width characters that some chat
+    # templates prepend to model output. Without this, the first marker line
+    # ends up being "\ufeff<<<<<<< SEARCH" which the regex never matches
+    # and the entire patch looks empty.
+    if patch_text:
+        patch_text = patch_text.lstrip("\ufeff\u200b\u200c\u200d")
     text = _strip_outer_fence(patch_text.strip())
     raw_blocks, malformed = _split_blocks(text)
 
@@ -473,7 +490,11 @@ def apply_patch(original_code: str, patch_text: str) -> PatchOutcome:
                 break
 
         # ── Tier 3: per-line fuzzy window match (3B-model friendly) ───────
-        if not matched:
+        # Guard against accidental matches on 1-line SEARCH blocks: those can
+        # match almost any code with a high enough fuzzy score, and re-applying
+        # the same patch would then find a different near-match and apply
+        # again (non-idempotence). 2+ line SEARCHes are specific enough.
+        if not matched and len(s_lines) >= 2:
             result = _fuzzy_find_window(code_lines, norm_search)
             if result is not None:
                 start, end, mean, runnerup = result
@@ -483,10 +504,15 @@ def apply_patch(original_code: str, patch_text: str) -> PatchOutcome:
                 # shifted in/out (the alignment is greedy per-line). When the
                 # best match is middling, a similar score in a different
                 # region IS real ambiguity, so require a bigger gap.
+                # Tiered gap requirement. At very high mean similarity the
+                # model produced SEARCH that\u0027s nearly verbatim, so even a
+                # small gap indicates uniqueness. At middling similarity we
+                # need a real gap to be sure it\u0027s not a coincidental
+                # similarity with a different part of the file.
                 if mean >= 0.95:
-                    required_gap = 0.05
-                elif mean >= 0.80:
-                    required_gap = 0.10
+                    required_gap = 0.08
+                elif mean >= 0.85:
+                    required_gap = 0.15
                 else:
                     required_gap = _MIN_GAP_BETWEEN_BEST_AND_RUNNERUP
                 gap = mean - runnerup
