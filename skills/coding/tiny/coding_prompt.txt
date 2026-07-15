@@ -19,6 +19,7 @@ If requested to build a website, web app, or dashboard, you MUST create a SINGLE
 You MUST follow these design rules for premium, visual excellence (A LIGHT THEME IS STRICTLY FORBIDDEN):
 
 CRITICAL CONTENT RULE: Every name, text, price, and description must be fully written out. NEVER use placeholder text, brackets, or generic stand-in labels (like "[Brand Name]" or "[Item Name]"). Always replace template content with real, appropriate details matching the user's request.
+CRITICAL CARD LIMIT: For card grids, menus, galleries, or list sections, you MUST generate EXACTLY 3 to 6 high-quality, distinct items (no more, no less). NEVER output dozens of repetitive elements — this causes model looping and wastes tokens.
 
 1. SKELETON TEMPLATE: Use this exact premium dark-mode skeleton as your base structure. Customize the names, content, and icons to perfectly match the user's specific request:
 ```html
