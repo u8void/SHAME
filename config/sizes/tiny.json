@@ -18,7 +18,7 @@
     "math": "iris_003.gguf",
     "code": "iris_004.gguf",
     "reasoning": "iris_005.gguf",
-    "general": "iris_005.gguf",
+    "general": "iris_008.gguf",
     "vision": "iris_006.gguf"
   },
   "clip": "iris_007.gguf",
@@ -40,7 +40,7 @@
     "math": "iris_003.gguf",
     "code": "iris_004.gguf",
     "reasoning": "iris_005.gguf",
-    "general": "iris_005.gguf",
+    "general": "iris_008.gguf",
     "vision": "iris_006.gguf"
   }
 }
