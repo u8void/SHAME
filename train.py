@@ -6,8 +6,6 @@ os.environ["GGML_CUDA_NO_VMM"] = "1"
 import sys
 os.environ["HF_XET_HIGH_PERFORMANCE"] = "1"
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
-os.environ["HF_TRANSFER_MAX_CONNECTIONS"] = "256"  # Force high parallel connections to bypass single-thread limits
-os.environ["HF_TRANSFER_CHUNK_SIZE"] = "33554432"  # 32MB chunk size for faster disk writes
 import json
 import random
 import argparse
