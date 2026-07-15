@@ -450,7 +450,7 @@ def _run_complex_coding(
     if context:
         reasoning_prompt = f"REFERENCE EXCERPT:\n{context}\n\n{reasoning_prompt}"
 
-    reasoning_prompt += "\n\n[NEW AGENTIC ABILITY: If you need to search the web for the latest documentation, frameworks, or code snippets, you MUST output <search>your search query</search>. If you do this, your generation will be paused, the web will be searched, and the results will be injected back into your context so you can continue.]"
+    reasoning_prompt += "\n\n[NEW AGENTIC ABILITY: If you need to search the web for the latest documentation, frameworks, or code snippets, you MUST output <search>your search query</search>. If you need to read the content of an existing file in the workspace, you MUST output <read>path/to/file</read>. If you do either, your generation will be paused, the action will be performed, and the results will be injected back into your context so you can continue.]"
 
     reasoning_msgs = [{"role": "system", "content": reasoning_prompt}] + optimized
 
@@ -458,10 +458,10 @@ def _run_complex_coding(
     total_raw_reasoning = ""
     # NOTE: Stage 1 is an internal architecture-planning pass only
     
-    MAX_SEARCHES = 2
-    for search_iter in range(MAX_SEARCHES + 1):
+    MAX_ACTIONS = 4
+    for action_iter in range(MAX_ACTIONS + 1):
         raw_reasoning = ""
-        for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="status", settings=settings, extra_stop_words=["```", "</search>"]):
+        for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="status", settings=settings, extra_stop_words=["```", "</search>", "</read>"]):
             if ev["type"] == "status":
                 yield ev
             if ev["type"] in ("token", "thinking"):
@@ -471,7 +471,9 @@ def _run_complex_coding(
         
         import re
         search_match = re.search(r'<search>(.*?)(?:</search>|$)', raw_reasoning, re.IGNORECASE)
-        if search_match and search_iter < MAX_SEARCHES:
+        read_match = re.search(r'<read>(.*?)(?:</read>|$)', raw_reasoning, re.IGNORECASE)
+        
+        if search_match and action_iter < MAX_ACTIONS:
             query = search_match.group(1).strip()
             yield {"type": "status", "content": f"Searching the web for '{query}'..."}
             try:
@@ -483,6 +485,32 @@ def _run_complex_coding(
             reasoning_msgs.append({"role": "assistant", "content": raw_reasoning + (f"</search>" if "</search>" not in raw_reasoning else "")})
             reasoning_msgs.append({"role": "user", "content": f"Web Search Results for '{query}':\n\n{results}\n\nContinue your reasoning now."})
             continue
+            
+        elif read_match and action_iter < MAX_ACTIONS:
+            filepath = read_match.group(1).strip()
+            yield {"type": "status", "content": f"Reading file: {filepath}..."}
+            import os
+            target_path = settings.get("target_path") if isinstance(settings, dict) else None
+            if target_path and os.path.exists(target_path):
+                workspace_dir = target_path if os.path.isdir(target_path) else os.path.dirname(target_path)
+                full_path = os.path.join(workspace_dir, filepath) if not os.path.isabs(filepath) else filepath
+            else:
+                full_path = filepath
+                
+            try:
+                if os.path.exists(full_path) and os.path.isfile(full_path):
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    results = f"File `{filepath}` content:\n```\n{content}\n```"
+                else:
+                    results = f"File not found: {filepath}"
+            except Exception as e:
+                results = f"Error reading file {filepath}: {str(e)}"
+                
+            reasoning_msgs.append({"role": "assistant", "content": raw_reasoning + (f"</read>" if "</read>" not in raw_reasoning else "")})
+            reasoning_msgs.append({"role": "user", "content": f"File Read Results:\n\n{results}\n\nContinue your reasoning now."})
+            continue
+            
         else:
             break
 
@@ -527,6 +555,14 @@ def _run_complex_coding(
         "You MUST output working code inside a ```html code block. No exceptions.\n\n"
     )
     code_content = _ANTI_REFUSAL + f"User Query: {user_query}\n\n"
+    code_content += (
+        "IMPORTANT FOR EXISTING FILES: If you are modifying an EXISTING file that was provided in your context, DO NOT output the full file. "
+        "Instead, you MUST use Surgical Diff Patching blocks inside the code block, and specify the filename at the top of the block. Format:\n"
+        "```python filepath.py\n"
+        "<<<<\nexact original lines to replace\n====\nnew replaced lines\n>>>>\n"
+        "```\n"
+        "If you are generating a NEW file, output the full file inside a standard markdown code block.\n\n"
+    )
     if context:
         code_content += f"<retrieved_context>\n{context}\n</retrieved_context>\n\nMake sure your implementation heavily utilizes the instructions, themes, and patterns in the retrieved context above.\n\n"
     if raw_reasoning:
@@ -784,6 +820,17 @@ def _run_complex_coding(
                 continue
             fpath = os.path.join(workspace_dir, fname)
             os.makedirs(os.path.dirname(fpath), exist_ok=True)
+            
+            # Feature 3: Surgical Diff Patching
+            if "<<<<" in content and "====" in content and os.path.exists(fpath):
+                try:
+                    from src.harness import apply_search_replace_blocks
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        original_content = f.read()
+                    content = apply_search_replace_blocks(original_content, content)
+                except Exception as e:
+                    pass
+                    
             with open(fpath, "w", encoding="utf-8") as f:
                 f.write(content)
         
@@ -830,9 +877,29 @@ def _run_complex_coding(
                     yield {"type": "token", "content": cmd_msg}
                 except Exception as e:
                     pass
+                    pass
+
+    # Feature 4: Auto Git Version Control
+    if target_path and os.path.exists(target_path):
+        try:
+            import subprocess
+            is_git = subprocess.run("git rev-parse --is-inside-work-tree", shell=True, cwd=workspace_dir, capture_output=True, text=True).returncode == 0
+            if not is_git:
+                subprocess.run("git init", shell=True, cwd=workspace_dir, capture_output=True)
+                yield {"type": "status", "content": "Initialized new Git repository."}
+            
+            subprocess.run("git add .", shell=True, cwd=workspace_dir, capture_output=True)
+            res = subprocess.run('git commit -m "feat: auto-commit by Iris AI"', shell=True, cwd=workspace_dir, capture_output=True, text=True)
+            if res.returncode == 0:
+                git_msg = "\n\n> 📦 **Git Auto-Commit:** Changes saved successfully."
+                if user_lang != "English":
+                    git_msg = "\n\n> 📦 **حفظ تلقائي (Git):** تم حفظ التعديلات في سجل الـ Git بنجاح."
+                final_output += git_msg
+                yield {"type": "token", "content": git_msg}
+        except Exception:
+            pass
 
     yield {"type": "raw_response", "content": final_output}
-
 
 
 def generate_internal_code(
