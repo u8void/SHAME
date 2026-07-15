@@ -450,21 +450,46 @@ def _run_complex_coding(
     if context:
         reasoning_prompt = f"REFERENCE EXCERPT:\n{context}\n\n{reasoning_prompt}"
 
+    reasoning_prompt += "\n\n[NEW AGENTIC ABILITY: If you need to search the web for the latest documentation, frameworks, or code snippets, you MUST output <search>your search query</search>. If you do this, your generation will be paused, the web will be searched, and the results will be injected back into your context so you can continue.]"
+
     reasoning_msgs = [{"role": "system", "content": reasoning_prompt}] + optimized
 
     raw_reasoning = ""
-    # NOTE: Stage 1 is an internal architecture-planning pass only — its raw output
-    # (including any <think> deliberation) must never be streamed to the user as if
-    # it were the answer. think_mode="status" suppresses the content and only pings
-    # a lightweight "Thinking..." status; we forward status events for UI feedback
-    # but never forward token/thinking content here.
-    for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="status", settings=settings, extra_stop_words=["```"]):
-        if ev["type"] == "status":
-            yield ev
-        if ev["type"] in ("token", "thinking"):
-            raw_reasoning += ev["content"]
+    total_raw_reasoning = ""
+    # NOTE: Stage 1 is an internal architecture-planning pass only
+    
+    MAX_SEARCHES = 2
+    for search_iter in range(MAX_SEARCHES + 1):
+        raw_reasoning = ""
+        for ev in _stream_tokens(ModelRole.REASONING, reasoning_msgs, max_tokens=8192, temperature=0.6, think_mode="status", settings=settings, extra_stop_words=["```", "</search>"]):
+            if ev["type"] == "status":
+                yield ev
+            if ev["type"] in ("token", "thinking"):
+                raw_reasoning += ev["content"]
+        
+        total_raw_reasoning += raw_reasoning
+        
+        import re
+        search_match = re.search(r'<search>(.*?)(?:</search>|$)', raw_reasoning, re.IGNORECASE)
+        if search_match and search_iter < MAX_SEARCHES:
+            query = search_match.group(1).strip()
+            yield {"type": "status", "content": f"Searching the web for '{query}'..."}
+            try:
+                from src.web_search import perform_web_search
+                results = perform_web_search(query)
+            except Exception as e:
+                results = f"Search failed: {str(e)}"
+            
+            reasoning_msgs.append({"role": "assistant", "content": raw_reasoning + (f"</search>" if "</search>" not in raw_reasoning else "")})
+            reasoning_msgs.append({"role": "user", "content": f"Web Search Results for '{query}':\n\n{results}\n\nContinue your reasoning now."})
+            continue
+        else:
+            break
+
     if not _keep_loaded:
         unload_model()
+    
+    raw_reasoning = total_raw_reasoning
 
     # If Stage 1 spent its whole budget deliberating and never produced a real
     # blueprint, don't hand Stage 2 an empty/near-empty "authoritative" blueprint —
@@ -740,14 +765,23 @@ def _run_complex_coding(
     from src.harness import CodeSandbox
     import time
     import os
+    import re
     scaffold_files = CodeSandbox.extract_multiple_files(final_output)
-    if len(scaffold_files) > 1 or _is_web_design_request(user_query):
+    
+    target_path = settings.get("target_path") if isinstance(settings, dict) else None
+    
+    # Feature 2: In-Place File Editing
+    if target_path and os.path.exists(target_path):
+        workspace_dir = target_path if os.path.isdir(target_path) else os.path.dirname(target_path)
+    else:
         workspace_dir = os.path.join(os.getcwd(), f"iris_projects/project_{int(time.time())}")
+        
+    if len(scaffold_files) > 0 or _is_web_design_request(user_query):
         os.makedirs(workspace_dir, exist_ok=True)
         for fname, content in scaffold_files.items():
             fname = fname.replace("..", "").lstrip("/")
-            if not fname:
-                fname = f"file_{int(time.time())}.txt"
+            if not fname or fname.startswith("bash") or fname.startswith("sh"):
+                continue
             fpath = os.path.join(workspace_dir, fname)
             os.makedirs(os.path.dirname(fpath), exist_ok=True)
             with open(fpath, "w", encoding="utf-8") as f:
@@ -768,11 +802,34 @@ def _run_complex_coding(
         scaffold_msg += f"\n> 🎨 **Live Preview Server:** http://127.0.0.1:{port}"
         
         if user_lang != "English":
-            scaffold_msg = f"\n\n> 📁 **تم بناء المشروع بنجاح!** لقد قمت بتوليد مجلد للمشروع وحفظ جميع الملفات محلياً في: `{workspace_dir}`."
+            scaffold_msg = f"\n\n> 📁 **تم بناء/تحديث المشروع بنجاح!** مسار العمل الحالي: `{workspace_dir}`."
             scaffold_msg += f"\n> 🎨 **رابط المعاينة الحية:** [http://127.0.0.1:{port}](http://127.0.0.1:{port})"
             
         final_output += scaffold_msg
         yield {"type": "token", "content": scaffold_msg}
+
+    # Feature 3: Terminal Execution (Bash Agent)
+    bash_blocks = re.findall(r'```(?:bash|sh)\n(.*?)\n```', final_output, re.IGNORECASE | re.DOTALL)
+    if bash_blocks:
+        import subprocess
+        for cmd in bash_blocks:
+            cmd = cmd.strip()
+            if cmd:
+                yield {"type": "status", "content": f"Executing: {cmd[:30]}..."}
+                try:
+                    res = subprocess.run(cmd, shell=True, cwd=workspace_dir, capture_output=True, text=True, timeout=60)
+                    cmd_msg = f"\n\n> 💻 **Terminal Execution:** `{cmd}`\n"
+                    if res.returncode == 0:
+                        cmd_msg += f"> ✅ **Success**\n"
+                        if res.stdout.strip():
+                            cmd_msg += f"> ```text\n> {res.stdout.strip()[:500]}\n> ```"
+                    else:
+                        cmd_msg += f"> ❌ **Failed (Exit Code {res.returncode})**\n> ```text\n> {res.stderr.strip()[:500]}\n> ```"
+                    
+                    final_output += cmd_msg
+                    yield {"type": "token", "content": cmd_msg}
+                except Exception as e:
+                    pass
 
     yield {"type": "raw_response", "content": final_output}
 
@@ -1130,9 +1187,13 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
         )
         
     import os
+    if settings is None:
+        settings = {}
+        
     path_match = re.search(r'\[(?:path|مسار):\s*(.+?)\]', user_query, re.IGNORECASE)
     if path_match:
         target_path = path_match.group(1).strip()
+        settings["target_path"] = target_path
         if os.path.exists(target_path) and os.path.isdir(target_path):
             tree = []
             for root, dirs, files in os.walk(target_path):
