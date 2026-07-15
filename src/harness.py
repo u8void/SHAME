@@ -1695,3 +1695,38 @@ __all__ = [
     'SmartHarnessResult',
     'SmartHarness'
 ]
+
+def apply_search_replace_blocks(original_text: str, diff_text: str) -> str:
+    """
+    Parses <<<< ==== >>>> blocks from diff_text and applies them to original_text.
+    """
+    import re
+    pattern = re.compile(r'<<<<\s*\n(.*?)\n====\s*\n(.*?)\n>>>>', re.DOTALL)
+    result = original_text
+    blocks = pattern.finditer(diff_text)
+    
+    for match in blocks:
+        search_text = match.group(1)
+        replace_text = match.group(2)
+        if search_text in result:
+            result = result.replace(search_text, replace_text, 1)
+        else:
+            search_lines = [l.rstrip() for l in search_text.split('\n')]
+            result_lines = result.split('\n')
+            window_size = len(search_lines)
+            found_idx = -1
+            for i in range(len(result_lines) - window_size + 1):
+                match_found = True
+                for j in range(window_size):
+                    if result_lines[i+j].rstrip() != search_lines[j]:
+                        match_found = False
+                        break
+                if match_found:
+                    found_idx = i
+                    break
+            if found_idx != -1:
+                before = result_lines[:found_idx]
+                after = result_lines[found_idx + window_size:]
+                replace_lines = replace_text.split('\n')
+                result = '\n'.join(before + replace_lines + after)
+    return result

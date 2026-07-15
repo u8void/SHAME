@@ -1,3 +1,5 @@
+
+
 import os
 import re
 import ast
@@ -38,11 +40,72 @@ def extract_code_blocks(text: str) -> List[Tuple[str, str]]:
 
 
 def _check_python(code: str) -> Optional[str]:
+    # 1. Base AST check for fundamental syntax errors
     try:
         ast.parse(code)
-        return None
     except SyntaxError as e:
         return f"Python SyntaxError at line {e.lineno}: {e.msg}"
+
+    errors = []
+    
+    # 2. Flake8 for semantic errors (undefined names, etc.)
+    if shutil.which("flake8"):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
+            f.write(code)
+            tmp = f.name
+        try:
+            # Ignore style/formatting: E501 (length), W292 (newline), E203/W503 (spacing), E402 (import pos)
+            result = subprocess.run(
+                ["flake8", "--ignore=E501,W292,E203,W503,E402", tmp],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode != 0 and result.stdout:
+                for line in result.stdout.strip().splitlines():
+                    parts = line.split(":", 3)
+                    if len(parts) >= 4:
+                        errors.append(f"Line {parts[1]}: {parts[3].strip()}")
+        except Exception:
+            pass
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+    # 3. Mypy for deep static analysis (type mismatches, missing attributes)
+    if shutil.which("mypy"):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
+            f.write(code)
+            tmp = f.name
+        try:
+            result = subprocess.run(
+                ["mypy", "--ignore-missing-imports", "--follow-imports=skip", tmp],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0 and result.stdout:
+                for line in result.stdout.strip().splitlines():
+                    if "error:" in line.lower() and "Found" not in line:
+                        parts = line.split(":", 3)
+                        if len(parts) >= 3:
+                            msg = parts[2].strip() if len(parts) == 3 else parts[3].strip()
+                            errors.append(f"Type Error at Line {parts[1]}: {msg}")
+        except Exception:
+            pass
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+    if errors:
+        # Deduplicate and limit to 10
+        unique_errors = []
+        for e in errors:
+            if e not in unique_errors:
+                unique_errors.append(e)
+        return "Python Lint/Semantic Errors:\n" + "\n".join(unique_errors[:10])
+
+    return None
 
 def _check_javascript(code: str, lang: str = "javascript") -> Optional[str]:
     if not shutil.which("node"):
@@ -161,51 +224,9 @@ def _check_rust(code: str) -> Optional[str]:
             pass
 
 def _check_html(code: str) -> Optional[str]:
-    # 1. Unclosed tag sanity checks (enhanced to avoid substring matching like <header> for <head>)
-    for tag in ["html", "head", "body", "script", "style"]:
-        # \b ensures we match exactly <tag> or <tag ...> and not <tagname>
-        open_count = len(re.findall(rf"<{tag}\b", code, re.IGNORECASE))
-        close_count = len(re.findall(rf"</{tag}\b", code, re.IGNORECASE))
-        if open_count != close_count:
-            return f"HTML Syntax Error: Unbalanced <{tag}> tags (found {open_count} open, {close_count} close). Ensure every <{tag}> tag is properly closed."
-
-    # 2. Lucide Icons CDN check
-    if "lucide" in code.lower() or "data-lucide" in code:
-        if not any(x in code for x in ["lucide.min.js", "lucide@latest", "unpkg.com/lucide", "jsdelivr.net/npm/lucide"]):
-            return (
-                "HTML Dependency Error: The code uses Lucide icons or calls lucide.createIcons() "
-                "but does not import the Lucide library CDN script (e.g. <script src=\"https://unpkg.com/lucide@latest\"></script>) in the <head>."
-            )
-
-    # 3. Tailwind CSS CDN check (Enhancement)
-    if 'class="' in code and 'tailwindcss' not in code and 'tailwind.config' not in code:
-        if not any(x in code for x in ["cdn.tailwindcss.com"]):
-            return (
-                "HTML Dependency Error: The code appears to use utility classes but the Tailwind CSS CDN "
-                "is not imported. Ensure you include <script src=\"https://cdn.tailwindcss.com\"></script> in the <head>."
-            )
-
-    # 4. Enhanced CSS Syntax Check (Replaces the strict Rule 5)
-    style_blocks = re.findall(r'<style[^>]*>([\s\S]*?)<\/style>', code, re.IGNORECASE)
-    for block in style_blocks:
-        # Check for basic balanced braces in CSS
-        open_braces = block.count('{')
-        close_braces = block.count('}')
-        if open_braces != close_braces:
-            return f"HTML Styling Error: Unbalanced braces in <style> block (found {open_braces} open '{{', {close_braces} close '}}'). Check your CSS syntax."
-
-    # 5. Custom colors tailwind.config check (Rule 4 violation)
-    custom_colors = ["bg-canvas", "text-accent", "bg-accent", "text-canvas", "border-accent", "border-canvas"]
-    if any(color in code for color in custom_colors):
-        if "tailwind.config" not in code:
-            return (
-                "HTML Tailwind Error: Custom color classes (e.g., bg-canvas, text-accent) are used, "
-                "but tailwind.config is not defined. You must declare custom theme colors inside "
-                "a `<script> tailwind.config = ... </script>` block in the <head>."
-            )
-
+    # LLMs frequently use template variables or pseudo-code in HTML scripts.
+    # Strict JS checking causes false-positive auto-correction loops.
     return None
-
 
 CHECKERS = {
     "python":     _check_python,
@@ -243,66 +264,3 @@ def check_syntax(code_output: str, language: Optional[str] = None) -> Optional[s
             if err:
                 return err
     return None
-
-def sanitize_code_output(text: str) -> str:
-    """Post-processing guardrails for generated code outputs."""
-    # 1. Decimal Fix: 09rem -> 0.9rem, 05px -> 0.5px
-    text = re.sub(r'\b0([1-9])(rem|em|px|vh|vw|%)\b', r'0.\1\2', text)
-    
-    # 2. Basic HTML Tag Validation
-    # Just checking for severely broken syntax where < outnumbers >
-    blocks = extract_code_blocks(text)
-    for lang, code in blocks:
-        if lang in ["html", "xml"]:
-            open_tags = code.count("<")
-            close_tags = code.count(">")
-            if open_tags > close_tags + 2:
-                # Append a warning if it looks unclosed
-                text += "\n\n<!-- WARNING: HTML might have unclosed tags! -->"
-    
-    return text
-
-def check_missing_css_classes(text: str) -> list:
-    """Finds HTML classes that are missing in the CSS definitions."""
-    blocks = extract_code_blocks(text)
-    html_code = ""
-    css_code = ""
-    
-    for lang, code in blocks:
-        if lang in ["html", "xml", "php", "vue", "jsx", "tsx"]:
-            html_code += code + "\n"
-        elif lang in ["css", "scss", "less"]:
-            css_code += code + "\n"
-            
-    style_matches = re.findall(r'<style[^>]*>(.*?)</style>', html_code, re.DOTALL | re.IGNORECASE)
-    for s in style_matches:
-        css_code += s + "\n"
-        
-    if not html_code:
-        return []
-        
-    html_classes = set()
-    class_attrs = re.findall(r'class(?:Name)?\s*=\s*["\']([^"\']+)["\']', html_code, re.IGNORECASE)
-    for attr in class_attrs:
-        for cls in attr.split():
-            cls = cls.strip()
-            if cls:
-                html_classes.add(cls)
-            
-    if not html_classes:
-        return []
-        
-    css_classes = set()
-    defined_cls = re.findall(r'\.([a-zA-Z0-9_-]+)', css_code)
-    for c in defined_cls:
-        css_classes.add(c.strip())
-        
-    missing = []
-    ignore = {"active", "hover", "focus", "hidden", "show", "container"}
-    
-    for c in html_classes:
-        if c not in css_classes and c not in ignore and not c.startswith(('js-', 'is-', 'has-', 'sm:', 'md:', 'lg:', 'hover:', 'focus:')):
-            if any(keyword in c for keyword in ['grid', 'card', 'item', 'list', 'nav', 'hero', 'btn', 'wrapper', 'section', 'layout', 'row', 'col']):
-                missing.append(c)
-                
-    return missing
