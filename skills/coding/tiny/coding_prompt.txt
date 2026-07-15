@@ -15,16 +15,19 @@ When you generate a complete, self-contained file, place a <file_card> tag stric
 <file_card filename="name.ext" lang="ext"></file_card>
 
 WEB DESIGN RULES (CRITICAL FOR WEBSITES/WEB APPS):
-If requested to build a website, web app, or dashboard, you MUST create a SINGLE, self-contained HTML file (using Tailwind CDN, Lucide CDN, and Google Fonts in <head>).
-To ensure a premium, modern look that WOWs the user, follow these design recipes:
-1. Dark Mode Canvas: Use `bg-zinc-950 text-zinc-50` with an ambient glow container:
+If requested to build a website, web app, or dashboard, you MUST create a SINGLE, self-contained HTML file.
+You MUST follow these design rules for visual excellence and premium aesthetics:
+1. STYLING: You MUST use Tailwind CSS CDN for styling. Put Tailwind classes DIRECTLY in the HTML `class` attributes.
+2. NO CUSTOM CSS GRADIENTS: DO NOT write custom gradient definitions in a `<style>` block (they often break). Instead, use built-in Tailwind gradient classes directly on elements, e.g. `bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950` or `from-teal-950 to-emerald-900`.
+3. AMBIENT GLOWS: Always add one or more blurred background glow elements for premium aesthetics:
    `<div class="absolute top-0 left-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none -z-10"></div>`
-2. Glassmorphic Cards:
+4. DARK CANVAS & COLOR CONTRAST: Default to a dark theme using `bg-zinc-950 text-zinc-100`. All headings, text, and labels must be clearly readable. Never put dark text on a dark background or light text on a light background.
+5. GLASSMORPHIC CARDS: For feature grids or product menus, use:
    `<div class="bg-zinc-900/50 backdrop-blur-md border border-zinc-800 rounded-2xl p-6 transition-all duration-300 hover:-translate-y-1 hover:border-indigo-500/30"></div>`
-3. Premium Buttons:
+6. PREMIUM BUTTONS: Use nice hover transitions and gradients:
    `<button class="bg-gradient-to-r from-indigo-500 to-purple-600 hover:opacity-95 text-white font-semibold px-6 py-3 rounded-xl transition-all duration-300 shadow-lg shadow-indigo-500/20">`
-4. Modern Inputs:
-   `<input class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all">`
-5. Hero Section: Must include centered eyebrow badge, large bold title with gradient-highlighted text (`bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent`), and clear CTA buttons.
-6. Responsive & Centered: Center all grids, tables, and buttons within `<div class="max-w-5xl mx-auto px-6">` container wrappers. Never let content touch the viewport edges.
-7. Color Contrast: Text MUST be high contrast relative to the background (e.g., zinc-100 or white on dark backgrounds).
+7. MODERN FONTS: Load a modern font (like Inter or Plus Jakarta Sans) from Google Fonts. NEVER use uppercase-only fonts like 'Bebas Neue' for general body text.
+8. REAL STOCK IMAGES: Never use dummy domains like `https://example.com/image.jpg` (they render as broken icons). Instead, use high-quality, working Unsplash images, e.g.:
+   - Restaurant/Food: `https://images.unsplash.com/photo-1517248135467-4c7edcad34c4` or `https://images.unsplash.com/photo-1504674900247-0877df9cc836`
+   - Laptops/Tech: `https://images.unsplash.com/photo-1496181130204-755241544e35`
+9. LAYOUT: Center all elements inside a responsive container wrapper `<div class="max-w-5xl mx-auto px-6 py-12">`. Never let content touch the viewport edges.
