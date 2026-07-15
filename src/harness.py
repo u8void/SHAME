@@ -1130,12 +1130,81 @@ class CodeSandbox:
         return ""
 
     @staticmethod
-    def run_code_with_io(code: str, language: str, test_cases: List[TestCase], timeout_seconds: float = 10.0) -> SandboxReport:
+    def extract_multiple_files(text: str) -> Dict[str, str]:
+        import re
+        files = {}
+        # Match all code blocks
+        blocks = re.finditer(r'```(?:\w+)?\s*(.*?)\n(.*?)\n```', text, re.DOTALL)
+        for idx, match in enumerate(blocks):
+            info_string = match.group(1).strip()
+            content = match.group(2).strip()
+            
+            filename = None
+            if info_string and not info_string.startswith('<!--') and not info_string.startswith('/*'):
+                filename = info_string.split()[0]
+                
+            if not filename:
+                first_line = content.split('\n')[0].strip()
+                m_html = re.search(r'<!--\s*([a-zA-Z0-9_\-./]+)\s*-->', first_line)
+                if m_html:
+                    filename = m_html.group(1)
+                else:
+                    m_css = re.search(r'/\*\s*([a-zA-Z0-9_\-./]+)\s*\*/', first_line)
+                    if m_css:
+                        filename = m_css.group(1)
+                    else:
+                        m_py = re.search(r'#\s*([a-zA-Z0-9_\-./]+\.[a-zA-Z]+)', first_line)
+                        if m_py:
+                            filename = m_py.group(1)
+            
+            if not filename:
+                filename = f"file_{idx+1}.txt"
+                
+            files[filename] = content
+            
+        return files
+
+    @staticmethod
+    def _get_external_python_deps(code: str) -> List[str]:
+        import ast
+        import sys
+        try:
+            tree = ast.parse(code)
+        except Exception:
+            return []
+            
+        imports = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    imports.add(alias.name.split('.')[0])
+            elif isinstance(node, ast.ImportFrom):
+                if node.module and node.level == 0:
+                    imports.add(node.module.split('.')[0])
+                    
+        stdlib = getattr(sys, 'stdlib_module_names', set())
+        builtins = {'os', 'sys', 'time', 'json', 're', 'math', 'datetime', 'collections', 'itertools', 'functools', 'random', 'subprocess', 'typing', 'ast', 'tempfile', 'shutil', 'pathlib'}
         
+        external = [pkg for pkg in imports if pkg not in stdlib and pkg not in builtins and not pkg.startswith('_')]
+        
+        pkg_mapping = {
+            'bs4': 'beautifulsoup4',
+            'cv2': 'opencv-python',
+            'sklearn': 'scikit-learn',
+            'PIL': 'Pillow',
+            'yaml': 'pyyaml',
+            'dotenv': 'python-dotenv'
+        }
+        
+        return [pkg_mapping.get(pkg, pkg) for pkg in external]
+
+    @staticmethod
+    def run_code_with_io(code: str, language: str, test_cases: List[TestCase], timeout_seconds: float = 10.0) -> SandboxReport:
         import tempfile
         import subprocess
         import time
         import os
+        import sys
         
         start_time = time.time()
         
@@ -1145,8 +1214,6 @@ class CodeSandbox:
                 exe_file = os.path.join(tmpdir, "solution")
                 with open(src_file, "w", encoding="utf-8") as f:
                     f.write(code)
-                
-                
                 try:
                     comp = subprocess.run(
                         ["g++", "-O2", "-std=c++17", src_file, "-o", exe_file],
@@ -1170,13 +1237,31 @@ class CodeSandbox:
                     )
                 run_cmd = [exe_file]
             else:
-                
                 src_file = os.path.join(tmpdir, "solution.py")
                 with open(src_file, "w", encoding="utf-8") as f:
                     f.write(code)
-                run_cmd = [sys.executable, src_file]
+                    
+                python_exe = sys.executable
                 
-            
+                # Auto Dependency Management
+                external_deps = CodeSandbox._get_external_python_deps(code)
+                if external_deps:
+                    venv_dir = os.path.join(tmpdir, "venv")
+                    try:
+                        subprocess.run([sys.executable, "-m", "venv", venv_dir], capture_output=True, timeout=10)
+                        if os.name == 'nt':
+                            pip_exe = os.path.join(venv_dir, "Scripts", "pip.exe")
+                            python_exe = os.path.join(venv_dir, "Scripts", "python.exe")
+                        else:
+                            pip_exe = os.path.join(venv_dir, "bin", "pip")
+                            python_exe = os.path.join(venv_dir, "bin", "python")
+                            
+                        if os.path.exists(pip_exe):
+                            subprocess.run([pip_exe, "install", "--quiet"] + external_deps, capture_output=True, timeout=45)
+                    except Exception:
+                        python_exe = sys.executable  # Fallback to system python if venv fails
+                        
+                run_cmd = [python_exe, src_file]
             for i, tc in enumerate(test_cases):
                 try:
                     proc = subprocess.run(

@@ -707,6 +707,29 @@ def _run_complex_coding(
         final_output = translated
         yield {"type": "token", "content": final_output}
 
+    from src.harness import CodeSandbox
+    import time
+    import os
+    scaffold_files = CodeSandbox.extract_multiple_files(final_output)
+    if len(scaffold_files) > 1 or _is_web_design_request(user_query):
+        workspace_dir = os.path.join(os.getcwd(), f"iris_projects/project_{int(time.time())}")
+        os.makedirs(workspace_dir, exist_ok=True)
+        for fname, content in scaffold_files.items():
+            fname = fname.replace("..", "").lstrip("/")
+            if not fname:
+                fname = f"file_{int(time.time())}.txt"
+            fpath = os.path.join(workspace_dir, fname)
+            os.makedirs(os.path.dirname(fpath), exist_ok=True)
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(content)
+        
+        scaffold_msg = f"\n\n> 📁 **Project Scaffolding Generated!** Your files have been saved locally in `{workspace_dir}`."
+        if user_lang != "English":
+            scaffold_msg = f"\n\n> 📁 **تم بناء المشروع بنجاح!** لقد قمت بتوليد مجلد للمشروع وحفظ جميع الملفات الجاهزة للتشغيل محلياً في: `{workspace_dir}`."
+            
+        final_output += scaffold_msg
+        yield {"type": "token", "content": scaffold_msg}
+
     yield {"type": "raw_response", "content": final_output}
 
 

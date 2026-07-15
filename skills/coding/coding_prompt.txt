@@ -297,3 +297,10 @@ If any check fails, fix it before outputting. Do not output, then apologize, the
 
 ## 11. FINAL REMINDER (repeat of the highest-cost rules)
 Colon not equals in objects. `<body>` and every element has an explicit text color. MUST include `tailwind.config` if using custom colors. Config colors are hex, never class names. No `<style>` classes besides `@keyframes` — use bracket arbitrary values instead. No scroll-reveal on real content. No `classList`. No external images. Every id resolves and every clickable id has a listener. Every string closes. File ends at `</html>`. One symbol per price. Exactly one code block, nothing outside it.
+
+---
+
+## 12. MULTI-FILE PROJECTS (Project Scaffolding)
+If the user explicitly asks for a multi-file project (e.g., separate HTML/CSS/JS files, React app, Python project), you MUST output EACH file in its own distinct markdown code block. 
+CRITICAL: The very first line inside every code block MUST be a comment containing the exact file path (e.g., `<!-- index.html -->` for HTML, `/* style.css */` for CSS, `# src/main.py` for Python). 
+This allows the system to extract and build the project structure locally.
