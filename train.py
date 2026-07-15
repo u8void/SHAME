@@ -6,6 +6,8 @@ os.environ["GGML_CUDA_NO_VMM"] = "1"
 import sys
 os.environ["HF_XET_HIGH_PERFORMANCE"] = "1"
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+os.environ["HF_TRANSFER_MAX_CONNECTIONS"] = "256"  # Force high parallel connections to bypass single-thread limits
+os.environ["HF_TRANSFER_CHUNK_SIZE"] = "33554432"  # 32MB chunk size for faster disk writes
 import json
 import random
 import argparse
@@ -1413,16 +1415,29 @@ def download_all_models(roles_to_train: List[str] = None):
                 try:
                     from huggingface_hub import hf_hub_download
                     
+                    from tqdm import tqdm
+                    class ForceTqdm(tqdm):
+                        def __init__(self, *args, **kwargs):
+                            kwargs['disable'] = False
+                            super().__init__(*args, **kwargs)
+                            
+                        def display(self, msg=None, pos=None):
+                            # Output using \n instead of \r so external readline() doesn't block
+                            sys.stdout.write(self.__str__() + "\n")
+                            sys.stdout.flush()
+                                
                     parts = url.split("huggingface.co/")[-1].split("/resolve/")
                     repo_id = parts[0]
                     subparts = parts[1].split("/")
                     remote_name = "/".join(subparts[1:])
                     print("  Using accelerated Xet high-performance transfer...")
+                    
                     dl_path = hf_hub_download(
                         repo_id=repo_id,
                         filename=remote_name,
                         local_dir="./models",
-                        local_dir_use_symlinks=False
+                        local_dir_use_symlinks=False,
+                        tqdm_class=ForceTqdm
                     )
                     if os.path.abspath(dl_path) != os.path.abspath(dest_path):
                         if os.path.exists(dest_path): os.remove(dest_path)
@@ -1455,6 +1470,7 @@ def download_all_models(roles_to_train: List[str] = None):
                                 f_out.write(chunk)
                                 count += 1
                                 
+                                # Progress bar with \n for compatibility with external wrapper scripts
                                 duration = time.time() - start_time
                                 progress_size = count * block_size
                                 if progress_size > total_size and total_size > 0:
@@ -1462,8 +1478,8 @@ def download_all_models(roles_to_train: List[str] = None):
                                 speed = int(progress_size / (1024 * 1024 * max(duration, 0.001)))
                                 percent = int(progress_size * 100 / total_size) if total_size > 0 else 0
                                 sys.stdout.write(
-                                    f"\r  ... {percent}% | {progress_size / (1024*1024):.1f} MB "
-                                    f"| {speed} MB/s | {duration:.1f}s"
+                                    f"  ... {percent}% | {progress_size / (1024*1024):.1f} MB "
+                                    f"| {speed} MB/s | {duration:.1f}s\n"
                                 )
                                 sys.stdout.flush()
                                 
