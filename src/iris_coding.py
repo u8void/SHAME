@@ -450,7 +450,15 @@ def _run_complex_coding(
     if context:
         reasoning_prompt = f"REFERENCE EXCERPT:\n{context}\n\n{reasoning_prompt}"
 
-    reasoning_prompt += "\n\n[NEW AGENTIC ABILITY: If you need to search the web for the latest documentation, frameworks, or code snippets, you MUST output <search>your search query</search>. If you need to read the content of an existing file in the workspace, you MUST output <read>path/to/file</read>. If you do either, your generation will be paused, the action will be performed, and the results will be injected back into your context so you can continue.]"
+    reasoning_prompt += (
+        "\n\n[NEW AGENTIC ABILITY: If you need to search the web for the latest documentation, frameworks, or code snippets, you MUST output <search>your search query</search>. "
+        "If you need to read the content of an existing file in the workspace, you MUST output <read>path/to/file</read>. "
+        "If you do either, your generation will be paused, the action will be performed, and the results will be injected back into your context so you can continue.]\n\n"
+        "[AUTONOMOUS EXECUTION: For large projects, you can output a <plan>...</plan> block outlining the steps. "
+        "Then, complete ONLY the first step, and output <step_completed>. "
+        "The system will automatically run your code, run terminal commands, and loop back to you to complete the next steps. "
+        "When ALL steps are fully completed, output <done>.]"
+    )
 
     reasoning_msgs = [{"role": "system", "content": reasoning_prompt}] + optimized
 
@@ -645,16 +653,16 @@ def _run_complex_coding(
         review_msgs = optimized + [
             {"role": "assistant", "content": full_code},
             {"role": "user",
-             "content": f"Review the above code against the original architecture blueprint:\n\n{raw_reasoning}\n\n"
-             "1. Verify that every file, function, and constraint in the blueprint was implemented correctly.\n"
-             "2. Fix all syntax errors, logical bugs, and edge cases.\n"
-             "If you need to make changes, DO NOT output the full file. Instead, output ONLY Search and Replace blocks using the following exact format:\n"
+             "content": f"You are the CRITIC AGENT. Review the generated code against the original blueprint:\n\n{raw_reasoning}\n\n"
+             "1. Verify that every file, function, and constraint was implemented correctly.\n"
+             "2. Find any logical bugs, security flaws, or UI layout issues.\n"
+             "3. If you find ANY issue, you MUST output Surgical Diff Patches to fix them using this format:\n"
              "<<<<\n"
              "exact lines to find in the original code\n"
              "====\n"
              "new lines to replace them with\n"
              ">>>>\n"
-             "If no changes are needed, just output 'No issues found.'"}
+             "If the code is absolutely flawless, output 'No issues found.'"}
         ]
         
         est_review = estimate_tokens(review_msgs)
@@ -898,6 +906,19 @@ def _run_complex_coding(
                 yield {"type": "token", "content": git_msg}
         except Exception:
             pass
+
+    # Feature 3: Autonomous Execution (Auto-Plan Loop)
+    if "<plan>" in final_output and "<step_completed>" in final_output and "<done>" not in final_output:
+        yield {"type": "status", "content": "Autonomous Agent: Proceeding to next step..."}
+        
+        new_history = history + [
+            {"role": "user", "content": user_query},
+            {"role": "assistant", "content": final_output},
+            {"role": "user", "content": "Step completed. Please proceed to the next step in your <plan>. Do not stop until all steps are done. Output <step_completed> after each step. If all steps are complete, output <done>."}
+        ]
+        
+        yield from _run_complex_coding(user_query, new_history, optimized, context, retriever, settings)
+        return
 
     yield {"type": "raw_response", "content": final_output}
 
@@ -1257,6 +1278,18 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
     if settings is None:
         settings = {}
         
+    img_match = re.search(r'\[(?:image|صورة):\s*(.+?)\]', user_query, re.IGNORECASE)
+    if img_match:
+        img_path = img_match.group(1).strip()
+        if os.path.exists(img_path):
+            yield {"type": "status", "content": f"Analyzing image: {img_path}..."}
+            try:
+                from src.iris_vision import analyze_image
+                vision_desc = analyze_image(img_path, "Describe this UI or image in high detail. Convert it into a detailed structure that a web developer can use to build a responsive HTML/CSS page.")
+                final_query += f"\n\n[IMAGE ANALYSIS]\nI have analyzed the provided image. Here is the detailed description of what it looks like:\n{vision_desc}\n\nUse this description to build the code exactly as shown in the image."
+            except Exception as e:
+                yield {"type": "status", "content": f"Vision analysis failed: {e}"}
+
     path_match = re.search(r'\[(?:path|مسار):\s*(.+?)\]', user_query, re.IGNORECASE)
     if path_match:
         target_path = path_match.group(1).strip()
