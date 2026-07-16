@@ -28,7 +28,7 @@ function triggerDownload(filename, content) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-    let chats = JSON.parse(localStorage.getItem('iris_chats')) || [];
+    let chats = (JSON.parse(localStorage.getItem('iris_chats')) || []).filter(c => c.messages && c.messages.length > 0);
     let currentChatId = null;
     window.getCurrentChats = () => chats;
     window.getCurrentChatId = () => currentChatId;
@@ -67,7 +67,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const sendBtn = document.getElementById("sendBtn");
     const chatMessages = document.getElementById("chatMessages");
     const chatHistory = document.getElementById("chatHistory");
-    const newChatBtn = document.getElementById("newChatBtn");
+    const newChatBtn = document.getElementById('newChatBtn');
+    const quickNewChatBtnGlobal = document.getElementById('quickNewChatBtnGlobal');
+    const tempChatBtn = document.getElementById('tempChatBtn');
+    const modelBtn = document.getElementById('modelBtn');
     const searchToggleBtn = document.getElementById("searchToggleBtn");
     const searchBarContainer = document.getElementById("searchBarContainer");
     const searchInput = document.getElementById("searchInput");
@@ -119,8 +122,33 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let searchOpen = false;
     let searchQuery = '';
+
+    window.saveAppUIState = function() {
+        const settingsModal = document.getElementById('settingsPanel');
+        const sidebarEl = document.querySelector('.sidebar');
+        const state = {
+            currentChatId: currentChatId,
+            isChatActive: document.body.classList.contains('chat-active'),
+            isSidebarExpanded: sidebarEl ? sidebarEl.classList.contains('expanded') : false,
+            isSettingsOpen: settingsModal ? settingsModal.classList.contains('open') : false
+        };
+        localStorage.setItem('iris_ui_state', JSON.stringify(state));
+    };
+
+    const uiObserver = new MutationObserver(() => window.saveAppUIState());
+    
+    // We observe after a tick to ensure elements exist
+    setTimeout(() => {
+        uiObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+        const sidebarEl = document.querySelector('.sidebar');
+        if (sidebarEl) uiObserver.observe(sidebarEl, { attributes: true, attributeFilter: ['class'] });
+        const settingsModal = document.getElementById('settingsPanel');
+        if (settingsModal) uiObserver.observe(settingsModal, { attributes: true, attributeFilter: ['class'] });
+    }, 100);
+
     function savePersist() {
-        localStorage.setItem('iris_chats', JSON.stringify(chats));
+        const persistChats = chats.filter(c => !c.isTemp && c.messages.length > 0);
+        localStorage.setItem('iris_chats', JSON.stringify(persistChats));
     }
     function normaliseChat(chat) {
         if (typeof chat.historyString !== 'string') chat.historyString = '';
@@ -180,20 +208,32 @@ document.addEventListener("DOMContentLoaded", () => {
         const q = query.trim().toLowerCase();
         let visibleCount = 0;
 
-        chats.forEach(chat => {
+        const displayChats = [
+            ...chats.filter(c => c.isPinned && !c.isTemp && c.messages.length > 0),
+            ...chats.filter(c => !c.isPinned && !c.isTemp && c.messages.length > 0)
+        ];
+
+        displayChats.forEach(chat => {
             if (q && !chat.title.toLowerCase().includes(q)) return;
             visibleCount++;
 
             const item = document.createElement('div');
             item.className = `chat-history-item${chat.id === currentChatId ? ' active' : ''}`;
+            
+            const pinHtml = chat.isPinned ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" style="margin-right: 6px; opacity: 0.7; vertical-align: middle;"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 11.64V6a3 3 0 0 0-6 0v5.64a2 2 0 0 1-1.11 1.91l-1.78.9A2 2 0 0 0 5 15.24Z"></path></svg>` : '';
+            
             item.innerHTML = `
-                <span class="chat-history-item-title">${highlightMatch(chat.title, q)}</span>
-                <button class="chat-delete-btn" data-id="${chat.id}" title="Delete">✕</button>
+                <span class="chat-history-item-title">${pinHtml}${highlightMatch(chat.title, q)}</span>
+                <button class="chat-options-btn" data-id="${chat.id}" title="Options">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/>
+                    </svg>
+                </button>
             `;
-            item.querySelector('.chat-history-item-title').addEventListener('click', () => loadChat(chat.id));
-            item.querySelector('.chat-delete-btn').addEventListener('click', (e) => {
+            item.addEventListener('click', () => loadChat(chat.id));
+            item.querySelector('.chat-options-btn').addEventListener('click', (e) => {
                 e.stopPropagation();
-                deleteChat(chat.id);
+                openContextMenu(e, chat.id);
             });
             chatHistory.appendChild(item);
         });
@@ -201,6 +241,79 @@ document.addEventListener("DOMContentLoaded", () => {
         if (recentLabel) recentLabel.textContent = q ? `Results (${visibleCount})` : 'Recent Chats';
         if (searchEmpty) searchEmpty.classList.toggle('visible', q !== '' && visibleCount === 0);
     }
+
+    let currentContextId = null;
+    const contextMenu = document.getElementById('chatContextMenu');
+    
+    function openContextMenu(e, id) {
+        currentContextId = id;
+        contextMenu.style.display = 'flex';
+        
+        const chat = chats.find(c => c.id === id);
+        const pinBtn = document.getElementById('cmPinBtn');
+        if (pinBtn && chat) {
+            pinBtn.innerHTML = `
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="${chat.isPinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 11.64V6a3 3 0 0 0-6 0v5.64a2 2 0 0 1-1.11 1.91l-1.78.9A2 2 0 0 0 5 15.24Z"></path></svg>
+                ${chat.isPinned ? 'Unpin' : 'Pin'}
+            `;
+        }
+
+        const rect = e.currentTarget.getBoundingClientRect();
+        let top = rect.bottom + 8;
+        let left = rect.left; // Align left edge of menu with button, so it extends to the right
+        
+        if (top + contextMenu.offsetHeight > window.innerHeight) {
+            top = rect.top - contextMenu.offsetHeight - 8;
+        }
+        
+        contextMenu.style.top = top + 'px';
+        contextMenu.style.left = Math.max(10, left) + 'px';
+    }
+    
+    document.addEventListener('click', (e) => {
+        if (contextMenu && contextMenu.style.display === 'flex') {
+            if (!contextMenu.contains(e.target) && !e.target.closest('.chat-options-btn')) {
+                contextMenu.style.display = 'none';
+            }
+        }
+    });
+
+    document.getElementById('cmDeleteBtn')?.addEventListener('click', () => {
+        if (currentContextId) {
+            deleteChat(currentContextId);
+            contextMenu.style.display = 'none';
+        }
+    });
+    
+    document.getElementById('cmRenameBtn')?.addEventListener('click', () => {
+        if (currentContextId) {
+            const chat = chats.find(c => c.id === currentContextId);
+            const newName = prompt("Enter new name:", chat?.title || "");
+            if (newName && newName.trim()) {
+                chat.title = newName.trim();
+                savePersist();
+                renderChatList();
+            }
+            contextMenu.style.display = 'none';
+        }
+    });
+    
+    document.getElementById('cmShareBtn')?.addEventListener('click', () => {
+        alert("Share functionality coming soon!");
+        contextMenu.style.display = 'none';
+    });
+    
+    document.getElementById('cmPinBtn')?.addEventListener('click', () => {
+        if (currentContextId) {
+            const chat = chats.find(c => c.id === currentContextId);
+            if (chat) {
+                chat.isPinned = !chat.isPinned;
+                savePersist();
+                renderChatList();
+            }
+            contextMenu.style.display = 'none';
+        }
+    });
 
     function escapeHtml(str) {
         return String(str)
@@ -219,21 +332,41 @@ document.addEventListener("DOMContentLoaded", () => {
         if (welcomeSection) welcomeSection.style.display = 'none';
     }
 
+    function updatePlaceholder() {
+        if (!chatInput) return;
+        const currentChat = chats.find(c => c.id === currentChatId);
+        const isTemp = currentChat && currentChat.isTemp;
+        chatInput.placeholder = isTemp ? "Ask anything (Incognito)" : "Ask anything";
+    }
+
     function exitChatMode() {
         chatActive = false;
         document.body.classList.remove("chat-active");
-        if (welcomeSection) welcomeSection.style.display = '';
+        if (welcomeSection) {
+            welcomeSection.style.display = '';
+        }
     }
 
-    function startNewChat() {
-        const id = Date.now().toString();
-        chats.unshift({ id, title: 'New Conversation', messages: [], historyString: '' });
-        currentChatId = id;
-        savePersist();
-        closeSearch();
+    function startNewChat(isTemp = false) {
+        // Clean up any empty chats before starting a new one
+        chats = chats.filter(c => c.messages.length > 0);
+
+        function generateId() { return Date.now().toString(); }
+        const newChat = {
+            id: generateId(),
+            title: isTemp ? 'Temporary Chat' : 'New Conversation',
+            messages: [],
+            isTemp: isTemp
+        };
+        chats.unshift(newChat);
+        if (!isTemp) savePersist();
+        currentChatId = newChat.id;
+        updatePlaceholder();
         renderChatList();
+        
         chatMessages.innerHTML = '';
         exitChatMode();
+        window.saveAppUIState();
     }
 
     function loadChat(id) {
@@ -243,7 +376,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         chatMessages.innerHTML = '';
         chat.messages.forEach(msg => {
-            appendMessageDOM(msg.role, msg.displayText || msg.content, false, msg.imageUrl, msg.attachmentName);
+            appendMessageDOM(msg.role, msg.displayText || msg.content, false, msg.imageUrl, msg.attachmentName, msg.sources);
         });
 
         if (chat.messages.length > 0) {
@@ -252,7 +385,9 @@ document.addEventListener("DOMContentLoaded", () => {
         } else {
             exitChatMode();
         }
+        updatePlaceholder();
         renderChatList();
+        window.saveAppUIState();
     }
 
     function deleteChat(id) {
@@ -491,6 +626,14 @@ document.addEventListener("DOMContentLoaded", () => {
                     work = work.substring(0, startIdx) + id + work.substring(endIdx);
                     startIdx = work.indexOf('{', startIdx + id.length);
                     continue;
+                }
+            } else if (isStreaming) {
+                const candidate = work.substring(startIdx);
+                if (candidate.includes('"action"') || candidate.includes("'action'")) {
+                    const id = `@@@ACTION_${blocks.length}@@@`;
+                    blocks.push({ type: 'action', content: candidate });
+                    work = work.substring(0, startIdx) + id;
+                    break;
                 }
             }
             startIdx = work.indexOf('{', startIdx + 1);
@@ -923,7 +1066,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 id = `@@@THOUGHT_${index}@@@`;
                 const tKey = 't_' + index;
                 window.toggledBlocks = window.toggledBlocks || {};
-                let isExpanded = window.toggledBlocks[tKey] !== undefined ? window.toggledBlocks[tKey] : !block.isClosed;
+                let isExpanded = window.toggledBlocks[tKey] !== undefined ? window.toggledBlocks[tKey] : true;
                 let inner = escapeHtml(block.content || '').replace(/\n/g, '<br>');
 
                 if (!block.isClosed) {
@@ -995,13 +1138,31 @@ document.addEventListener("DOMContentLoaded", () => {
                 try {
                     const obj = JSON.parse(block.content);
                     if (obj.action === "chat" && obj.response) {
-                        html = escapeHtml(obj.response).replace(/\n/g, '<br>');
+                        if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+                            const purifyConfig = { ADD_TAGS: ['math', 'mrow', 'mi', 'mo', 'mn', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mphantom', 'mpadded', 'mroot', 'mfrac', 'msub', 'msup', 'msubsup', 'munder', 'mover', 'munderover', 'mmultiscripts', 'msection', 'maction', 'annotation', 'semantics'], ADD_ATTR: ['mathvariant', 'mathcolor', 'mathsize', 'mathbackground', 'display', 'xmlns'] };
+                            html = DOMPurify.sanitize(marked.parse(obj.response, { breaks: true, gfm: true }), purifyConfig);
+                        } else {
+                            html = escapeHtml(obj.response).replace(/\n/g, '<br>');
+                        }
                     } else {
                         const formattedAction = formatActionNormally(obj);
                         html = `<div class="action-result-stream" style="font-size:12px; color:#a385ff; opacity:0.8;">${escapeHtml(formattedAction)}</div>`;
                     }
                 } catch (e) {
-                    html = escapeHtml(block.content).replace(/\n/g, '<br>');
+                    const respMatch = block.content.match(/"response"\s*:\s*"([\s\S]*)$/);
+                    if (respMatch) {
+                        let partialResponse = respMatch[1];
+                        if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+                            const purifyConfig = { ADD_TAGS: ['math', 'mrow', 'mi', 'mo', 'mn', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mphantom', 'mpadded', 'mroot', 'mfrac', 'msub', 'msup', 'msubsup', 'munder', 'mover', 'munderover', 'mmultiscripts', 'msection', 'maction', 'annotation', 'semantics'], ADD_ATTR: ['mathvariant', 'mathcolor', 'mathsize', 'mathbackground', 'display', 'xmlns'] };
+                            html = DOMPurify.sanitize(marked.parse(partialResponse, { breaks: true, gfm: true }), purifyConfig);
+                        } else {
+                            html = escapeHtml(partialResponse).replace(/\n/g, '<br>');
+                        }
+                    } else if (block.content.includes('"action"') && !block.content.includes('"response"')) {
+                        html = ''; // Still buffering action JSON, don't show raw JSON
+                    } else {
+                        html = escapeHtml(block.content).replace(/\n/g, '<br>');
+                    }
                 }
             } else if (block.type === 'result') {
                 id = `@@@RESULT_${index}@@@`;
@@ -1321,7 +1482,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     };
 
-    function appendMessageDOM(role, text, scroll = true, imageUrl = null, attachmentName = null) {
+    function appendMessageDOM(role, text, scroll = true, imageUrl = null, attachmentName = null, sources = null) {
         const outer = document.createElement("div");
         outer.classList.add("message", role === "user" ? "user-message" : "ai-message");
 
@@ -1349,7 +1510,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (role === "bot") {
             const div = document.createElement("div");
-            div.innerHTML = formatMessage(text);
+            let html = formatMessage(text);
+            if (sources && sources.length > 0) {
+                html += '<div class="sources-container"><div class="sources-title">Sources</div><div class="sources-list">';
+                sources.forEach(s => {
+                    html += `<a class="source-chip" href="${s.url}" target="_blank" rel="noopener noreferrer">${s.domain}</a>`;
+                });
+                html += '</div></div>';
+            }
+            div.innerHTML = html;
             inner.appendChild(div);
             setTimeout(() => { if (typeof Prism !== 'undefined') Prism.highlightAll(); }, 50);
         } else if (text) {
@@ -1375,7 +1544,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         if (!currentChatId || !chats.find(c => c.id === currentChatId)) {
-            startNewChat();
+            currentChatId = Date.now().toString();
+            chats.unshift({ id: currentChatId, title: 'New Conversation', messages: [], historyString: '' });
+            savePersist();
+            renderChatList();
         }
 
         const chat = normaliseChat(chats.find(c => c.id === currentChatId));
@@ -1645,20 +1817,9 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             // Clean up currentResponseText before saving to prevent corrupting the LLM context
-            let cleanResponse = rawResponseText || currentResponseText;
-            try {
-                // If the response contains a JSON action block, we extract the action result 
-                // and store ONLY the clean text in history, avoiding massive JSON duplication
-                const match = cleanResponse.match(/\{[\s\S]*?"action"[\s\S]*?\}/i);
-                if (match) {
-                    const actionObj = JSON.parse(match[0]);
-                    if (actionObj.action === "chat" && actionObj.response) {
-                        cleanResponse = actionObj.response;
-                    }
-                }
-            } catch (e) { }
+            let cleanResponse = currentResponseText;
 
-            chat.messages.push({ role: 'bot', content: cleanResponse });
+            chat.messages.push({ role: 'bot', content: cleanResponse, sources: window._pendingSources });
             savePersist();
 
             // Regenerate title after every complete exchange (debounced 3s)
@@ -1822,7 +1983,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         chatInput.placeholder = "Transcribing...";
 
                         if (audioChunks.length === 0) {
-                            chatInput.placeholder = "Ask anything";
+                            updatePlaceholder();
                             return;
                         }
 
@@ -1855,7 +2016,7 @@ document.addEventListener("DOMContentLoaded", () => {
                             console.error("Dictation network error:", err);
                         }
 
-                        chatInput.placeholder = "Ask anything";
+                        updatePlaceholder();
                         stream.getTracks().forEach(track => track.stop());
                     };
 
@@ -1865,7 +2026,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     isRecording = false;
                     dictationBtn.classList.remove('recording-active');
                     dictationBtn.style.color = '';
-                    chatInput.placeholder = "Ask anything";
+                    updatePlaceholder();
                     alert("Please allow microphone permissions to use dictation.");
                 }
             } else {
@@ -1876,7 +2037,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     isRecording = false;
                     dictationBtn.classList.remove('recording-active');
                     dictationBtn.style.color = '';
-                    chatInput.placeholder = "Ask anything";
+                    updatePlaceholder();
                 }
             }
         });
@@ -1893,7 +2054,29 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         }
     });
-    newChatBtn.addEventListener('click', startNewChat);
+    
+    if (newChatBtn) {
+        newChatBtn.addEventListener('click', () => {
+            startNewChat(false);
+            if (window.innerWidth <= 768 && sidebar.classList.contains('expanded')) {
+                // Assuming toggleBtn is available globally
+                const toggleBtn = document.getElementById('sidebarToggleBtn');
+                if (toggleBtn) toggleBtn.click();
+            }
+        });
+    }
+
+    if (quickNewChatBtnGlobal) {
+        quickNewChatBtnGlobal.addEventListener('click', () => {
+            startNewChat(false);
+        });
+    }
+
+    if (tempChatBtn) {
+        tempChatBtn.addEventListener('click', () => {
+            startNewChat(true);
+        });
+    }
 
     function openSearch() {
         searchOpen = true;
@@ -1901,7 +2084,6 @@ document.addEventListener("DOMContentLoaded", () => {
         searchToggleBtn?.classList.add('active');
         if (sidebar && !sidebar.classList.contains('expanded')) {
             sidebar.classList.add('expanded');
-            if (mainContent) mainContent.style.marginLeft = 'var(--sidebar-expanded)';
         }
         setTimeout(() => searchInput?.focus(), 320);
     }
@@ -2050,10 +2232,40 @@ document.addEventListener("DOMContentLoaded", () => {
 
     chats = chats.map(normaliseChat);
 
-    if (chats.length > 0) {
-        loadChat(chats[0].id);
+    let uiState = null;
+    try {
+        uiState = JSON.parse(localStorage.getItem('iris_ui_state'));
+    } catch (e) {}
+
+    if (uiState) {
+        if (uiState.currentChatId && chats.some(c => c.id === uiState.currentChatId)) {
+            loadChat(uiState.currentChatId);
+        } else {
+            startNewChat();
+        }
+
+        if (uiState.isSidebarExpanded !== undefined) {
+            const sb = document.querySelector('.sidebar');
+            if (sb) {
+                if (uiState.isSidebarExpanded) {
+                    sb.classList.add('expanded');
+                } else {
+                    sb.classList.remove('expanded');
+                }
+            }
+        }
+
+        if (uiState.isSettingsOpen) {
+            setTimeout(() => {
+                document.getElementById('settingsBtn')?.click();
+            }, 100);
+        }
     } else {
-        startNewChat();
+        if (chats.length > 0) {
+            loadChat(chats[0].id);
+        } else {
+            startNewChat();
+        }
     }
 });
 

@@ -287,6 +287,9 @@ def chat():
                 
                 final_response = ""
                 assigned_role = None
+                
+                full_stream_text = ""
+                in_thought = False
 
                 for event in ai_agent_handle(
                     user_message,
@@ -295,13 +298,30 @@ def chat():
                     settings=settings,
                     keep_loaded=False
                 ):
-                    if event.get("type") == "raw_response":
+                    ev_type = event.get("type")
+                    if ev_type == "thinking":
+                        if not in_thought:
+                            full_stream_text += "\n<think>\n"
+                            in_thought = True
+                        full_stream_text += event.get("content", "")
+                    elif ev_type in ("token", "text", "action_result"):
+                        if in_thought:
+                            full_stream_text += "\n</think>\n\n"
+                            in_thought = False
+                        if ev_type == "action_result":
+                            full_stream_text += f"\n<action_result>{event.get('content', '')}</action_result>\n"
+                        else:
+                            full_stream_text += event.get("content", "")
+                    elif ev_type == "raw_response":
                         final_response = event.get("content", "")
-                    elif event.get("type") == "status":
+                    elif ev_type == "status":
                         status_text = event.get("content", "")
                         if status_text.startswith("Task: "):
                             assigned_role = status_text.split("Task: ")[1].strip().lower()
                     yield f"data: {json.dumps(event)}\n\n"
+                    
+                if in_thought:
+                    full_stream_text += "\n</think>\n\n"
                     
                 # Post-pipeline HCA compaction
                 from src.iris_engine import ModelRole
@@ -317,8 +337,8 @@ def chat():
                             
                 full_history = list(agent_history)
                 full_history.append({"role": "user", "content": user_message})
-                if final_response:
-                    full_history.append({"role": "assistant", "content": final_response})
+                if full_stream_text:
+                    full_history.append({"role": "assistant", "content": full_stream_text})
                     
                 yield f"data: {json.dumps({'type': 'status', 'content': 'Compacting Context (HCA)...'})}\n\n"
                 compacted, info = auto_compact_for_role(full_history, role=target_role, max_output_tokens=4096)
