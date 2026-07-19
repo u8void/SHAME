@@ -256,6 +256,12 @@ ANIMATIONS = {
     "spin": """Add this to CSS:
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .animate-spin-custom { animation: spin 1s linear infinite; }""",
+    "spin-slow": """Add this to CSS: @keyframes spinSlow { 100% { transform: rotate(360deg); } } .animate-spin-slow { animation: spinSlow 8s linear infinite; }""",
+    "pendulum": """Add this to CSS: @keyframes pendulum { 0%, 100% { transform: rotate(-10deg); } 50% { transform: rotate(10deg); } } .animate-pendulum { transform-origin: top center; animation: pendulum 2s ease-in-out infinite; }""",
+    "squeeze": """Add this to CSS: @keyframes squeeze { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.1, 0.9); } } .animate-squeeze { animation: squeeze 1.5s ease-in-out infinite; }""",
+    "flicker": """Add this to CSS: @keyframes flicker { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } 25%, 75% { opacity: 0.4; } } .animate-flicker { animation: flicker 0.2s linear infinite alternate; }""",
+    "slide-up-fade": """Add this to CSS: @keyframes slideUpFade { 0% { opacity: 0; transform: translateY(50px); } 100% { opacity: 1; transform: translateY(0); } } .animate-slide-up-fade { animation: slideUpFade 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }""",
+    "breathe": """Add this to CSS: @keyframes breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.05); opacity: 0.8; } } .animate-breathe { animation: breathe 4s ease-in-out infinite; }""",
     "float": """Add this to CSS:
 @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0px); } }
 .animate-float { animation: float 3s ease-in-out infinite; }""",
@@ -370,7 +376,6 @@ ANIMATIONS = {
     "bounce in": """Add this to CSS:
 @keyframes bounceIn { from, 20%, 40%, 60%, 80%, to { animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1); } 0% { opacity: 0; transform: scale3d(0.3, 0.3, 0.3); } 20% { transform: scale3d(1.1, 1.1, 1.1); } 40% { transform: scale3d(0.9, 0.9, 0.9); } 60% { opacity: 1; transform: scale3d(1.03, 1.03, 1.03); } 80% { transform: scale3d(0.97, 0.97, 0.97); } to { opacity: 1; transform: scale3d(1, 1, 1); } }
 .animate-bounce-in { animation: bounceIn 0.8s; }""",
-
     "slide-up-fast-v2": """Add this to CSS:\n@keyframes slide-up-fast { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-up-fast { animation: slide-up-fast 1s ease-in-out forwards; }""",
     "slide-up-slow-v2": """Add this to CSS:\n@keyframes slide-up-slow { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-up-slow { animation: slide-up-slow 1s ease-in-out forwards; }""",
     "slide-up-medium-v2": """Add this to CSS:\n@keyframes slide-up-medium { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-up-medium { animation: slide-up-medium 1s ease-in-out forwards; }""",
@@ -395,9 +400,8 @@ ANIMATIONS = {
     "slide-bottom-right-fast-v2": """Add this to CSS:\n@keyframes slide-bottom-right-fast { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-bottom-right-fast { animation: slide-bottom-right-fast 1s ease-in-out forwards; }""",
     "slide-bottom-right-slow-v2": """Add this to CSS:\n@keyframes slide-bottom-right-slow { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-bottom-right-slow { animation: slide-bottom-right-slow 1s ease-in-out forwards; }""",
     "slide-bottom-right-medium-v2": """Add this to CSS:\n@keyframes slide-bottom-right-medium { from { opacity: 0; transform: translate(10px); } to { opacity: 1; transform: translate(0); } }\n.animate-slide-bottom-right-medium { animation: slide-bottom-right-medium 1s ease-in-out forwards; }""",
-
-"float-gentle": "Add this to CSS: `@keyframes floatGentle { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }`. Class: `.animate-float-gentle { animation: floatGentle 4s ease-in-out infinite; }`.",
-"pulse-glow": "Add this to CSS: `@keyframes pulseGlow { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.8; transform: scale(1.05); } }`. Class: `.animate-pulse-glow { animation: pulseGlow 3s ease-in-out infinite; }`.",
+    "float-gentle": "Add this to CSS: `@keyframes floatGentle { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }`. Class: `.animate-float-gentle { animation: floatGentle 4s ease-in-out infinite; }`.",
+    "pulse-glow": "Add this to CSS: `@keyframes pulseGlow { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.8; transform: scale(1.05); } }`. Class: `.animate-pulse-glow { animation: pulseGlow 3s ease-in-out infinite; }`.",
 }
 
 STYLES = {
@@ -461,27 +465,32 @@ STYLES = {
     "comic-book": "Bold comic panel style. Thick black outlines, halftone dots, speech bubbles, POW/ZAP action text, and primary colors: `border-4 border-black bg-yellow-300 font-black uppercase`.",
     "sci-fi-hud": "Heads-up display interface. Transparent panels, scanning lines, circular UI elements, and cyan/amber data readouts: `bg-black/80 border border-cyan-500/40 text-cyan-400 font-mono text-sm`.",
     "crypto-web3": "Blockchain/Web3 aesthetic. Dark purple-black backgrounds, neon gradient accents, hexagonal shapes, and futuristic sans-serif fonts: `bg-slate-950 text-purple-300 border border-purple-500/20`.",
-
-
-
-"premium-glass": "Use `bg-white/5 backdrop-blur-2xl border border-white/10 shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] rounded-3xl` for high-end frosted glass.",
-"professional-card": "Use `bg-white border border-gray-200 shadow-sm rounded-xl hover:shadow-md transition-shadow` for clean SaaS/Dashboard interfaces.",
-"comfort-soft": "Use `bg-stone-50 border border-stone-200 shadow-inner rounded-3xl p-8` for a soft, pillowy, ergonomic container.",
-"luxury-matte": "Use `bg-zinc-900 border border-zinc-800 rounded-none shadow-[20px_20px_60px_#000000,-20px_-20px_60px_#1a1a1a]` for heavy, expensive feel.",
-
-"card-glass-premium": "Premium glass card: `bg-zinc-900/40 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-6 shadow-2xl shadow-black/50`.",
-"card-neumorphic-light": "Neumorphic light card: `bg-zinc-100 rounded-3xl shadow-[20px_20px_60px_#d4d4d8,-20px_-20px_60px_#ffffff] p-8 text-zinc-800`.",
-"card-neumorphic-dark": "Neumorphic dark card: `bg-zinc-900 rounded-3xl shadow-[10px_10px_30px_#0a0a0b,-10px_-10px_30px_#26262b] p-8 text-zinc-100`.",
-"badge-glowing": "Glowing badge: `inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.2)]`.",
-
+    "law-firm": """Use navy blues, gold accents, traditional serif fonts, structured columnar layouts, and very conservative, slow fade transitions.""",
+    "space-exploration": """Use deep starfield blacks, intense glowing cyans, extremely thin sans-serifs, and floating zero-gravity animations.""",
+    "vintage-clothing": """Use sepia overlays, warm cream backgrounds, bold 70s serif fonts, and slightly misaligned collage-style image galleries.""",
+    "cybersecurity": """Use pure black backgrounds, monospace green/cyan typography, grid overlays, glitch hover effects, and technical lock motifs.""",
+    "meditation": """Use extreme whitespace, soft sage and lavender gradients, ultra-thin elegant typography, and barely perceptible ease-in animations.""",
+    "energy-drink": """Use aggressive neon greens and blacks, slanted brutalist borders, extremely heavy italic fonts, and violent shake/pulse animations.""",
+    "dynamic-style-50": """Use `bg-white border-2 border-red-200 shadow-xl rounded-2xl p-4` for an auto-generated style.""",
+    "monochrome-brutalism": """Use `bg-white border-4 border-black text-black font-black uppercase tracking-tighter shadow-[8px_8px_0_rgba(0,0,0,1)] p-8` for a harsh, ink-heavy layout.""",
+    "soft-frosted": """Use `bg-white/40 backdrop-blur-2xl border border-white/50 shadow-[0_4px_24px_rgba(0,0,0,0.05)] rounded-3xl p-6` for extreme softness.""",
+    "cyber-glitch": """Use `bg-black border border-fuchsia-500/50 shadow-[0_0_10px_rgba(217,70,239,0.5),inset_0_0_10px_rgba(217,70,239,0.2)] text-cyan-400 p-6`.""",
+    "velvet-luxury": """Use `bg-zinc-950 border border-zinc-800 shadow-2xl rounded-sm p-10 text-amber-500 font-serif` for deep, quiet opulence.""",
+    "retro-diner": """Use `bg-rose-100 border-4 border-rose-300 rounded-full shadow-lg p-8 text-rose-900 font-bold` for a nostalgic, 50s diner aesthetic.""",
+    "premium-glass": "Use `bg-white/5 backdrop-blur-2xl border border-white/10 shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] rounded-3xl` for high-end frosted glass.",
+    "professional-card": "Use `bg-white border border-gray-200 shadow-sm rounded-xl hover:shadow-md transition-shadow` for clean SaaS/Dashboard interfaces.",
+    "comfort-soft": "Use `bg-stone-50 border border-stone-200 shadow-inner rounded-3xl p-8` for a soft, pillowy, ergonomic container.",
+    "luxury-matte": "Use `bg-zinc-900 border border-zinc-800 rounded-none shadow-[20px_20px_60px_#000000,-20px_-20px_60px_#1a1a1a]` for heavy, expensive feel.",
+    "card-glass-premium": "Premium glass card: `bg-zinc-900/40 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-6 shadow-2xl shadow-black/50`.",
+    "card-neumorphic-light": "Neumorphic light card: `bg-zinc-100 rounded-3xl shadow-[20px_20px_60px_#d4d4d8,-20px_-20px_60px_#ffffff] p-8 text-zinc-800`.",
+    "card-neumorphic-dark": "Neumorphic dark card: `bg-zinc-900 rounded-3xl shadow-[10px_10px_30px_#0a0a0b,-10px_-10px_30px_#26262b] p-8 text-zinc-100`.",
+    "badge-glowing": "Glowing badge: `inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.2)]`.",
     "card-soft-shadow-1": "Card style: `bg-white rounded-2xl shadow-[0_2px_6px_-1px_rgba(0,0,0,0.1)] border border-gray-100 p-6`.",
     "card-hard-brutal-1": "Brutalist card: `bg-zinc-100 rounded-none border-4 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] p-6`.",
     "style-modern-brutalism": "MODERN BRUTALIST STYLE: Use flat, bold layout styles: `bg-white border-4 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] rounded-none text-black font-extrabold` for elements, and bright, raw background colors.",
     "style-ethereal-glass": "ETHEREAL GLASS STYLE: Use a frosted glass vibe: `bg-white/10 backdrop-blur-md border border-white/20 shadow-2xl rounded-2xl text-white`.",
     "style-retro-terminal": "RETRO TERMINAL STYLE: Use a retro computer aesthetic: `bg-black border-2 border-emerald-500 rounded-md text-emerald-400 font-mono shadow-[0_0_10px_rgba(16,185,129,0.3)]`.",
     "style-neumorphic-clay": "NEUMORPHIC CLAY STYLE: Use soft 3D clay-like buttons and panels: `bg-[#e0e5ec] rounded-2xl shadow-[6px_6px_12px_#cacaca,-6px_-6px_12px_#ffffff] border border-white/40 text-slate-700`.",
-
-
 }
 
 EFFECTS = {
@@ -519,12 +528,15 @@ EFFECTS = {
     "border glow": "Use `border border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.4),inset_0_0_15px_rgba(6,182,212,0.1)]` for glowing borders.",
     "clip path": "Use `clip-path: polygon(...)` for custom non-rectangular shapes like triangles, hexagons, or diagonal cuts.",
     "sticky element": "Use `sticky top-0 z-50` to make an element stick to the top of the viewport on scroll.",
-
-
-
-"premium-glow": "Use `shadow-[0_0_40px_-10px_rgba(139,92,246,0.3)]` for a very subtle, expensive-looking ambient glow.",
-"professional-focus": "Use `focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all` for accessible, crisp form interactions.",
-"comfort-fade": "Use `opacity-90 hover:opacity-100 transition-opacity duration-500` for a gentle, non-jarring hover response.",
+    "dynamic-effect-50": """Use `shadow-[0_10px_30px_rgba(var(--color-green),0.2)]` for dynamic glow.""",
+    "chromatic-shadow": """Use `shadow-[4px_0_0_rgba(255,0,0,0.5),-4px_0_0_rgba(0,255,255,0.5)]` for a 3D glasses glitch effect.""",
+    "frosted-edge": """Use `border border-white/20 shadow-[inset_0_0_20px_rgba(255,255,255,0.1)] backdrop-blur-md` for icy glass edges.""",
+    "deep-inset": """Use `shadow-[inset_0_10px_20px_rgba(0,0,0,0.5)]` for elements that look carved deeply into the background.""",
+    "ethereal-glow": """Use `shadow-[0_0_60px_-15px_rgba(255,255,255,0.8)]` for a bright, angelic backlight.""",
+    "text-outline-neon": """Use `-webkit-text-stroke: 1px theme('colors.cyan.400'); color: transparent; filter: drop-shadow(0 0 8px theme('colors.cyan.400'));` for glowing hollow text.""",
+    "premium-glow": "Use `shadow-[0_0_40px_-10px_rgba(139,92,246,0.3)]` for a very subtle, expensive-looking ambient glow.",
+    "professional-focus": "Use `focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all` for accessible, crisp form interactions.",
+    "comfort-fade": "Use `opacity-90 hover:opacity-100 transition-opacity duration-500` for a gentle, non-jarring hover response.",
 }
 
 TYPOGRAPHY = {
@@ -557,7 +569,6 @@ TYPOGRAPHY = {
     "code": "Use `font-family: 'Fira Code', monospace`. Monospace with ligatures for code. Add `<link href='https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&display=swap' rel='stylesheet'>`.",
     "impact": "Use `font-family: 'Bebas Neue', sans-serif`. Ultra-condensed impact headline font. Add `<link href='https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap' rel='stylesheet'>`.",
     "japanese": "Use `font-family: 'Noto Sans JP', sans-serif`. Clean Japanese-supporting font. Add `<link href='https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700;800;900&display=swap' rel='stylesheet'>`.",
-
     "typo-sans-tight-v2": "Use `font-sans tracking-tight leading-relaxed` for elegant readability.",
     "typo-sans-loose-v2": "Use `font-sans tracking-loose leading-relaxed` for elegant readability.",
     "typo-sans-massive-v2": "Use `font-sans tracking-massive leading-relaxed` for elegant readability.",
@@ -583,12 +594,10 @@ TYPOGRAPHY = {
     "typo-handwriting-massive-v2": "Use `font-handwriting tracking-massive leading-relaxed` for elegant readability.",
     "typo-handwriting-tiny-v2": "Use `font-handwriting tracking-tiny leading-relaxed` for elegant readability.",
     "typo-handwriting-standard-v2": "Use `font-handwriting tracking-standard leading-relaxed` for elegant readability.",
-
-"premium-editorial": "Use `font-serif tracking-tight leading-relaxed text-zinc-900` for a high-end magazine/editorial look.",
-"professional-corporate": "Use `font-sans tracking-normal leading-snug text-slate-800` for crisp, trustworthy business readability.",
-"comfort-reading": "Use `font-sans tracking-wide leading-loose text-stone-700` to minimize eye strain and maximize reading comfort.",
-"luxury-display": "Use `font-serif tracking-widest uppercase font-light text-amber-500` for ultra-premium headings.",
-
+    "premium-editorial": "Use `font-serif tracking-tight leading-relaxed text-zinc-900` for a high-end magazine/editorial look.",
+    "professional-corporate": "Use `font-sans tracking-normal leading-snug text-slate-800` for crisp, trustworthy business readability.",
+    "comfort-reading": "Use `font-sans tracking-wide leading-loose text-stone-700` to minimize eye strain and maximize reading comfort.",
+    "luxury-display": "Use `font-serif tracking-widest uppercase font-light text-amber-500` for ultra-premium headings.",
     "typo-font-sans-0-0": "Typography preset: Headings use `font-sans tracking-tighter leading-none font-bold`. Paragraphs use `font-sans tracking-normal leading-relaxed text-zinc-600 dark:text-zinc-400`.",
     "typo-font-sans-0-1": "Typography preset: Headings use `font-sans tracking-tighter leading-relaxed font-bold`. Paragraphs use `font-sans tracking-normal leading-relaxed text-zinc-600 dark:text-zinc-400`.",
     "typo-font-sans-0-2": "Typography preset: Headings use `font-sans tracking-tighter leading-loose font-bold`. Paragraphs use `font-sans tracking-normal leading-relaxed text-zinc-600 dark:text-zinc-400`.",
@@ -616,7 +625,6 @@ TYPOGRAPHY = {
     "typo-font-mono-2-0": "Typography preset: Headings use `font-mono tracking-widest leading-none font-bold`. Paragraphs use `font-sans tracking-normal leading-relaxed text-zinc-600 dark:text-zinc-400`.",
     "typo-font-mono-2-1": "Typography preset: Headings use `font-mono tracking-widest leading-relaxed font-bold`. Paragraphs use `font-sans tracking-normal leading-relaxed text-zinc-600 dark:text-zinc-400`.",
     "typo-font-mono-2-2": "Typography preset: Headings use `font-mono tracking-widest leading-loose font-bold`. Paragraphs use `font-sans tracking-normal leading-relaxed text-zinc-600 dark:text-zinc-400`.",
-
     "typo-sans-tighter-none-light": "Typography preset: `font-sans tracking-tighter leading-none font-light`.",
     "typo-sans-tighter-none-normal": "Typography preset: `font-sans tracking-tighter leading-none font-normal`.",
     "typo-sans-tighter-none-semibold": "Typography preset: `font-sans tracking-tighter leading-none font-semibold`.",
@@ -809,7 +817,6 @@ TYPOGRAPHY = {
     "typo-mono-widest-loose-normal": "Typography preset: `font-mono tracking-widest leading-loose font-normal`.",
     "typo-mono-widest-loose-semibold": "Typography preset: `font-mono tracking-widest leading-loose font-semibold`.",
     "typo-mono-widest-loose-extrabold": "Typography preset: `font-mono tracking-widest leading-loose font-extrabold`.",
-
 }
 
 BUTTONS = {
@@ -835,14 +842,10 @@ BUTTONS = {
     "success": "Success/confirm button: `px-6 py-3 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 shadow-lg shadow-emerald-500/25 transition-all duration-300`.",
     "animated-border": "Animated border button: `px-8 py-3 bg-transparent text-white rounded-lg font-semibold relative` with a rotating conic-gradient border animation using pseudo-elements.",
     "text-only": "Text-only minimal button: `px-4 py-2 bg-transparent text-current font-medium hover:opacity-70 transition-opacity` with no border or background.",
-
-
-"premium-cta": "Premium button: `px-10 py-4 bg-zinc-950 text-white rounded-full font-medium tracking-wide hover:bg-zinc-800 hover:scale-105 transition-all shadow-xl`.",
-"professional-submit": "Professional button: `px-6 py-2.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 shadow-sm transition-colors`.",
-"comfort-pill": "Comfortable button: `px-8 py-3 bg-stone-200 text-stone-800 rounded-full font-medium hover:bg-stone-300 transition-colors focus:ring-4 focus:ring-stone-100`.",
-"luxury-gold-outline": "Luxury button: `px-8 py-3 bg-transparent border-2 border-amber-500 text-amber-500 rounded-sm font-light uppercase tracking-widest hover:bg-amber-500 hover:text-black transition-all duration-500`.",
-
-
+    "premium-cta": "Premium button: `px-10 py-4 bg-zinc-950 text-white rounded-full font-medium tracking-wide hover:bg-zinc-800 hover:scale-105 transition-all shadow-xl`.",
+    "professional-submit": "Professional button: `px-6 py-2.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 shadow-sm transition-colors`.",
+    "comfort-pill": "Comfortable button: `px-8 py-3 bg-stone-200 text-stone-800 rounded-full font-medium hover:bg-stone-300 transition-colors focus:ring-4 focus:ring-stone-100`.",
+    "luxury-gold-outline": "Luxury button: `px-8 py-3 bg-transparent border-2 border-amber-500 text-amber-500 rounded-sm font-light uppercase tracking-widest hover:bg-amber-500 hover:text-black transition-all duration-500`.",
 }
 
 HEROES = {
@@ -866,11 +869,8 @@ HEROES = {
     "wave-hero": "Wave divider hero: Hero section with an SVG wave shape at the bottom edge creating a smooth curved transition to the next section.",
     "diagonal-hero": "Diagonal hero: Content divided diagonally using clip-path, with image on one side and text on the other at an angle.",
     "aurora-hero": "Aurora hero: Dark background with animated aurora borealis-style gradient waves flowing behind centered text content.",
-
-
-"hero-saas-modern": "Modern SaaS Hero: `text-center max-w-4xl mx-auto space-y-8`. Headline `text-6xl md:text-8xl font-extrabold tracking-tighter`. Buttons centered `flex flex-col sm:flex-row gap-4 justify-center`.",
-"hero-startup-dark": "Dark Startup Hero: Transparent background. `text-5xl font-semibold`. Use a blurred glowing orb `bg-purple-600/30 w-96 h-96 blur-3xl rounded-full absolute -top-10 -left-10 -z-10` behind the text.",
-
+    "hero-saas-modern": "Modern SaaS Hero: `text-center max-w-4xl mx-auto space-y-8`. Headline `text-6xl md:text-8xl font-extrabold tracking-tighter`. Buttons centered `flex flex-col sm:flex-row gap-4 justify-center`.",
+    "hero-startup-dark": "Dark Startup Hero: Transparent background. `text-5xl font-semibold`. Use a blurred glowing orb `bg-purple-600/30 w-96 h-96 blur-3xl rounded-full absolute -top-10 -left-10 -z-10` behind the text.",
 }
 
 FOOTERS = {
@@ -889,10 +889,14 @@ FOOTERS = {
     "accordion-footer": "Accordion footer: Collapsible link sections for mobile-first design, expanding on tap/click to reveal sub-links.",
     "map-footer": "Map footer: Embedded map or location visual alongside contact information and quick links.",
     "app-download-footer": "App download footer: Prominent app store badges (iOS/Android) as the main CTA alongside minimal footer links.",
-
-
-"footer-corporate-fat": "Fat Corporate Footer: `border-t border-zinc-800 pt-16 pb-8`. Container `grid grid-cols-1 md:grid-cols-4 lg:grid-cols-5 gap-8`. 1 column for brand, 3 for links, 1 for newsletter.",
-"footer-minimal-centered": "Minimal Centered Footer: `py-12 flex flex-col items-center justify-center space-y-6 text-center text-sm text-zinc-500 border-t border-zinc-200/10`.",
+    "footer-corporate-fat": "Fat Corporate Footer: `border-t border-zinc-800 pt-16 pb-8`. Container `grid grid-cols-1 md:grid-cols-4 lg:grid-cols-5 gap-8`. 1 column for brand, 3 for links, 1 for newsletter.",
+    "footer-minimal-centered": "Minimal Centered Footer: `py-12 flex flex-col items-center justify-center space-y-6 text-center text-sm text-zinc-500 border-t border-zinc-200/10`.",
+    "gradient-footer": """Use `bg-gradient-to-r from-indigo-500 to-purple-600 text-white py-16 text-center` with a bold final call to action.""",
+    "ticker-footer": """Use a massive, continuously scrolling marquee with the brand name at the very top of the footer, above the standard columns.""",
+    "bento-footer": """Arrange the footer content in a bento-box grid instead of standard columns. Highlight the newsletter box with a different background color.""",
+    "glass-dock-footer": """A floating glass panel at the bottom of the page, unattached from the sides, acting as a compact, modern footer for web apps.""",
+    "map-integrated-footer": """Split the footer horizontally: the top half is a desaturated interactive map, the bottom half contains the links and copyright.""",
+    "brutalist-grid-footer": """Thick black borders separating every single link and section into a rigid, highly visible grid. Yellow background for maximum contrast.""",
 }
 
 SECTIONS = {
@@ -928,7 +932,6 @@ SECTIONS = {
     "cookie-banner": "Cookie consent banner: Fixed bottom or overlay banner with accept/reject buttons and privacy link.",
     "login-form": "Login form: Email/password fields, remember me checkbox, forgot password link, and social login options.",
     "signup-form": "Signup form: Name, email, password, confirm password with terms checkbox and social signup alternatives.",
-
 }
 
 HOVER_EFFECTS = {
@@ -954,7 +957,6 @@ HOVER_EFFECTS = {
     "ring": "Ring outline on hover: `hover:ring-2 hover:ring-blue-500 hover:ring-offset-2 transition-all duration-300`.",
     "expand": "Expand on hover: `hover:px-10 hover:py-6 transition-all duration-300` for growing padding effect.",
     "morph": "Shape morph on hover: `rounded-lg hover:rounded-full transition-all duration-500` for shape-shifting elements.",
-
     "hover-scale-up-slight-v2": "Use `transition-all duration-300 hover:scale-up-slight` for interactive feel.",
     "hover-scale-up-moderate-v2": "Use `transition-all duration-300 hover:scale-up-moderate` for interactive feel.",
     "hover-scale-up-extreme-v2": "Use `transition-all duration-300 hover:scale-up-extreme` for interactive feel.",
@@ -985,7 +987,6 @@ HOVER_EFFECTS = {
     "hover-darken-slight-v2": "Use `transition-all duration-300 hover:darken-slight` for interactive feel.",
     "hover-darken-moderate-v2": "Use `transition-all duration-300 hover:darken-moderate` for interactive feel.",
     "hover-darken-extreme-v2": "Use `transition-all duration-300 hover:darken-extreme` for interactive feel.",
-
 }
 
 BACKGROUNDS = {
@@ -1008,19 +1009,14 @@ BACKGROUNDS = {
     "aurora-bg": "Aurora background: Animated flowing gradient blobs in greens, blues, and purples on a dark canvas.",
     "marble": "Marble texture: Subtle veined marble pattern using layered CSS gradients in whites and grays.",
     "paper": "Paper texture: Subtle off-white background with noise overlay simulating real paper.",
-
-
-"premium-mesh": "Premium mesh gradient: Soft, slow-moving blurred orbs in professional blues and purples over a slate background.",
-"professional-grid": "Professional grid: Very faint subtle grid lines (`bg-[length:30px_30px] border-zinc-100`) on a pure white background for structured precision.",
-"comfort-warm": "Comfortable warm: A solid, soft off-white `bg-stone-50` with subtle noise texture to reduce glare and eye strain.",
-"luxury-velvet": "Luxury velvet: Deep, rich `bg-zinc-950` with a very subtle radial gradient fading to pure black at the edges.",
-
     "bg-dot-10px_10px": "Dot pattern: `bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:10px_10px] bg-white text-zinc-900`.",
     "bg-dot-dark-10px_10px": "Dark dot pattern: `bg-[radial-gradient(#3f3f46_1px,transparent_1px)] [background-size:10px_10px] bg-zinc-950 text-white`.",
     "bg-grid-10px_10px": "Grid pattern: `bg-[linear-gradient(to_right,#e5e7eb_1px,transparent_1px),linear-gradient(to_bottom,#e5e7eb_1px,transparent_1px)] [background-size:10px_10px] bg-white text-zinc-900`.",
     "bg-grid-dark-10px_10px": "Dark grid pattern: `bg-[linear-gradient(to_right,#27272a_1px,transparent_1px),linear-gradient(to_bottom,#27272a_1px,transparent_1px)] [background-size:10px_10px] bg-zinc-950 text-white`.",
-
-
+    "premium-mesh": "Premium mesh gradient: Soft, slow-moving blurred orbs in professional blues and purples over a slate background.",
+    "professional-grid": "Professional grid: Very faint subtle grid lines (`bg-[length:30px_30px] border-zinc-100`) on a pure white background for structured precision.",
+    "comfort-warm": "Comfortable warm: A solid, soft off-white `bg-stone-50` with subtle noise texture to reduce glare and eye strain.",
+    "luxury-velvet": "Luxury velvet: Deep, rich `bg-zinc-950` with a very subtle radial gradient fading to pure black at the edges.",
 }
 
 GRADIENTS = {
@@ -1052,121 +1048,17 @@ GRADIENTS = {
     "abyss": "Use `bg-gradient-to-r from-slate-950 via-blue-950 to-indigo-950` for deep abyss.",
     "sakura": "Use `bg-gradient-to-r from-pink-300 via-rose-200 to-pink-100` for cherry blossom.",
     "holographic": "Use `bg-gradient-to-r from-pink-400 via-blue-400 via-green-400 to-yellow-400` with animation for holographic shimmer.",
-
-    "gradient-red-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to purple-500. Rich vibrant transition.",
-    "gradient-red-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to indigo-500. Rich vibrant transition.",
-    "gradient-red-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to blue-500. Rich vibrant transition.",
-    "gradient-red-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to teal-500. Rich vibrant transition.",
-    "gradient-red-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to green-500. Rich vibrant transition.",
-    "gradient-red-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to yellow-500. Rich vibrant transition.",
-    "gradient-red-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to orange-500. Rich vibrant transition.",
-    "gradient-red-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from red-500 to red-500. Rich vibrant transition.",
-    "gradient-orange-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to pink-500. Rich vibrant transition.",
-    "gradient-orange-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to indigo-500. Rich vibrant transition.",
-    "gradient-orange-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to blue-500. Rich vibrant transition.",
-    "gradient-orange-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to teal-500. Rich vibrant transition.",
-    "gradient-orange-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to green-500. Rich vibrant transition.",
-    "gradient-orange-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to yellow-500. Rich vibrant transition.",
-    "gradient-orange-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to orange-500. Rich vibrant transition.",
-    "gradient-orange-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from orange-500 to red-500. Rich vibrant transition.",
-    "gradient-yellow-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to pink-500. Rich vibrant transition.",
-    "gradient-yellow-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to purple-500. Rich vibrant transition.",
-    "gradient-yellow-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to blue-500. Rich vibrant transition.",
-    "gradient-yellow-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to teal-500. Rich vibrant transition.",
-    "gradient-yellow-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to green-500. Rich vibrant transition.",
-    "gradient-yellow-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to yellow-500. Rich vibrant transition.",
-    "gradient-yellow-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to orange-500. Rich vibrant transition.",
-    "gradient-yellow-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from yellow-500 to red-500. Rich vibrant transition.",
-    "gradient-green-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to pink-500. Rich vibrant transition.",
-    "gradient-green-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to purple-500. Rich vibrant transition.",
-    "gradient-green-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to indigo-500. Rich vibrant transition.",
-    "gradient-green-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to teal-500. Rich vibrant transition.",
-    "gradient-green-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to green-500. Rich vibrant transition.",
-    "gradient-green-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to yellow-500. Rich vibrant transition.",
-    "gradient-green-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to orange-500. Rich vibrant transition.",
-    "gradient-green-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from green-500 to red-500. Rich vibrant transition.",
-    "gradient-teal-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to pink-500. Rich vibrant transition.",
-    "gradient-teal-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to purple-500. Rich vibrant transition.",
-    "gradient-teal-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to indigo-500. Rich vibrant transition.",
-    "gradient-teal-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to blue-500. Rich vibrant transition.",
-    "gradient-teal-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to green-500. Rich vibrant transition.",
-    "gradient-teal-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to yellow-500. Rich vibrant transition.",
-    "gradient-teal-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to orange-500. Rich vibrant transition.",
-    "gradient-teal-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from teal-500 to red-500. Rich vibrant transition.",
-    "gradient-blue-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to pink-500. Rich vibrant transition.",
-    "gradient-blue-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to purple-500. Rich vibrant transition.",
-    "gradient-blue-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to indigo-500. Rich vibrant transition.",
-    "gradient-blue-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to blue-500. Rich vibrant transition.",
-    "gradient-blue-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to teal-500. Rich vibrant transition.",
-    "gradient-blue-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to yellow-500. Rich vibrant transition.",
-    "gradient-blue-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to orange-500. Rich vibrant transition.",
-    "gradient-blue-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from blue-500 to red-500. Rich vibrant transition.",
-    "gradient-indigo-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to pink-500. Rich vibrant transition.",
-    "gradient-indigo-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to purple-500. Rich vibrant transition.",
-    "gradient-indigo-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to indigo-500. Rich vibrant transition.",
-    "gradient-indigo-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to blue-500. Rich vibrant transition.",
-    "gradient-indigo-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to teal-500. Rich vibrant transition.",
-    "gradient-indigo-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to green-500. Rich vibrant transition.",
-    "gradient-indigo-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to orange-500. Rich vibrant transition.",
-    "gradient-indigo-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from indigo-500 to red-500. Rich vibrant transition.",
-    "gradient-purple-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to pink-500. Rich vibrant transition.",
-    "gradient-purple-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to purple-500. Rich vibrant transition.",
-    "gradient-purple-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to indigo-500. Rich vibrant transition.",
-    "gradient-purple-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to blue-500. Rich vibrant transition.",
-    "gradient-purple-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to teal-500. Rich vibrant transition.",
-    "gradient-purple-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to green-500. Rich vibrant transition.",
-    "gradient-purple-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to yellow-500. Rich vibrant transition.",
-    "gradient-purple-to-red-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from purple-500 to red-500. Rich vibrant transition.",
-    "gradient-pink-to-pink-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to pink-500. Rich vibrant transition.",
-    "gradient-pink-to-purple-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to purple-500. Rich vibrant transition.",
-    "gradient-pink-to-indigo-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to indigo-500. Rich vibrant transition.",
-    "gradient-pink-to-blue-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to blue-500. Rich vibrant transition.",
-    "gradient-pink-to-teal-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to teal-500. Rich vibrant transition.",
-    "gradient-pink-to-green-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to green-500. Rich vibrant transition.",
-    "gradient-pink-to-yellow-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to yellow-500. Rich vibrant transition.",
-    "gradient-pink-to-orange-v2": "Primary: linear-gradient(135deg, var(--tw-gradient-stops)), from pink-500 to orange-500. Rich vibrant transition.",
-
-    "grad-linear-rose-to-pink": "Use `bg-gradient-to-r from-rose-500 to-pink-600` for a vibrant linear transition.",
-    "grad-radial-rose-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-rose-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-pink-to-fuchsia": "Use `bg-gradient-to-r from-pink-500 to-fuchsia-600` for a vibrant linear transition.",
-    "grad-radial-pink-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-pink-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-fuchsia-to-purple": "Use `bg-gradient-to-r from-fuchsia-500 to-purple-600` for a vibrant linear transition.",
-    "grad-radial-fuchsia-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-fuchsia-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-purple-to-violet": "Use `bg-gradient-to-r from-purple-500 to-violet-600` for a vibrant linear transition.",
-    "grad-radial-purple-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-purple-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-violet-to-indigo": "Use `bg-gradient-to-r from-violet-500 to-indigo-600` for a vibrant linear transition.",
-    "grad-radial-violet-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-violet-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-indigo-to-blue": "Use `bg-gradient-to-r from-indigo-500 to-blue-600` for a vibrant linear transition.",
-    "grad-radial-indigo-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-indigo-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-blue-to-sky": "Use `bg-gradient-to-r from-blue-500 to-sky-600` for a vibrant linear transition.",
-    "grad-radial-blue-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-blue-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-sky-to-cyan": "Use `bg-gradient-to-r from-sky-500 to-cyan-600` for a vibrant linear transition.",
-    "grad-radial-sky-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-sky-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-cyan-to-teal": "Use `bg-gradient-to-r from-cyan-500 to-teal-600` for a vibrant linear transition.",
-    "grad-radial-cyan-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-cyan-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-teal-to-emerald": "Use `bg-gradient-to-r from-teal-500 to-emerald-600` for a vibrant linear transition.",
-    "grad-radial-teal-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-teal-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-emerald-to-green": "Use `bg-gradient-to-r from-emerald-500 to-green-600` for a vibrant linear transition.",
-    "grad-radial-emerald-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-green-to-lime": "Use `bg-gradient-to-r from-green-500 to-lime-600` for a vibrant linear transition.",
-    "grad-radial-green-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-green-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-lime-to-yellow": "Use `bg-gradient-to-r from-lime-500 to-yellow-600` for a vibrant linear transition.",
-    "grad-radial-lime-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-lime-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-yellow-to-amber": "Use `bg-gradient-to-r from-yellow-500 to-amber-600` for a vibrant linear transition.",
-    "grad-radial-yellow-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-yellow-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-amber-to-orange": "Use `bg-gradient-to-r from-amber-500 to-orange-600` for a vibrant linear transition.",
-    "grad-radial-amber-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-amber-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-orange-to-red": "Use `bg-gradient-to-r from-orange-500 to-red-600` for a vibrant linear transition.",
-    "grad-radial-orange-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-orange-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-red-to-stone": "Use `bg-gradient-to-r from-red-500 to-stone-600` for a vibrant linear transition.",
-    "grad-radial-red-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-red-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-stone-to-zinc": "Use `bg-gradient-to-r from-stone-500 to-zinc-600` for a vibrant linear transition.",
-    "grad-radial-stone-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-stone-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-zinc-to-slate": "Use `bg-gradient-to-r from-zinc-500 to-slate-600` for a vibrant linear transition.",
-    "grad-radial-zinc-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-zinc-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-    "grad-linear-slate-to-rose": "Use `bg-gradient-to-r from-slate-500 to-rose-600` for a vibrant linear transition.",
-    "grad-radial-slate-dark": "Use `bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-900/40 via-zinc-950 to-black` for a deep, dark radial backdrop.",
-
+    "dynamic-grad-200": """Use `bg-gradient-to-r from-sky-500 via-fuchsia-500 to-rose-500`.""",
+    "obsidian-glow": """Use `bg-gradient-to-br from-zinc-900 via-black to-zinc-800` for a sleek dark mode base.""",
+    "neon-cyber": """Use `bg-gradient-to-r from-cyan-400 via-purple-500 to-fuchsia-500` for high energy headers.""",
+    "golden-hour-warmth": """Use `bg-gradient-to-tr from-orange-400 via-amber-300 to-yellow-200` for soft, inviting light.""",
+    "toxic-sludge": """Use `bg-gradient-to-b from-lime-500 via-green-600 to-emerald-900` for an aggressive, edgy feel.""",
+    "lavender-mist": """Use `bg-gradient-to-r from-indigo-200 via-purple-200 to-pink-200` for extremely soft, delicate themes.""",
+    "deep-sea-trench": """Use `bg-gradient-to-bl from-blue-800 via-slate-900 to-black` for underwater depth.""",
+    "holographic-foil": """Use `bg-gradient-to-br from-purple-300 via-cyan-200 to-pink-300` for a shiny, iridescent look.""",
+    "crimson-velvet": """Use `bg-gradient-to-r from-rose-800 via-red-900 to-black` for dark luxury.""",
+    "arctic-glacier": """Use `bg-gradient-to-tr from-sky-100 via-cyan-50 to-white` for crisp, freezing light themes.""",
+    "vintage-sepia": """Use `bg-gradient-to-r from-stone-300 via-amber-100 to-orange-50` for old paper nostalgia.""",
 }
 
 INDUSTRIES = {
@@ -1231,7 +1123,12 @@ INDUSTRIES = {
     "dating": "Use warm 'rose', 'sakura', or 'candy' themes. Profile cards, match percentages, swipe-style interactions, and heart motifs.",
     "astrology": "Use mystical 'midnight', 'galaxy', or 'amethyst' themes. Star charts, zodiac icons, celestial patterns, and serif fonts.",
     "crypto-exchange": "Use dark 'obsidian' or 'cyber' themes. Live price tickers, candlestick chart motifs, trading UI elements, and green/red indicators.",
-
+    "law-firm": """Use navy blues, gold accents, traditional serif fonts, structured columnar layouts, and very conservative, slow fade transitions.""",
+    "space-exploration": """Use deep starfield blacks, intense glowing cyans, extremely thin sans-serifs, and floating zero-gravity animations.""",
+    "vintage-clothing": """Use sepia overlays, warm cream backgrounds, bold 70s serif fonts, and slightly misaligned collage-style image galleries.""",
+    "cybersecurity": """Use pure black backgrounds, monospace green/cyan typography, grid overlays, glitch hover effects, and technical lock motifs.""",
+    "meditation": """Use extreme whitespace, soft sage and lavender gradients, ultra-thin elegant typography, and barely perceptible ease-in animations.""",
+    "energy-drink": """Use aggressive neon greens and blacks, slanted brutalist borders, extremely heavy italic fonts, and violent shake/pulse animations.""",
 }
 
 MOODS = {
@@ -1277,7 +1174,12 @@ MOODS = {
     "scientific": "Use data-visualization inspired layouts, monospace fonts, chart elements, grid backgrounds, and clinical blue/gray tones.",
     "magical": "Use deep purples and golds, sparkle/star particle effects, glowing elements, and enchanting gradient backgrounds.",
     "vintage": "Use sepia tones, aged paper textures, ornamental borders, classic serif fonts, and film-grain overlays.",
-
+    "nostalgic": """Sepia/warm tones, serif or typewriter fonts, grain textures, classic balanced layouts.""",
+    "ethereal": """Soft pastel gradients, heavy backdrop blurs, floating elements, thin white typography on light backgrounds.""",
+    "tactical": """Dark grays, military greens, monospace fonts, heavy grid lines, high-contrast orange accent markers.""",
+    "opulent": """Deep emeralds or blacks, gold foil textures, extravagant serif fonts, plenty of negative space, elegant slow reveals.""",
+    "frenetic": """Clashing neon colors, overlapping text, marquee scrolls running at high speeds, rapid blink animations.""",
+    "clinical": """Pure white backgrounds, icy blue accents, perfect grid alignments, highly legible sans-serif fonts, no decorative elements.""",
 }
 
 LAYOUTS = {
@@ -1301,17 +1203,17 @@ LAYOUTS = {
     "grid-gallery": "Use a uniform grid gallery: equal-sized cards in a responsive CSS grid with hover overlay effects for portfolios and image-heavy sites.",
     "f-pattern": "Use an F-pattern reading layout: important content along the top and left, supporting content on the right, following natural eye-scanning patterns.",
     "hero-cards": "Use a hero-with-cards layout: large hero section followed immediately by 3-4 feature cards that overlap the hero bottom edge using negative margin-top.",
-
-
-
-
-"bento-grid-3x3": "Bento box grid: `grid grid-cols-1 md:grid-cols-3 gap-4 md:auto-rows-[250px]`. Make the first item span 2 columns with `md:col-span-2` and the last span 2 rows with `md:row-span-2`.",
-"zig-zag-features": "Zig-zag section: Use a flex container with alternating `md:flex-row` and `md:flex-row-reverse` to create a zig-zag image/text layout.",
-"masonry-columns": "Masonry layout: Use `columns-1 md:columns-2 lg:columns-3 gap-6 space-y-6` on the container, and `break-inside-avoid` on the children.",
-"split-hero": "Split hero layout: `min-h-[80vh] grid grid-cols-1 lg:grid-cols-2 gap-12 items-center`. Left side text, right side visual.",
+    "bento-grid-3x3": "Bento box grid: `grid grid-cols-1 md:grid-cols-3 gap-4 md:auto-rows-[250px]`. Make the first item span 2 columns with `md:col-span-2` and the last span 2 rows with `md:row-span-2`.",
+    "zig-zag-features": "Zig-zag section: Use a flex container with alternating `md:flex-row` and `md:flex-row-reverse` to create a zig-zag image/text layout.",
+    "masonry-columns": "Masonry layout: Use `columns-1 md:columns-2 lg:columns-3 gap-6 space-y-6` on the container, and `break-inside-avoid` on the children.",
+    "split-hero": "Split hero layout: `min-h-[80vh] grid grid-cols-1 lg:grid-cols-2 gap-12 items-center`. Left side text, right side visual.",
     "layout-bento-chaos": "BENTO BOX GRID: Use a dynamic, irregular grid of cards. Set container to `grid grid-cols-1 md:grid-cols-3 gap-6`. Set different col-spans and row-spans on the child cards to make them asymmetrical, e.g. `md:col-span-2 md:row-span-1` on the main feature card, and `md:col-span-1 md:row-span-2` on the sidebar card.",
-
-
+    "magazine": """Use drop caps, multiple text columns, large pull quotes, and bold horizontal dividing lines.""",
+    "radial-focus": """Content arranged in circular patterns radiating from a central focal point. Great for product features orbiting the product image.""",
+    "staircase-flow": """Sections step down the page diagonally, alternating left to right alignment, guiding the eye in a continuous Z-pattern.""",
+    "floating-islands": """Groups of content inside distinct, heavily shadowed rounded cards that appear to float independently over a vast, animated background.""",
+    "terminal-window": """The entire site is contained within a single faux-OS window frame centered on the screen, with content scrolling inside it.""",
+    "overlapping-panels": """Large colored panels that overlap each other by 10-20%, creating deep shadows and a complex hierarchy of depth.""",
 }
 
 NAV_STYLES = {
@@ -1329,12 +1231,15 @@ NAV_STYLES = {
     "mega-menu": "Use a mega dropdown menu: hovering over nav items reveals a large multi-column dropdown with categorized links, images, and featured content.",
     "progress-nav": "Use a progress-bar navigation: a thin horizontal bar at the very top showing scroll progress or step completion percentage.",
     "animated-underline": "Use animated underline navigation: clean text links where a colored underline slides in from left on hover with smooth CSS transitions.",
-
-
-"nav-floating-pill": "Floating Pill Nav: `fixed top-6 left-1/2 -translate-x-1/2 w-[90%] max-w-3xl rounded-full bg-zinc-900/80 backdrop-blur-md border border-zinc-700/50 px-6 py-3 flex items-center justify-between z-50 shadow-2xl`.",
-"nav-transparent-blur": "Transparent Blur Nav: `fixed top-0 w-full bg-white/5 backdrop-blur-lg border-b border-white/10 z-50 px-8 py-4 flex items-center justify-between`.",
+    "nav-floating-pill": "Floating Pill Nav: `fixed top-6 left-1/2 -translate-x-1/2 w-[90%] max-w-3xl rounded-full bg-zinc-900/80 backdrop-blur-md border border-zinc-700/50 px-6 py-3 flex items-center justify-between z-50 shadow-2xl`.",
+    "nav-transparent-blur": "Transparent Blur Nav: `fixed top-0 w-full bg-white/5 backdrop-blur-lg border-b border-white/10 z-50 px-8 py-4 flex items-center justify-between`.",
+    "bottom-tab-nav": """Mobile app style. `fixed bottom-0 w-full bg-white border-t border-zinc-200 flex justify-around py-4`.""",
+    "circular-floating-action": """A single FAB in the bottom right. When clicked, it spawns 4-5 smaller circular icons in an arc for navigation.""",
+    "split-corner-nav": """Logo in top-left, menu in top-right, language in bottom-right, theme toggle in bottom-left. Completely uncontained.""",
+    "vertical-text-sidebar": """A left sidebar where the navigation links are rotated -90 degrees, reading vertically from bottom to top.""",
+    "expanding-search-nav": """The navbar is just a search bar. When focused, it expands full screen to reveal suggested links and categories.""",
+    "dynamic-island-nav": """A black pill at the top center of the screen that smoothly expands into a full menu when clicked, mimicking smartphone UI.""",
 }
-
 
 INDUSTRY_ALIASES = {
     "gaming": ["gaming", "game", "gamer", "playstation", "xbox", "nintendo", "steam", "rpg", "arcade", "esports", "combat", "fight", "battle", "multiplayer", "coop", "console", "pc game", "interactive", "character", "boss", "versus", "action"],
@@ -1349,6 +1254,12 @@ INDUSTRY_ALIASES = {
     "fitness": ["fitness", "gym", "workout", "exercise", "training", "coach", "athlete", "run", "sport"],
     "real estate": ["real estate", "property", "house", "home", "apartment", "condo", "rent", "buy home"],
     "fashion": ["fashion", "clothing", "wear", "style", "dress", "outfit", "boutique", "apparel", "model"],
+    "law-firm": """['legal', 'attorney', 'lawyer', 'corporate', 'finance']""",
+    "space-exploration": """['space', 'nasa', 'aerospace', 'satellite', 'orbit', 'galaxy', 'astronomy']""",
+    "vintage-clothing": """['thrift', 'retro', 'secondhand', 'antique', 'boutique', '70s', '80s', '90s']""",
+    "cybersecurity": """['security', 'hacker', 'infosec', 'encryption', 'firewall', 'protect', 'vpn']""",
+    "meditation": """['yoga', 'mindfulness', 'zen', 'buddhism', 'calm', 'peace', 'healing', 'therapy']""",
+    "energy-drink": """['beverage', 'caffeine', 'extreme sports', 'action', 'boost', 'fuel']""",
     "law": ["law", "lawyer", "attorney", "legal", "court", "justice", "firm", "advocate"],
     "music": ["music", "song", "band", "artist", "album", "singer", "concert", "dj", "sound", "audio", "track"],
     "beauty": ["beauty", "makeup", "cosmetics", "salon", "spa", "skin", "hair", "styling"],
