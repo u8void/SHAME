@@ -56,6 +56,7 @@ class HardwareProfile:
     total_ram_gb:  float = 8.0
     free_ram_gb:   float = 4.0
     total_vram_gb: float = 0.0   
+    num_gpus:      int   = 0
 
     
     physical_cores: int = 4
@@ -204,7 +205,7 @@ def _detect_apple_chip() -> tuple[ChipFamily, str]:
     return ChipFamily.APPLE_UNKNOWN, label
 
 
-def _detect_nvidia() -> tuple[bool, float, str]:
+def _detect_nvidia() -> tuple[bool, float, str, int]:
     
     try:
         out = subprocess.check_output(
@@ -215,12 +216,13 @@ def _detect_nvidia() -> tuple[bool, float, str]:
         )
         lines = [l.strip() for l in out.strip().splitlines() if l.strip()]
         if not lines:
-            return False, 0.0, ""
-        name, vram_mib = lines[0].rsplit(",", 1)
-        vram_gb = float(vram_mib.strip()) / 1024
-        return True, vram_gb, name.strip()
+            return False, 0.0, "", 0
+        name = lines[0].rsplit(",", 1)[0].strip()
+        vram_gbs = [float(l.rsplit(",", 1)[1].strip()) / 1024 for l in lines]
+        total_vram_gb = sum(vram_gbs)
+        return True, total_vram_gb, name, len(lines)
     except Exception:
-        return False, 0.0, ""
+        return False, 0.0, "", 0
 
 
 def _detect_amd_gpu() -> tuple[bool, str]:
@@ -463,14 +465,15 @@ def _build_profile() -> HardwareProfile:
 
     else:
         
-        nvidia_found, nvidia_vram, nvidia_label = _detect_nvidia()
+        nvidia_found, nvidia_vram, nvidia_label, num_gpus = _detect_nvidia()
         if nvidia_found:
             p.chip_family   = ChipFamily.NVIDIA
             p.backend       = AccelBackend.CUDA
-            p.device_label  = nvidia_label
+            p.device_label  = f"{num_gpus}x {nvidia_label}" if num_gpus > 1 else nvidia_label
             p.total_vram_gb = nvidia_vram
+            p.num_gpus      = num_gpus
             params = _nvidia_params(nvidia_vram, p.total_ram_gb, p.logical_cores)
-            p.notes.append(f"NVIDIA CUDA — VRAM={nvidia_vram:.1f} GB")
+            p.notes.append(f"NVIDIA CUDA — {num_gpus} GPUs, Total VRAM={nvidia_vram:.1f} GB")
         else:
             
             amd_found, amd_label = _detect_amd_gpu()
@@ -575,6 +578,9 @@ def apply_to_config(cfg: dict, hw: Optional[HardwareProfile] = None) -> dict:
     _auto_or_missing("n_ubatch",        hw.n_ubatch)
     _auto_or_missing("flash_attn",      flash_attn)
     _auto_or_missing("use_mlock",       hw.use_mlock)
+
+    if hw.num_gpus >= 2:
+        _auto_or_missing("tensor_split", [1.0] * hw.num_gpus)
 
     if cfg.get("size", "auto") in ("auto", "", None):
         cfg["size"] = hw.recommended_size
