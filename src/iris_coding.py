@@ -1265,7 +1265,11 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
 
     # Inject randomized design directive for web design requests
     if is_web_design:
-        final_query += _generate_design_directive()
+        try:
+            from src.elements_db import scan_query_for_elements
+            final_query += "\n" + scan_query_for_elements(user_query)
+        except ImportError:
+            final_query += _generate_design_directive()
 
     if context:
         final_query = (
