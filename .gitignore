@@ -17,3 +17,4 @@ models/
 iris_adapters/
 .claude/
 last_request.json
+iris_projects/*
