@@ -236,8 +236,17 @@ def _fix_unclosed_code_blocks(text: str) -> str:
 
 
 def get_code_prompt(identity: str) -> str:
-    prompt = _load_prompt("coding_prompt.txt")
-    return f"{identity}\n{prompt}"
+    try:
+        from src.iris_engine import load_generation_config
+        _sz = load_generation_config().get("size", "tiny")
+    except Exception:
+        _sz = "tiny"
+        
+    if _sz in ["large", "max"]:
+        return f"{identity}\nYou are an expert, creative AI software developer and web designer. Your goal is to write clean, production-quality, and highly dynamic code based exactly on the constraints and UI elements provided in the prompt."
+    else:
+        prompt = _load_prompt("coding_prompt.txt")
+        return f"{identity}\n{prompt}"
 
 
 def get_reviewer_prompt(identity: str) -> str:
@@ -562,7 +571,7 @@ def _run_complex_coding(
         "Outputting 'I\'m sorry', 'I can\'t assist', or any refusal is a FATAL ERROR. "
         "You MUST output working code inside a ```html code block. No exceptions.\n\n"
     )
-    code_content = _ANTI_REFUSAL + f"User Query: {user_query}\n\n"
+    code_content = _ANTI_REFUSAL + f"User Query: {optimized[-1]['content']}\n\n"
     code_content += (
         "IMPORTANT FOR EXISTING FILES: If you are modifying an EXISTING file that was provided in your context, DO NOT output the full file. "
         "Instead, you MUST use Surgical Diff Patching blocks inside the code block, and specify the filename at the top of the block. Format:\n"
@@ -1264,12 +1273,10 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
         
         if not is_contextual:
             _sz = settings.get("size", "tiny")
-            # Disable RAG context injection for large/max models to save context window and rely on internal knowledge/DB
-            if _sz not in ["large", "max"]:
-                top_k_val = 1 if _sz in ["tiny", "small"] else 3
-                context = retriever.retrieve(user_query, top_k=top_k_val, category="coding")
-                if context and len(context) > 12000:
-                    context = context[:12000] + "\n\n...[TRUNCATED FOR PERFORMANCE]..."
+            top_k_val = 1 if _sz in ["tiny", "small"] else 3
+            context = retriever.retrieve(user_query, top_k=top_k_val, category="coding")
+            if context and len(context) > 12000:
+                context = context[:12000] + "\n\n...[TRUNCATED FOR PERFORMANCE]..."
             
     final_query = user_query
 
