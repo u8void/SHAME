@@ -591,7 +591,11 @@ def _run_complex_coding(
         {"role": "user", "content": code_content}
     ]
     full_code = ""
-    _complex_code_temp = 0.7 if (isinstance(settings, dict) and settings.get('_web_design_mode')) else 0.4
+    _sz = settings.get("size", "tiny") if isinstance(settings, dict) else "tiny"
+    if isinstance(settings, dict) and settings.get('_web_design_mode'):
+        _complex_code_temp = 0.3 if _sz in ["large", "max"] else 0.7
+    else:
+        _complex_code_temp = 0.2 if _sz in ["large", "max"] else 0.4
     for ev in _stream_tokens(ModelRole.CODE, code_msgs, max_tokens=8192, temperature=_complex_code_temp, think_mode="show", settings=settings):
         if user_lang == "English" or ev["type"] != "token":
             yield ev
@@ -948,7 +952,11 @@ def generate_internal_code(
 def _run_simple_coding(user_query: str, history: list, optimized: list, settings: dict) -> Generator[Dict[str, str], None, None]:
     user_lang = (settings.get("user_lang") if settings else None) or detect_user_language(user_query)
     # Use higher temperature for web design to produce varied creative outputs
-    _code_temp = 0.6 if settings.get('_web_design_mode') else 0.2
+    _sz = settings.get("size", "tiny") if isinstance(settings, dict) else "tiny"
+    if settings.get('_web_design_mode'):
+        _code_temp = 0.3 if _sz in ["large", "max"] else 0.6
+    else:
+        _code_temp = 0.2
     yield {"type": "status", "content": "Writing code..."}
     full = ""
     for ev in _stream_tokens(ModelRole.CODE, optimized, max_tokens=8192, temperature=_code_temp, think_mode="show", settings=settings):
@@ -1256,10 +1264,12 @@ def run_stream(user_query: str, history: list, retriever: Any, settings: dict, i
         
         if not is_contextual:
             _sz = settings.get("size", "tiny")
-            top_k_val = 1 if _sz in ["tiny", "small"] else 3
-            context = retriever.retrieve(user_query, top_k=top_k_val, category="coding")
-            if context and len(context) > 12000:
-                context = context[:12000] + "\n\n...[TRUNCATED FOR PERFORMANCE]..."
+            # Disable RAG context injection for large/max models to save context window and rely on internal knowledge/DB
+            if _sz not in ["large", "max"]:
+                top_k_val = 1 if _sz in ["tiny", "small"] else 3
+                context = retriever.retrieve(user_query, top_k=top_k_val, category="coding")
+                if context and len(context) > 12000:
+                    context = context[:12000] + "\n\n...[TRUNCATED FOR PERFORMANCE]..."
             
     final_query = user_query
 
