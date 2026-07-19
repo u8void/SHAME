@@ -26,6 +26,7 @@
   "max_seq_length": 1024,
   "num_layers": -1,
   "context_length": 8192,
+  "tensor_split": [1.0, 1.0],
   "download_urls": {
     "qwen2.5-coder-7b-instruct-q4_k_m.gguf": "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
     "qwen3-coder-32b-q4_k_m.gguf": "https://huggingface.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF/resolve/main/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
