@@ -1,2 +1,0 @@
-# Generated Egyptian Arabic Data
-
